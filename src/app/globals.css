@@ -1,0 +1,82 @@
+/* Load Google Font first (before all other rules) */
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@100..900&display=swap");
+
+/* Tailwind base import */
+@import "tailwindcss";
+
+/* DaisyUI plugin */
+@plugin "daisyui" {
+  themes: light --default, night --prefersdark, cupcake;
+}
+
+/* Your custom CSS */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --font-noto: "Noto Sans", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-noto);
+}
+
+calendar-date.cally {
+  width: 280px;
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 16px;
+  padding: 12px;
+  font-size: 14px;
+}
+
+calendar-date.cally::part(button) {
+  border-radius: 10px;
+  color: #0f172a;
+}
+
+calendar-date.cally::part(button):hover {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+calendar-date.cally::part(selected) {
+  background: #38bdf8;
+  color: #0f172a;
+  border-radius: 10px;
+}
+
+calendar-date.cally::part(today) {
+  border: 1px solid #38bdf8;
+  color: #0284c7;
+  border-radius: 10px;
+}
+
+calendar-date.cally::part(disabled) {
+  color: #cbd5e1;
+  opacity: 0.5;
+}
+
+calendar-date.cally::part(header) {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+calendar-date.cally::part(previous),
+calendar-date.cally::part(next) {
+  color: #0f172a;
+  border-radius: 8px;
+}
+
+calendar-date.cally::part(previous):hover,
+calendar-date.cally::part(next):hover {
+  background: #f1f5f9;
+}
