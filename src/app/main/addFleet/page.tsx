@@ -8,6 +8,9 @@ import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import { CalendarDays, Eraser, Filter, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
 
+const VEHICLE_WAREHOUSE_INFO_API_URL =
+  "http://192.168.158.210/api_new_truck/api/vehicle_warehouse_info.php";
+
 interface SelectedDC {
   DC_CODE?: string;
   DC_NAME?: string;
@@ -22,6 +25,96 @@ interface RequestDetailItem {
   truck_type?: string;
   company_id?: string;
   company_name?: string;
+}
+
+interface FlowStepDetail {
+  id: string;
+  process: string;
+  detail: string | null;
+  process_level: string;
+}
+
+interface FlowCarDetail {
+  vehicle_no: string | number;
+  running_doc_vehicle_no?: string | null;
+  license: string;
+  province: string;
+  truck_type: string;
+  company_name: string;
+  detail_id: string | null;
+}
+
+interface FlowTrackingDetail {
+  id: string;
+  request_id: string;
+  process_id: string;
+  str_date: string | null;
+  end_date: string | null;
+  sla: string | number | null;
+  created_by: string | null;
+  created_at: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+  vehicle_no: string | number;
+  running_doc_vehicle_no?: string | null;
+  license: string;
+  request_truck_detail_id: string | null;
+}
+
+interface FlowRequestSummary {
+  usage_date?: string;
+  dc_type?: string;
+  dc_code?: string;
+  request_by?: string;
+}
+
+interface FlowDetailData {
+  request: FlowRequestSummary;
+  steps: FlowStepDetail[];
+  cars: FlowCarDetail[];
+  flow_data: FlowTrackingDetail[];
+  is_initialized: boolean;
+}
+
+interface FlowDetailApiResponse {
+  status: string;
+  message?: string;
+  data?: FlowDetailData;
+}
+
+interface VehicleProgress {
+  vehicle_no: string | number;
+  running_doc_vehicle_no: string;
+  license: string;
+  current_step: number;
+  total_steps: number;
+}
+
+interface FetchVehicleProgressResult {
+  vehicleProgress: VehicleProgress[];
+  usageDate: string;
+  dcType: string;
+  dcCode: string;
+  requestBy: string;
+  totalSteps: number;
+}
+
+interface VehicleWarehouseInfo {
+  id?: string | number;
+  request_id?: string | number;
+  vehicle_no?: string | number;
+  warehouse_plan_date?: string | null;
+  car_model?: string | null;
+  car_brand?: string | null;
+  car_chassis?: string | null;
+  car_engine?: string | null;
+  car_license?: string | null;
+}
+
+interface VehicleWarehouseInfoResponse {
+  status?: string;
+  message?: string;
+  data?: VehicleWarehouseInfo | VehicleWarehouseInfo[] | null;
 }
 
 interface RequestItem {
@@ -48,6 +141,19 @@ interface RequestItem {
   request_by: string;
   remark: string;
 
+  vehicle_no?: string | number;
+  running_doc_vehicle_no?: string;
+  vehicle_license?: string;
+  current_step?: number;
+  total_steps?: number;
+
+  warehouse_plan_date?: string | null;
+  car_model?: string | null;
+  car_brand?: string | null;
+  car_chassis?: string | null;
+  car_engine?: string | null;
+  car_license?: string | null;
+
   details?: RequestDetailItem[];
 }
 
@@ -73,12 +179,19 @@ type StatusFilter =
 
 export default function HomePage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [processVehicleRows, setProcessVehicleRows] = useState<RequestItem[]>([]);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
+  const [warehouseInfoLoading, setWarehouseInfoLoading] = useState<
+    Record<string, boolean>
+  >({});
+  const [warehouseInfoErrors, setWarehouseInfoErrors] = useState<
+    Record<string, string>
+  >({});
   const [editingStatus, setEditingStatus] = useState<Record<string, string>>({});
   const [updatingRows, setUpdatingRows] = useState<Record<string, boolean>>({});
   const [updateMessage, setUpdateMessage] = useState<
@@ -158,11 +271,272 @@ export default function HomePage() {
     }
   }, []);
 
+  const fetchVehicleProgress = async (
+    requestId: string | number
+  ): Promise<FetchVehicleProgressResult> => {
+    const emptyResult: FetchVehicleProgressResult = {
+      vehicleProgress: [],
+      usageDate: "",
+      dcType: "",
+      dcCode: "",
+      requestBy: "",
+      totalSteps: 0,
+    };
+
+    try {
+      const response = await fetch(
+        `http://192.168.158.210/api_new_truck/api/flow_data_get.php?request_id=${encodeURIComponent(
+          String(requestId)
+        )}`,
+        {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `โหลดข้อมูล Flow ของ Request ID ${requestId} ไม่สำเร็จ (${response.status})`
+        );
+      }
+
+      const result = (await response.json()) as FlowDetailApiResponse;
+
+      if (result.status !== "success" || !result.data) {
+        throw new Error(
+          result.message || "Flow API ไม่ได้ส่งข้อมูลรายละเอียดกลับมา"
+        );
+      }
+
+      const {
+        request,
+        steps = [],
+        cars = [],
+        flow_data: flowData = [],
+      } = result.data;
+
+      const totalSteps = steps.length;
+      const processLevelMap = new Map<string, number>(
+        steps.map((step) => [String(step.id), Number(step.process_level)])
+      );
+
+      const vehicleProgress: VehicleProgress[] = cars.map((car) => {
+        const vehicleFlows = flowData.filter(
+          (flow) => String(flow.vehicle_no) === String(car.vehicle_no)
+        );
+
+        const startedSteps = vehicleFlows
+          .filter((flow) => Boolean(flow.str_date || flow.end_date))
+          .map((flow) => {
+            const processLevel = processLevelMap.get(String(flow.process_id));
+
+            if (
+              processLevel !== undefined &&
+              !Number.isNaN(processLevel)
+            ) {
+              return processLevel;
+            }
+
+            const fallbackLevel = Number(flow.process_id);
+            return Number.isNaN(fallbackLevel) ? 0 : fallbackLevel;
+          });
+
+        const currentStep =
+          startedSteps.length > 0 ? Math.max(...startedSteps) : 0;
+
+        const runningDocVehicleNo =
+          car.running_doc_vehicle_no ||
+          vehicleFlows.find((flow) => flow.running_doc_vehicle_no)
+            ?.running_doc_vehicle_no ||
+          "";
+
+        return {
+          vehicle_no: car.vehicle_no,
+          running_doc_vehicle_no: runningDocVehicleNo,
+          license: car.license || "",
+          current_step: currentStep,
+          total_steps: totalSteps,
+        };
+      });
+
+      return {
+        vehicleProgress,
+        usageDate: request.usage_date || "",
+        dcType: request.dc_type || "",
+        dcCode: request.dc_code || "",
+        requestBy: request.request_by || "",
+        totalSteps,
+      };
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error("fetchVehicleProgress error:", error.message);
+      } else {
+        console.error("fetchVehicleProgress unknown error:", error);
+      }
+
+      return emptyResult;
+    }
+  };
+
+  const fetchVehicleWarehouseInfo = async (
+    requestId: string | number,
+    vehicleNo: string | number
+  ): Promise<VehicleWarehouseInfo | null> => {
+    const url =
+      `${VEHICLE_WAREHOUSE_INFO_API_URL}` +
+      `?request_id=${encodeURIComponent(String(requestId))}` +
+      `&vehicle_no=${encodeURIComponent(String(vehicleNo))}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+
+    const responseText = await response.text();
+    let result: VehicleWarehouseInfoResponse = {};
+
+    try {
+      result = responseText
+        ? (JSON.parse(responseText) as VehicleWarehouseInfoResponse)
+        : {};
+    } catch {
+      throw new Error(
+        `vehicle_warehouse_info.php ไม่ได้ส่ง JSON กลับมา: ${responseText}`
+      );
+    }
+
+    if (!response.ok || result.status !== "success") {
+      throw new Error(
+        result.message ||
+          `โหลดข้อมูลรถ Request ${requestId} คันที่ ${vehicleNo} ไม่สำเร็จ (${response.status})`
+      );
+    }
+
+    const responseData = result.data;
+
+    // รองรับทั้ง data แบบ Object และ Array
+    const info = Array.isArray(responseData)
+      ? responseData[0] || null
+      : responseData || null;
+
+    console.log("Vehicle warehouse info:", {
+      requestId,
+      vehicleNo,
+      url,
+      result,
+      info,
+    });
+
+    return info;
+  };
+
+  const loadVehicleWarehouseInfo = async (
+    item: RequestItem,
+    rowKey: string
+  ) => {
+    if (
+      item.id === null ||
+      item.id === undefined ||
+      item.vehicle_no === null ||
+      item.vehicle_no === undefined ||
+      item.vehicle_no === ""
+    ) {
+      setWarehouseInfoErrors((current) => ({
+        ...current,
+        [rowKey]: "ไม่พบ Request ID หรือหมายเลขรถ",
+      }));
+      return;
+    }
+
+    try {
+      setWarehouseInfoLoading((current) => ({
+        ...current,
+        [rowKey]: true,
+      }));
+      setWarehouseInfoErrors((current) => ({
+        ...current,
+        [rowKey]: "",
+      }));
+
+      const info = await fetchVehicleWarehouseInfo(
+        item.id,
+        item.vehicle_no
+      );
+
+      if (!info) {
+        throw new Error(
+          `ยังไม่พบข้อมูลของ Request ${item.id} รถคันที่ ${item.vehicle_no}`
+        );
+      }
+
+      setProcessVehicleRows((current) =>
+        current.map((row) => {
+          const isSameRequest = String(row.id) === String(item.id);
+          const isSameVehicle =
+            String(row.vehicle_no) === String(item.vehicle_no);
+
+          if (!isSameRequest || !isSameVehicle) return row;
+
+          return {
+            ...row,
+            warehouse_plan_date: info.warehouse_plan_date || null,
+            car_model: info.car_model || null,
+            car_brand: info.car_brand || null,
+            car_chassis: info.car_chassis || null,
+            car_engine: info.car_engine || null,
+            car_license: info.car_license || null,
+          };
+        })
+      );
+    } catch (loadError) {
+      console.error("loadVehicleWarehouseInfo error:", loadError);
+      setWarehouseInfoErrors((current) => ({
+        ...current,
+        [rowKey]:
+          loadError instanceof Error
+            ? loadError.message
+            : "โหลดข้อมูลรายละเอียดรถไม่สำเร็จ",
+      }));
+    } finally {
+      setWarehouseInfoLoading((current) => ({
+        ...current,
+        [rowKey]: false,
+      }));
+    }
+  };
+
+  const handleToggleRow = async (
+    item: RequestItem,
+    rowKey: string,
+    isOpen: boolean
+  ) => {
+    const nextOpen = !isOpen;
+
+    setOpenRows((current) => ({
+      ...current,
+      [rowKey]: nextOpen,
+    }));
+
+    if (
+      nextOpen &&
+      normalizeStatus(item.status) === "process" &&
+      item.vehicle_no !== null &&
+      item.vehicle_no !== undefined
+    ) {
+      await loadVehicleWarehouseInfo(item, rowKey);
+    }
+  };
+
   const fetchRequests = async () => {
     try {
       setLoading(true);
       setError("");
 
+      // API หลักสำหรับข้อมูลคำขอทั้งหมด
       const res = await fetch(
         "http://192.168.158.210/api_new_truck/api/request_get.php",
         {
@@ -172,11 +546,10 @@ export default function HomePage() {
         }
       );
 
-      if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลได้");
+      if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลคำขอได้");
 
       const data = await res.json();
-
-      const list = Array.isArray(data)
+      const list: RequestItem[] = Array.isArray(data)
         ? data
         : Array.isArray(data.data)
           ? data.data
@@ -185,8 +558,78 @@ export default function HomePage() {
             : [];
 
       setRequests(list);
+
+      // ใช้ Flow API จากหน้าก่อนหน้า เฉพาะข้อมูลกำลังดำเนินการ
+      const processRequests = list.filter((item) => {
+        const status = String(item.status || "").trim().toLowerCase();
+
+        const isProcessStatus =
+          status === "process" ||
+          status === "progress" ||
+          status === "confirm_request" ||
+          status === "confirm request" ||
+          status === "in_progress" ||
+          status === "กำลังดำเนินการ" ||
+          /^[0-9]$/.test(status);
+
+        return isProcessStatus;
+      });
+
+      const processGroups = await Promise.all(
+        processRequests.map(async (item): Promise<RequestItem[]> => {
+          if (item.id === null || item.id === undefined) {
+            return [item];
+          }
+
+          const flowDetail = await fetchVehicleProgress(item.id);
+          const requestBase: RequestItem = {
+            ...item,
+            usage_date: flowDetail.usageDate || item.usage_date,
+            dc_type: flowDetail.dcType || item.dc_type,
+            dc_code: flowDetail.dcCode || item.dc_code,
+            request_by: flowDetail.requestBy || item.request_by,
+          };
+
+          // ไม่สร้าง vehicle_no เอง หาก API ยังไม่ส่งข้อมูลรถ
+          if (flowDetail.vehicleProgress.length === 0) {
+            return [
+              {
+                ...requestBase,
+                running_doc_vehicle_no: item.running_doc,
+                current_step: 0,
+                total_steps: flowDetail.totalSteps,
+              },
+            ];
+          }
+
+          // 1 Request แตกเป็นหลายแถวตามรถที่ Flow API ส่งกลับมา
+          // ข้อมูล vehicle_warehouse_info จะโหลดล่าสุดเมื่อผู้ใช้กด “ดู”
+          // เพื่อใช้พารามิเตอร์เดียวกับ FlowAssessmentModal และไม่ยิง API ทุกคันพร้อมกัน
+          return flowDetail.vehicleProgress.map((vehicle) => ({
+            ...requestBase,
+            vehicle_no: vehicle.vehicle_no,
+            running_doc_vehicle_no:
+              vehicle.running_doc_vehicle_no ||
+              `${item.running_doc}_${vehicle.vehicle_no}`,
+            vehicle_license: vehicle.license,
+            current_step: vehicle.current_step,
+            total_steps: vehicle.total_steps,
+            qty: 1,
+            warehouse_plan_date: null,
+            car_model: null,
+            car_brand: null,
+            car_chassis: null,
+            car_engine: null,
+            car_license: null,
+          } satisfies RequestItem));
+        })
+      );
+
+      setProcessVehicleRows(processGroups.flat());
     } catch (err) {
       console.error(err);
+      setRequests([]);
+      setProcessVehicleRows([]);
       setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
     } finally {
       setLoading(false);
@@ -617,6 +1060,42 @@ export default function HomePage() {
     return [];
   }, [requests, selectedDC, userInfo]);
 
+  const warehouseFilteredProcessRows = useMemo(() => {
+    const userWarehouse = String(
+      userInfo?.warehouse ||
+      userInfo?.WAREHOUSE ||
+      userInfo?.team ||
+      userInfo?.TEAM ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+    const selectedCode = String(selectedDC?.DC_CODE || "")
+      .trim()
+      .toUpperCase();
+
+    if (userWarehouse === "CENTER" || selectedCode === "CENTER") {
+      return processVehicleRows;
+    }
+
+    if (selectedCode) {
+      return processVehicleRows.filter(
+        (item) =>
+          String(item.dc_code || "").trim().toUpperCase() === selectedCode
+      );
+    }
+
+    if (userWarehouse) {
+      return processVehicleRows.filter(
+        (item) =>
+          String(item.dc_code || "").trim().toUpperCase() === userWarehouse
+      );
+    }
+
+    return [];
+  }, [processVehicleRows, selectedDC, userInfo]);
+
   const dcTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>();
 
@@ -648,7 +1127,12 @@ export default function HomePage() {
   }, [warehouseFilteredRequests, dcTypeFilter]);
 
   const filteredRequests = useMemo(() => {
-    return warehouseFilteredRequests.filter((item) => {
+    const sourceRequests =
+      statusFilter === "process"
+        ? warehouseFilteredProcessRows
+        : warehouseFilteredRequests;
+
+    return sourceRequests.filter((item) => {
       const normalizedItemStatus = normalizeStatus(item.status);
 
       const matchStatus =
@@ -673,13 +1157,15 @@ export default function HomePage() {
         (itemRequestDateKey >= startDateKey && itemRequestDateKey <= endDateKey);
 
       const licenseText = getLicenseList(item.license_replace).join(" ");
-
       const keyword = searchText.trim().toLowerCase();
 
       const matchSearch =
         !keyword ||
         [
           item.running_doc,
+          item.running_doc_vehicle_no,
+          item.vehicle_no,
+          item.vehicle_license,
           item.dc_type,
           item.dc_code,
           item.fleet_type,
@@ -696,6 +1182,7 @@ export default function HomePage() {
     });
   }, [
     warehouseFilteredRequests,
+    warehouseFilteredProcessRows,
     statusFilter,
     dcTypeFilter,
     dcFilter,
@@ -739,15 +1226,13 @@ export default function HomePage() {
         (item) => normalizeStatus(item.status) === "center_pending"
       ).length,
 
-      process: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "process"
-      ).length,
+      process: warehouseFilteredProcessRows.length,
 
       rejected: warehouseFilteredRequests.filter(
         (item) => normalizeStatus(item.status) === "rejected"
       ).length,
     };
-  }, [warehouseFilteredRequests]);
+  }, [warehouseFilteredRequests, warehouseFilteredProcessRows]);
 
   const selectedDCLabel = useMemo(() => {
     const userWarehouse = String(
@@ -1104,7 +1589,7 @@ export default function HomePage() {
             </div>
 
             <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
-              พบ {filteredRequests.length} รายการ
+              พบ {filteredRequests.length} {statusFilter === "process" ? "คัน" : "รายการ"}
             </span>
           </div>
 
@@ -1384,25 +1869,47 @@ export default function HomePage() {
               <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
-                    {[
-                      "ลำดับ",
-                      "เลขที่เอกสาร",
-                      "DC Type",
-                      "DC",
-                      "ประเภทรถ",
-                      "ทะเบียนทดแทน",
-                      statusFilter === "rejected"
-                        ? "จำนวนทั้งหมด / อนุมัติ / ไม่อนุมัติ"
-                        : "จำนวน",
-                      "วันที่ใช้งาน",
-                      "ผู้ขอ",
-                      "สถานะ",
-                      "รายละเอียด",
-                    ].map((col, i) => (
+                    {(
+                      statusFilter === "process"
+                        ? [
+                          "ลำดับ",
+                          "เลขที่เอกสาร",
+                          "DC Type",
+                          "DC",
+                          "ประเภทรถ",
+                          "จำนวน",
+                          "วันที่ใช้งาน",
+                          "ผู้ขอ",
+                          "สถานะ",
+                          "รายละเอียด",
+                        ]
+                        : [
+                          "ลำดับ",
+                          "เลขที่เอกสาร",
+                          "DC Type",
+                          "DC",
+                          "ประเภทรถ",
+                          "ทะเบียนทดแทน",
+                          statusFilter === "rejected"
+                            ? "จำนวนทั้งหมด / อนุมัติ / ไม่อนุมัติ"
+                            : "จำนวน",
+                          "วันที่ใช้งาน",
+                          "ผู้ขอ",
+                          "สถานะ",
+                          "รายละเอียด",
+                        ]
+                    ).map((col, i) => (
                       <th
                         key={col}
-                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0 ? "sticky left-0 z-30 w-[52px] text-center" : ""
-                          } ${i === 6 ? "text-center" : ""} ${i === 10 ? "text-right" : ""
+                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0
+                          ? "sticky left-0 z-30 w-[52px] text-center"
+                          : ""
+                          } ${i === (statusFilter === "process" ? 5 : 6)
+                            ? "text-center"
+                            : ""
+                          } ${i === (statusFilter === "process" ? 9 : 10)
+                            ? "text-right"
+                            : ""
                           }`}
                       >
                         {col}
@@ -1414,7 +1921,7 @@ export default function HomePage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={statusFilter === "process" ? 10 : 11} className="py-12 text-center">
                         <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-4 border-blue-100 border-t-blue-500" />
                         <p className="text-xs font-medium text-slate-400">
                           กำลังโหลดข้อมูล...
@@ -1423,7 +1930,7 @@ export default function HomePage() {
                     </tr>
                   ) : filteredRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={statusFilter === "process" ? 10 : 11} className="py-12 text-center">
                         <p className="text-sm font-bold text-slate-400">
                           ไม่พบข้อมูลตามเงื่อนไขนี้
                         </p>
@@ -1434,7 +1941,7 @@ export default function HomePage() {
                       <Fragment key={date}>
                         <tr>
                           <td
-                            colSpan={11}
+                            colSpan={statusFilter === "process" ? 10 : 11}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
@@ -1481,9 +1988,11 @@ export default function HomePage() {
                             normalizeStatus(item.status) === "rejected";
 
                           const rowKey =
-                            item.id !== null && item.id !== undefined
-                              ? String(item.id)
-                              : item.running_doc || `${date}-${index}`;
+                            statusFilter === "process"
+                              ? `${item.id ?? item.running_doc}-${item.vehicle_no ?? "no-vehicle"}`
+                              : item.id !== null && item.id !== undefined
+                                ? String(item.id)
+                                : item.running_doc || `${date}-${index}`;
 
                           const isOpen = openRows[rowKey];
                           const licenseList = getLicenseList(item.license_replace);
@@ -1514,6 +2023,49 @@ export default function HomePage() {
                             0
                           );
 
+                          const normalizedFleetType = String(
+                            item.fleet_type || ""
+                          ).trim();
+
+                          const hideReplacementTruckDetails =
+                            normalizeStatus(item.status) === "gm_pending" &&
+                            ["รถออกใหม่", "รถเสริม"].includes(
+                              normalizedFleetType
+                            );
+
+                          const showReplacementTruckDetails =
+                            !isProcessStatus && !hideReplacementTruckDetails;
+
+                          const warehouseInfoFields = [
+                            {
+                              key: "warehouse_plan_date",
+                              label: "แผนวันที่จะเข้าคลังได้",
+                              value: item.warehouse_plan_date
+                                ? formatThaiDate(item.warehouse_plan_date)
+                                : "-",
+                            },
+                            { key: "car_model", label: "รุ่น", value: item.car_model || "-" },
+                            { key: "car_brand", label: "ยี่ห้อ", value: item.car_brand || "-" },
+                            {
+                              key: "car_chassis",
+                              label: "เลขที่ตัวถัง",
+                              value: item.car_chassis || "-",
+                            },
+                            {
+                              key: "car_engine",
+                              label: "เลขที่เครื่อง",
+                              value: item.car_engine || "-",
+                            },
+                            {
+                              key: "car_license",
+                              label: "ทะเบียนรถ",
+                              value:
+                                item.car_license ||
+                                item.vehicle_license ||
+                                "-",
+                            },
+                          ] as const;
+
                           return (
                             <Fragment key={rowKey}>
                               <tr className="group bg-white text-xs transition hover:bg-blue-50/30">
@@ -1525,7 +2077,13 @@ export default function HomePage() {
 
                                 <td className="whitespace-nowrap px-3 py-3">
                                   <p className="font-black text-slate-800">
-                                    {item.running_doc || "-"}
+                                    {statusFilter === "process"
+                                      ? item.running_doc_vehicle_no ||
+                                        (item.vehicle_no !== undefined &&
+                                        item.vehicle_no !== null
+                                          ? `${item.running_doc}_${item.vehicle_no}`
+                                          : item.running_doc || "-")
+                                      : item.running_doc || "-"}
                                   </p>
                                   <p className="mt-0.5 text-[10px] font-medium text-slate-400">
                                     ใช้: {formatThaiDate(item.usage_date)}
@@ -1553,29 +2111,31 @@ export default function HomePage() {
                                   </p>
                                 </td>
 
-                                <td className="max-w-[150px] px-3 py-3">
-                                  {licenseList.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {visibleLicenses.map((lic, li) => (
-                                        <span
-                                          key={`${rowKey}-lic-${li}`}
-                                          title={lic}
-                                          className="inline-flex max-w-[86px] truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200"
-                                        >
-                                          {lic}
-                                        </span>
-                                      ))}
+                                {statusFilter !== "process" && (
+                                  <td className="max-w-[150px] px-3 py-3">
+                                    {licenseList.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {visibleLicenses.map((lic, li) => (
+                                          <span
+                                            key={`${rowKey}-lic-${li}`}
+                                            title={lic}
+                                            className="inline-flex max-w-[86px] truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200"
+                                          >
+                                            {lic}
+                                          </span>
+                                        ))}
 
-                                      {hiddenLicenseCount > 0 && (
-                                        <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-500 ring-1 ring-blue-100">
-                                          +{hiddenLicenseCount}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-300">-</span>
-                                  )}
-                                </td>
+                                        {hiddenLicenseCount > 0 && (
+                                          <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-500 ring-1 ring-blue-100">
+                                            +{hiddenLicenseCount}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-300">-</span>
+                                    )}
+                                  </td>
+                                )}
 
                                 <td className="px-3 py-3 text-center">
                                   {showRejectedQty ? (
@@ -1626,22 +2186,46 @@ export default function HomePage() {
                                 </td>
 
                                 <td className="whitespace-nowrap px-3 py-3">
-                                  <span
-                                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm ${statusClass}`}
-                                  >
-                                    <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                                    {statusText}
-                                  </span>
+                                  {statusFilter === "process" ? (
+                                    <div className="min-w-[175px] rounded-xl border border-blue-100 bg-blue-50 px-2.5 py-2">
+                                      {item.vehicle_no !== undefined &&
+                                      item.vehicle_no !== null ? (
+                                        <>
+                                          <div className="flex items-center gap-2">
+                                            <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                                            <p className="text-[10px] font-black text-blue-700">
+                                              รถคันที่ {item.vehicle_no} : {item.current_step ?? 0}/
+                                              {item.total_steps ?? 0}
+                                            </p>
+                                          </div>
+                                          <p className="mt-1 max-w-[150px] truncate pl-4 text-[9px] font-semibold text-slate-400">
+                                            {item.vehicle_license || "-"}
+                                          </p>
+                                        </>
+                                      ) : (
+                                        <div className="flex items-center gap-2">
+                                          <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
+                                          <p className="text-[10px] font-black text-slate-600">
+                                            ยังไม่พบข้อมูลรถจาก Flow API
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span
+                                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm ${statusClass}`}
+                                    >
+                                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                                      {statusText}
+                                    </span>
+                                  )}
                                 </td>
 
                                 <td className="px-3 py-3 text-right">
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      setOpenRows((prev) => ({
-                                        ...prev,
-                                        [rowKey]: !prev[rowKey],
-                                      }))
+                                      void handleToggleRow(item, rowKey, isOpen)
                                     }
                                     className={`rounded-xl px-3 py-1.5 text-[11px] font-black shadow-sm transition hover:-translate-y-0.5 active:translate-y-0 ${isOpen
                                       ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-600/20"
@@ -1655,7 +2239,7 @@ export default function HomePage() {
 
                               {isOpen && (
                                 <tr className="bg-slate-50">
-                                  <td colSpan={11} className="px-4 py-3">
+                                  <td colSpan={statusFilter === "process" ? 10 : 11} className="px-4 py-3">
                                     <div className="grid gap-2 rounded-2xl border border-slate-100 bg-white p-3 text-[11px] shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:grid-cols-2 lg:grid-cols-4">
                                       {isProcessStatus && (
                                         <div className="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-indigo-50 sm:col-span-2 lg:col-span-4">
@@ -1761,6 +2345,74 @@ export default function HomePage() {
                                         </p>
                                       </div>
 
+                                      {isProcessStatus ? (
+                                        <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white sm:col-span-2 lg:col-span-4">
+                                          <div className="flex flex-col gap-2 border-b border-blue-100 bg-gradient-to-r from-blue-700 to-indigo-700 px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
+                                            <div>
+                                              <p className="text-xs font-black">
+                                                ข้อมูลรถที่จะเข้าคลัง
+                                              </p>
+                                              <p className="mt-0.5 text-[10px] font-medium text-white/70">
+                                                ข้อมูลจาก vehicle_warehouse_info.php ของรถแต่ละคัน
+                                              </p>
+                                            </div>
+
+                                            <span className="inline-flex w-fit items-center rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-black text-white">
+                                              รถคันที่ {item.vehicle_no ?? "-"}
+                                            </span>
+                                          </div>
+
+                                          <div className="bg-gradient-to-br from-blue-50/70 via-white to-indigo-50/50 p-4">
+                                            {warehouseInfoLoading[rowKey] ? (
+                                              <div className="flex min-h-[120px] items-center justify-center rounded-xl border border-blue-100 bg-white text-xs font-black text-blue-600">
+                                                กำลังโหลดข้อมูลรถคันที่ {item.vehicle_no}...
+                                              </div>
+                                            ) : warehouseInfoErrors[rowKey] ? (
+                                              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+                                                <p className="text-xs font-black text-rose-700">
+                                                  โหลดข้อมูลรถไม่สำเร็จ
+                                                </p>
+                                                <p className="mt-1 break-words text-[10px] font-semibold text-rose-600">
+                                                  {warehouseInfoErrors[rowKey]}
+                                                </p>
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    void loadVehicleWarehouseInfo(item, rowKey)
+                                                  }
+                                                  className="mt-3 rounded-lg bg-rose-600 px-3 py-1.5 text-[10px] font-black text-white transition hover:bg-rose-700"
+                                                >
+                                                  โหลดใหม่
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                                {warehouseInfoFields.map((field) => (
+                                                  <div
+                                                    key={`${rowKey}-${field.key}`}
+                                                    className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm"
+                                                  >
+                                                    <p className="text-[10px] font-bold text-slate-400">
+                                                      {field.label}
+                                                    </p>
+                                                    <p
+                                                      className={`mt-1 break-words text-sm font-black ${
+                                                        field.key === "warehouse_plan_date"
+                                                          ? "text-blue-700"
+                                                          : field.key === "car_license"
+                                                            ? "text-emerald-700"
+                                                            : "text-slate-800"
+                                                      }`}
+                                                    >
+                                                      {field.value}
+                                                    </p>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : showReplacementTruckDetails ? (
                                       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white sm:col-span-2 lg:col-span-4">
                                         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
                                           <div>
@@ -1864,6 +2516,7 @@ export default function HomePage() {
                                           </table>
                                         </div>
                                       </div>
+                                      ) : null}
 
 
                                     </div>

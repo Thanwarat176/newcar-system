@@ -1,8 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 
 import {
@@ -62,83 +69,201 @@ interface SidebarProps {
   canViewReport?: boolean;
 }
 
+/**
+ * ทำให้ค่า role / department / warehouse
+ * สามารถเปรียบเทียบได้ง่าย
+ *
+ * ตัวอย่าง:
+ * "super admin"  -> "SUPERADMIN"
+ * "SUPER_ADMIN"  -> "SUPERADMIN"
+ * "Super-Admin"  -> "SUPERADMIN"
+ */
+const normalizeValue = (
+  value?: string | null
+): string => {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_-]/g, "");
+};
+
 export default function Sidebar({
-  isFullAccessTeam = false,
   isSuperadmin = false,
-  canViewReport = false,
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [userInfo, setUserInfo] = useState<SidebarUser | null>(null);
-  const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
+  const [userInfo, setUserInfo] =
+    useState<SidebarUser | null>(null);
 
+  const [selectedDC, setSelectedDC] =
+    useState<SelectedDC | null>(null);
+
+  /*
+   * อ่านข้อมูลจาก localStorage
+   */
   useEffect(() => {
     const loadSidebarData = () => {
-      const savedUser = localStorage.getItem("user");
-      const savedSelectedDC = localStorage.getItem("selected_dc");
+      const savedUser =
+        localStorage.getItem("user");
 
-      if (!savedUser) {
-        setUserInfo(null);
-        setSelectedDC(null);
-        return;
-      }
+      const savedSelectedDC =
+        localStorage.getItem("selected_dc");
 
-      try {
-        const parsedUser: SidebarUser = JSON.parse(savedUser);
-        console.log("SIDEBAR USER:", parsedUser);
-        setUserInfo(parsedUser);
-      } catch (error) {
-        console.error(
-          "อ่านข้อมูล user จาก localStorage ไม่ได้:",
-          error
-        );
-
-        localStorage.removeItem("user");
-        setUserInfo(null);
-      }
-
-      if (savedSelectedDC) {
+      /*
+       * อ่านข้อมูล User
+       */
+      if (savedUser) {
         try {
-          const parsedDC: SelectedDC = JSON.parse(savedSelectedDC);
-          console.log("SIDEBAR SELECTED DC:", parsedDC);
-          setSelectedDC(parsedDC);
+          const parsedUser =
+            JSON.parse(savedUser) as SidebarUser;
+
+          console.log(
+            "SIDEBAR USER:",
+            parsedUser
+          );
+
+          setUserInfo(parsedUser);
+        } catch (error) {
+          console.error(
+            "อ่านข้อมูล user จาก localStorage ไม่ได้:",
+            error
+          );
+
+          localStorage.removeItem("user");
+          setUserInfo(null);
+        }
+      } else {
+        setUserInfo(null);
+      }
+
+      /*
+       * อ่านข้อมูล DC ที่เลือก
+       *
+       * ป้องกันกรณี localStorage เป็น:
+       * ""
+       * null
+       * undefined
+       */
+      const hasValidSelectedDC =
+        savedSelectedDC &&
+        savedSelectedDC !== '""' &&
+        savedSelectedDC !== "null" &&
+        savedSelectedDC !== "undefined";
+
+      if (hasValidSelectedDC) {
+        try {
+          const parsedDC =
+            JSON.parse(
+              savedSelectedDC
+            ) as SelectedDC;
+
+          if (
+            parsedDC &&
+            typeof parsedDC === "object"
+          ) {
+            console.log(
+              "SIDEBAR SELECTED DC:",
+              parsedDC
+            );
+
+            setSelectedDC(parsedDC);
+          } else {
+            localStorage.removeItem(
+              "selected_dc"
+            );
+
+            setSelectedDC(null);
+          }
         } catch (error) {
           console.error(
             "อ่านข้อมูล selected_dc จาก localStorage ไม่ได้:",
             error
           );
 
-          localStorage.removeItem("selected_dc");
+          localStorage.removeItem(
+            "selected_dc"
+          );
+
           setSelectedDC(null);
         }
       } else {
+        if (savedSelectedDC) {
+          localStorage.removeItem(
+            "selected_dc"
+          );
+        }
+
         setSelectedDC(null);
       }
     };
 
     loadSidebarData();
 
-    window.addEventListener("selectedDCChanged", loadSidebarData);
+    /*
+     * Event สำหรับอัปเดต Sidebar
+     * เมื่อ Login หรือเปลี่ยน DC
+     */
+    window.addEventListener(
+      "userChanged",
+      loadSidebarData
+    );
+
+    window.addEventListener(
+      "selectedDCChanged",
+      loadSidebarData
+    );
+
+    /*
+     * ทำงานเมื่อ localStorage เปลี่ยน
+     * จาก Browser Tab อื่น
+     */
+    window.addEventListener(
+      "storage",
+      loadSidebarData
+    );
 
     return () => {
       window.removeEventListener(
+        "userChanged",
+        loadSidebarData
+      );
+
+      window.removeEventListener(
         "selectedDCChanged",
+        loadSidebarData
+      );
+
+      window.removeEventListener(
+        "storage",
         loadSidebarData
       );
     };
   }, []);
 
+  /*
+   * ชื่อผู้ใช้งาน
+   */
   const displayName = useMemo(() => {
-    const firstName = userInfo?.name || userInfo?.NAME || "";
-    const surname =
-      userInfo?.surname || userInfo?.SURNAME || "";
+    const firstName =
+      userInfo?.name ||
+      userInfo?.NAME ||
+      "";
 
-    const fullName = `${firstName} ${surname}`.trim();
+    const surname =
+      userInfo?.surname ||
+      userInfo?.SURNAME ||
+      "";
+
+    const fullName =
+      `${firstName} ${surname}`.trim();
 
     return fullName || "User";
   }, [userInfo]);
 
+  /*
+   * ตำแหน่ง / Role ที่แสดงบน Sidebar
+   */
   const displayPosition = useMemo(() => {
     return (
       userInfo?.POSITION ||
@@ -149,10 +274,78 @@ export default function Sidebar({
     );
   }, [userInfo]);
 
+  /*
+   * อ่าน Role สำหรับตรวจสิทธิ์
+   */
+  const normalizedRole = useMemo(() => {
+    return normalizeValue(
+      userInfo?.ROLE ||
+        userInfo?.role ||
+        userInfo?.user_type ||
+        userInfo?.POSITION
+    );
+  }, [userInfo]);
+
+  /*
+   * อ่าน Department สำหรับตรวจสิทธิ์เมนู
+   */
+  const normalizedDepartment =
+    useMemo(() => {
+      return normalizeValue(
+        userInfo?.department ||
+          userInfo?.DEPARTMENT
+      );
+    }, [userInfo]);
+
+  /*
+   * อ่าน Warehouse
+   */
+  const normalizedWarehouse =
+    useMemo(() => {
+      return normalizeValue(
+        userInfo?.warehouse ||
+          userInfo?.WAREHOUSE
+      );
+    }, [userInfo]);
+
+  /*
+   * อ่าน Team
+   */
+  const normalizedTeam = useMemo(() => {
+    return normalizeValue(
+      userInfo?.team ||
+        userInfo?.TEAM
+    );
+  }, [userInfo]);
+
+  /*
+   * ตรวจสอบ Superadmin
+   *
+   * รองรับทั้ง:
+   * 1. ค่า isSuperadmin ที่ส่งมาจาก Parent
+   * 2. ค่า ROLE / role / user_type จาก localStorage
+   */
+  const hasSuperadminAccess =
+    useMemo(() => {
+      return (
+        isSuperadmin ||
+        normalizedRole === "SUPERADMIN"
+      );
+    }, [
+      isSuperadmin,
+      normalizedRole,
+    ]);
+
+  /*
+   * ข้อมูล Team ที่แสดง
+   */
   const displayTeam = useMemo(() => {
     const warehouse =
       userInfo?.warehouse ||
       userInfo?.WAREHOUSE ||
+      "";
+
+    const team =
       userInfo?.team ||
       userInfo?.TEAM ||
       "";
@@ -162,8 +355,13 @@ export default function Sidebar({
       userInfo?.DEPARTMENT ||
       "";
 
-    const upperWarehouse = warehouse.toUpperCase();
+    const upperWarehouse =
+      normalizeValue(warehouse);
 
+    /*
+     * ถ้าเป็นผู้ใช้ Warehouse หรือ GM
+     * ให้แสดง DC ที่เลือก
+     */
     if (
       (upperWarehouse === "WAREHOUSE" ||
         upperWarehouse === "GM") &&
@@ -172,15 +370,37 @@ export default function Sidebar({
       return selectedDC.DC_CODE;
     }
 
+    /*
+     * ถ้า Warehouse เป็น CENTER
+     * ให้แสดง Department
+     */
     if (upperWarehouse === "CENTER") {
-      return department || "CENTER";
+      return (
+        department ||
+        team ||
+        "CENTER"
+      );
     }
 
-    return warehouse || department || "-";
-  }, [userInfo, selectedDC]);
+    return (
+      warehouse ||
+      team ||
+      department ||
+      "-"
+    );
+  }, [
+    userInfo,
+    selectedDC,
+  ]);
 
+  /*
+   * ตัวอักษรย่อของชื่อ
+   */
   const displayInitials = useMemo(() => {
-    if (!displayName || displayName === "User") {
+    if (
+      !displayName ||
+      displayName === "User"
+    ) {
       return "U";
     }
 
@@ -193,87 +413,217 @@ export default function Sidebar({
       .toUpperCase();
   }, [displayName]);
 
-  const menuItems = useMemo<MenuItem[]>(() => {
-    const items: MenuItem[] = [];
+  /*
+   * กำหนดสิทธิ์เมนู
+   */
+  const menuItems =
+    useMemo<MenuItem[]>(() => {
+      const items: MenuItem[] = [];
 
-    items.push({
-      label: "ขอเพิ่มกองรถ",
-      path: PATHS.main.addFleet,
-      icon: Truck,
+      const isGM =
+        normalizedDepartment === "GM";
+
+      const isFBP =
+        normalizedDepartment === "FBP";
+
+      const isIMP =
+        normalizedDepartment === "IMP";
+
+      const isTCAS =
+        normalizedDepartment === "TCAS";
+
+      /*
+       * ขอเพิ่มกองรถ
+       * ทุกคนเห็น
+       */
+      items.push({
+        label: "ขอเพิ่มกองรถ",
+        path: PATHS.main.addFleet,
+        icon: Truck,
+      });
+
+      /*
+       * คำขอจากคลัง
+       * Superadmin หรือ Department = GM
+       */
+      if (
+        hasSuperadminAccess ||
+        isGM
+      ) {
+        items.push({
+          label: "คำขอจากคลัง",
+          path: PATHS.main.gm,
+          icon: Inbox,
+        });
+      }
+
+      /*
+       * รอประเมินกองรถ
+       * Superadmin หรือ Department = FBP / IMP
+       */
+      if (
+        hasSuperadminAccess ||
+        isFBP ||
+        isIMP
+      ) {
+        items.push({
+          label: "รอประเมินกองรถ",
+          path:
+            PATHS.main.waitingFleet,
+          icon: Clock3,
+        });
+      }
+
+      /*
+       * ติดตามกองรถออกใหม่/ทดแทน
+       * Superadmin หรือ Department = TCAS / IMP
+       */
+      if (
+        hasSuperadminAccess ||
+        isTCAS ||
+        isIMP
+      ) {
+        items.push({
+          label:
+            "ติดตามกองรถออกใหม่/ทดแทน",
+          path:
+            PATHS.main.trackFleet,
+          icon: Route,
+        });
+      }
+
+      /*
+       * จัดการกระบวนการทำงาน
+       * Superadmin หรือ Department = IMP
+       */
+      if (
+        hasSuperadminAccess ||
+        isIMP
+      ) {
+        items.push({
+          label:
+            "จัดการกระบวนการทำงาน",
+          path:
+            PATHS.main.manageProcess,
+          icon: Settings,
+        });
+
+        /*
+         * จัดการการใช้งาน
+         * Superadmin หรือ Department = IMP
+         */
+        items.push({
+          label: "จัดการการใช้งาน",
+          path:
+            PATHS.main.manageUser,
+          icon: Shield,
+        });
+      }
+
+      return items;
+    }, [
+      normalizedDepartment,
+      hasSuperadminAccess,
+    ]);
+
+  /*
+   * ผู้ที่สามารถเปลี่ยน Warehouse / DC
+   */
+  const canChangeWarehouse =
+    useMemo(() => {
+      return (
+        normalizedWarehouse ===
+          "WAREHOUSE" ||
+        normalizedWarehouse === "GM" ||
+        normalizedDepartment === "GM" ||
+        hasSuperadminAccess
+      );
+    }, [
+      normalizedWarehouse,
+      normalizedDepartment,
+      hasSuperadminAccess,
+    ]);
+
+  /*
+   * Log ตรวจสอบค่าที่ Sidebar ใช้งานจริง
+   */
+  useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
+    console.log("SIDEBAR ACCESS:", {
+      role: normalizedRole,
+      department:
+        normalizedDepartment,
+      warehouse:
+        normalizedWarehouse,
+      team: normalizedTeam,
+      isSuperadminFromProps:
+        isSuperadmin,
+      hasSuperadminAccess,
+      selectedDC,
+      menuItems: menuItems.map(
+        (item) => item.label
+      ),
     });
+  }, [
+    userInfo,
+    normalizedRole,
+    normalizedDepartment,
+    normalizedWarehouse,
+    normalizedTeam,
+    isSuperadmin,
+    hasSuperadminAccess,
+    selectedDC,
+    menuItems,
+  ]);
 
-    if (isFullAccessTeam || isSuperadmin) {
-      items.push({
-        label: "คำขอจากคลัง",
-        path: PATHS.main.gm,
-        icon: Inbox,
-      });
-
-      items.push({
-        label: "รอประเมินกองรถ",
-        path: PATHS.main.waitingFleet,
-        icon: Clock3,
-      });
-    }
-
-    if (
-      canViewReport ||
-      isFullAccessTeam ||
-      isSuperadmin
-    ) {
-      items.push({
-        label: "ติดตามกองรถออกใหม่/ทดแทน",
-        path: PATHS.main.trackFleet,
-        icon: Route,
-      });
-    }
-
-    if (isSuperadmin) {
-      items.push({
-        label: "จัดการกระบวนการทำงาน",
-        path: PATHS.main.manageProcess,
-        icon: Settings,
-      });
-
-      items.push({
-        label: "จัดการการใช้งาน",
-        path: PATHS.main.manageUser,
-        icon: Shield,
-      });
-    }
-
-    return items;
-  }, [isFullAccessTeam, isSuperadmin, canViewReport]);
-
-  const canChangeWarehouse = useMemo(() => {
-    const warehouse =
-      userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
-      userInfo?.team ||
-      userInfo?.TEAM ||
-      "";
-
-    const upperWarehouse = warehouse.toUpperCase();
-
-    return (
-      upperWarehouse === "WAREHOUSE" ||
-      upperWarehouse === "GM"
-    );
-  }, [userInfo]);
-
+  /*
+   * เปลี่ยน Warehouse / DC
+   */
   const handleChangeWarehouse = () => {
-    localStorage.removeItem("selected_dc");
-    router.push(PATHS.auth.selectDC);
+    localStorage.removeItem(
+      "selected_dc"
+    );
+
+    setSelectedDC(null);
+
+    window.dispatchEvent(
+      new Event("selectedDCChanged")
+    );
+
+    router.push(
+      PATHS.auth.selectDC
+    );
   };
 
+  /*
+   * Logout
+   */
   const handleLogout = () => {
     localStorage.removeItem("user");
-    localStorage.removeItem("selected_dc");
+    localStorage.removeItem(
+      "selected_dc"
+    );
+
+    setUserInfo(null);
+    setSelectedDC(null);
+
+    window.dispatchEvent(
+      new Event("userChanged")
+    );
+
+    window.dispatchEvent(
+      new Event("selectedDCChanged")
+    );
+
     router.push("/");
   };
 
   return (
     <aside className="flex h-screen w-[220px] flex-col overflow-hidden border-r border-white/10 bg-gradient-to-b from-slate-950 via-blue-950 to-slate-950 text-white shadow-xl">
+      {/* User information */}
       <div className="p-3">
         <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-3">
           <div className="flex items-center gap-2.5">
@@ -293,7 +643,7 @@ export default function Sidebar({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-blue-500/10 px-2.5 py-1.5 text-[10px] text-blue-100">
-            <div className="min-w-0">
+            <div className="min-w-0 truncate">
               <span className="text-blue-200/70">
                 Team :{" "}
               </span>
@@ -306,7 +656,9 @@ export default function Sidebar({
             {canChangeWarehouse && (
               <button
                 type="button"
-                onClick={handleChangeWarehouse}
+                onClick={
+                  handleChangeWarehouse
+                }
                 title="เลือก Warehouse / DC ใหม่"
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/10 text-blue-100 transition hover:bg-white/20 hover:text-white"
               >
@@ -317,48 +669,57 @@ export default function Sidebar({
         </div>
       </div>
 
+      {/* Menu title */}
       <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-300/45">
         Main Menu
       </div>
 
+      {/* Menu list */}
       <div className="flex-1 overflow-y-auto px-2.5 py-2">
         <div className="flex flex-col gap-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
+          {menuItems.map(
+            (item) => {
+              const Icon =
+                item.icon;
 
-            const isActive =
-              pathname === item.path ||
-              pathname.startsWith(`${item.path}/`);
+              const isActive =
+                pathname ===
+                  item.path ||
+                pathname.startsWith(
+                  `${item.path}/`
+                );
 
-            return (
-              <Link
-                key={item.path}
-                href={item.path}
-                className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] transition ${
-                  isActive
-                    ? "bg-white text-blue-900"
-                    : "text-blue-100 hover:bg-white/[0.08] hover:text-white"
-                }`}
-              >
-                <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${
+              return (
+                <Link
+                  key={item.path}
+                  href={item.path}
+                  className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] transition ${
                     isActive
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-white/[0.06] text-blue-200"
+                      ? "bg-white text-blue-900"
+                      : "text-blue-100 hover:bg-white/[0.08] hover:text-white"
                   }`}
                 >
-                  <Icon size={14} />
-                </div>
+                  <div
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${
+                      isActive
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-white/[0.06] text-blue-200"
+                    }`}
+                  >
+                    <Icon size={14} />
+                  </div>
 
-                <span className="font-semibold">
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
+                  <span className="font-semibold">
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            }
+          )}
         </div>
       </div>
 
+      {/* Logout */}
       <div className="border-t border-white/10 p-2.5">
         <button
           type="button"
