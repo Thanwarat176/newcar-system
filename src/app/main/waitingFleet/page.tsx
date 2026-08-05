@@ -8,7 +8,9 @@ import { th } from "date-fns/locale";
 import {
   CalendarDays,
   Eraser,
+  Eye,
   Filter,
+  PencilLine,
   Search,
   SlidersHorizontal,
   Truck,
@@ -238,7 +240,7 @@ export default function HomePage() {
   }, [userInfo]);
 
   const isCenterUser =
-  userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
+    userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
 
   const sidebarFilteredRequests = useMemo(() => {
     // CENTER เห็นข้อมูลทั้งหมด
@@ -377,14 +379,14 @@ export default function HomePage() {
 
     if (
       value === "fbp_pending" ||
-      value === "รอส่วนกลางอนุมัติ"
+      value === "รอทีม FBP ประเมินข้อมูล"
     ) {
       return "fbp_pending";
     }
 
     if (
       value === "reject_by_fbp" ||
-      value === "ส่วนกลางไม่อนุมัติ"
+      value === "ทีม FBP ไม่อนุมัติ"
     ) {
       return "reject_by_fbp";
     }
@@ -402,7 +404,7 @@ export default function HomePage() {
 
   const isAllowedCardStatus = (status?: string) => {
     const value = normalizeStatus(status);
-  
+
     return (
       value === "fbp_pending" ||
       value === "reject_by_fbp" ||
@@ -413,8 +415,8 @@ export default function HomePage() {
   const formatStatusText = (status?: string) => {
     const value = normalizeStatus(status);
 
-    if (value === "fbp_pending") return "รอส่วนกลางอนุมัติ";
-    if (value === "reject_by_fbp") return "ส่วนกลางไม่อนุมัติ";
+    if (value === "fbp_pending") return "รอทีม FBP ประเมินข้อมูล";
+    if (value === "reject_by_fbp") return "ทีม FBP ไม่อนุมัติ";
     if (value === "approved") return "อนุมัติแล้ว";
 
     return status || "-";
@@ -506,15 +508,15 @@ export default function HomePage() {
     const fbp_pending = sidebarFilteredRequests.filter(
       (item) => normalizeStatus(item.status) === "fbp_pending"
     ).length;
-  
+
     const rejectedByCenter = sidebarFilteredRequests.filter(
       (item) => normalizeStatus(item.status) === "reject_by_fbp"
     ).length;
-  
+
     const approved = sidebarFilteredRequests.filter(
       (item) => normalizeStatus(item.status) === "approved"
     ).length;
-  
+
     return {
       total: fbp_pending + rejectedByCenter + approved,
       fbp_pending,
@@ -562,12 +564,12 @@ export default function HomePage() {
       list = list.filter((item) => isAllowedCardStatus(item.status));
     }
 
-    // รอส่วนกลางอนุมัติ = fbp_pending
+    // รอทีม FBP ประเมินข้อมูล = fbp_pending
     if (statusFilter === "fbp_pending") {
       list = list.filter((item) => normalizeStatus(item.status) === "fbp_pending");
     }
 
-    // ส่วนกลางไม่อนุมัติ = reject_by_fbp
+    // ทีม FBP ไม่อนุมัติ = reject_by_fbp
     if (statusFilter === "reject_by_fbp") {
       list = list.filter(
         (item) => normalizeStatus(item.status) === "reject_by_fbp"
@@ -647,11 +649,11 @@ export default function HomePage() {
           : "";
 
     if (statusFilter === "fbp_pending") {
-      return `รายการรอส่วนกลางอนุมัติ${dcSuffix}`;
+      return `รายการรอทีม FBP ประเมินข้อมูล${dcSuffix}`;
     }
 
     if (statusFilter === "reject_by_fbp") {
-      return `รายการส่วนกลางไม่อนุมัติ${dcSuffix}`;
+      return `รายการทีม FBP ไม่อนุมัติ${dcSuffix}`;
     }
 
     if (statusFilter === "approved") {
@@ -715,14 +717,13 @@ export default function HomePage() {
     if (selectedDcFromSidebar === "CENTER") {
       return "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด";
     }
-  
+
     if (!selectedDcFromSidebar) {
       return "ไม่ได้เลือก DC จาก Sidebar / แสดงทั้งหมด";
     }
-  
-    return `${selectedDcFromSidebar}${
-      selectedDcNameFromSidebar ? ` - ${selectedDcNameFromSidebar}` : ""
-    }${selectedDcTypeFromSidebar ? ` (${selectedDcTypeFromSidebar})` : ""}`;
+
+    return `${selectedDcFromSidebar}${selectedDcNameFromSidebar ? ` - ${selectedDcNameFromSidebar}` : ""
+      }${selectedDcTypeFromSidebar ? ` (${selectedDcTypeFromSidebar})` : ""}`;
   }, [
     selectedDcFromSidebar,
     selectedDcNameFromSidebar,
@@ -812,9 +813,9 @@ export default function HomePage() {
                 {statusFilter === "all"
                   ? "ดูทั้งหมด"
                   : statusFilter === "fbp_pending"
-                    ? "รอส่วนกลางอนุมัติ"
+                    ? "รอทีม FBP ประเมินข้อมูล"
                     : statusFilter === "reject_by_fbp"
-                      ? "ส่วนกลางไม่อนุมัติ"
+                      ? "ทีม FBP ไม่อนุมัติ"
                       : "อนุมัติแล้ว"}
               </span>
             </div>
@@ -860,7 +861,7 @@ export default function HomePage() {
               },
               {
                 key: "fbp_pending",
-                label: "รอส่วนกลางอนุมัติ",
+                label: "รอทีม FBP ประเมินข้อมูล",
                 count: dashboardSummary.fbp_pending,
                 sub: "รายการที่รอการพิจารณา",
                 activeClass:
@@ -876,7 +877,7 @@ export default function HomePage() {
               },
               {
                 key: "reject_by_fbp",
-                label: "ส่วนกลางไม่อนุมัติ",
+                label: "ทีม FBP ไม่อนุมัติ",
                 count: dashboardSummary.rejectedByCenter,
                 sub: "รายการที่ไม่ผ่านการประเมิน",
                 activeClass:
@@ -929,9 +930,8 @@ export default function HomePage() {
                   key={key}
                   type="button"
                   onClick={() => setStatusFilter(key)}
-                  className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${
-                    isActive ? activeClass : inactiveClass
-                  }`}
+                  className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
+                    }`}
                 >
                   <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
                   <div className="pointer-events-none absolute -bottom-10 left-6 h-20 w-20 rounded-full bg-white/10 blur-2xl" />
@@ -940,32 +940,28 @@ export default function HomePage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span
-                          className={`h-2 w-2 rounded-full ${
-                            isActive ? "bg-white" : dotClass
-                          }`}
+                          className={`h-2 w-2 rounded-full ${isActive ? "bg-white" : dotClass
+                            }`}
                         />
                         <p
-                          className={`truncate text-[11px] font-black ${
-                            isActive ? "text-white/90" : ""
-                          }`}
+                          className={`truncate text-[11px] font-black ${isActive ? "text-white/90" : ""
+                            }`}
                         >
                           {label}
                         </p>
                       </div>
 
                       <p
-                        className={`mt-1 truncate text-[10px] font-bold ${
-                          isActive ? "text-white/60" : "text-slate-400"
-                        }`}
+                        className={`mt-1 truncate text-[10px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
+                          }`}
                       >
                         {sub}
                       </p>
                     </div>
 
                     <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-black shadow-sm ${
-                        isActive ? activeIconClass : iconClass
-                      }`}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-black shadow-sm ${isActive ? activeIconClass : iconClass
+                        }`}
                     >
                       {shortLabel}
                     </div>
@@ -973,19 +969,17 @@ export default function HomePage() {
 
                   <div className="relative mt-4 flex items-end justify-between">
                     <p
-                      className={`text-3xl font-black tracking-tight ${
-                        isActive ? activeCountClass : countClass
-                      }`}
+                      className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
+                        }`}
                     >
                       {count}
                     </p>
 
                     <span
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-black ${
-                        isActive
-                          ? "bg-white/15 text-white"
-                          : "bg-white/80 text-slate-400 shadow-sm"
-                      }`}
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-black ${isActive
+                        ? "bg-white/15 text-white"
+                        : "bg-white/80 text-slate-400 shadow-sm"
+                        }`}
                     >
                       รายการ
                     </span>
@@ -1123,11 +1117,10 @@ export default function HomePage() {
                   ref={requestDateButtonRef}
                   type="button"
                   onClick={handleToggleRequestDatePicker}
-                  className={`h-10 w-full truncate rounded-xl border pl-9 pr-9 text-left text-xs font-semibold shadow-sm outline-none transition focus:ring-4 ${
-                    hasRequestDateRange
-                      ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-blue-100/70"
-                      : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-blue-100/70"
-                  }`}
+                  className={`h-10 w-full truncate rounded-xl border pl-9 pr-9 text-left text-xs font-semibold shadow-sm outline-none transition focus:ring-4 ${hasRequestDateRange
+                    ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-blue-100/70"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-blue-100/70"
+                    }`}
                 >
                   {formatThaiDateRange()}
                 </button>
@@ -1309,13 +1302,11 @@ export default function HomePage() {
                     ].map((col, index) => (
                       <th
                         key={col}
-                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${
-                          index === 0
-                            ? "sticky left-0 z-30 w-[52px] text-center"
-                            : ""
-                        } ${index === 6 ? "text-center" : ""} ${
-                          index === 10 ? "text-right" : ""
-                        }`}
+                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${index === 0
+                          ? "sticky left-0 z-30 w-[52px] text-center"
+                          : ""
+                          } ${index === 6 ? "text-center" : ""} ${index === 10 ? "text-right" : ""
+                          }`}
                       >
                         {col}
                       </th>
@@ -1366,6 +1357,9 @@ export default function HomePage() {
                           const status = item.status || "fbp_pending";
                           const statusText = formatStatusText(status);
                           const statusVisual = getStatusVisual(status);
+
+                          const isPending =
+                            normalizeStatus(item.status) === "fbp_pending";
                           const licenseList = getLicenseList(item.license_replace);
                           const visibleLicenses = licenseList.slice(0, 2);
                           const hiddenLicenseCount = Math.max(
@@ -1478,9 +1472,23 @@ export default function HomePage() {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenDetail(item)}
-                                  className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg"
+                                  className={
+                                    isPending
+                                      ? "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg"
+                                      : "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                                  }
                                 >
-                                  ประเมิน
+                                  {isPending ? (
+                                    <>
+                                      <PencilLine size={14} />
+                                      อัพเดตสถานะ
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Eye size={14} />
+                                      ดูรายละเอียด
+                                    </>
+                                  )}
                                 </button>
                               </td>
                             </tr>

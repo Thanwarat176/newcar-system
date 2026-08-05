@@ -6,7 +6,7 @@ import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
-import { CalendarDays, Eraser, Filter, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
+import { CalendarDays, Eraser, Eye, Filter, PencilLine, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
 
 const VEHICLE_WAREHOUSE_INFO_API_URL =
   "http://192.168.158.210/api_new_truck/api/vehicle_warehouse_info.php";
@@ -88,6 +88,7 @@ interface VehicleProgress {
   license: string;
   current_step: number;
   total_steps: number;
+  current_process: string;
 }
 
 interface FetchVehicleProgressResult {
@@ -146,6 +147,7 @@ interface RequestItem {
   vehicle_license?: string;
   current_step?: number;
   total_steps?: number;
+  current_process?: string;
 
   warehouse_plan_date?: string | null;
   car_model?: string | null;
@@ -321,29 +323,76 @@ export default function HomePage() {
         steps.map((step) => [String(step.id), Number(step.process_level)])
       );
 
+      const processStepMap = new Map<string, FlowStepDetail>(
+        steps.map((step) => [String(step.id), step])
+      );
+
+      const sortedSteps = [...steps].sort(
+        (a, b) => Number(a.process_level) - Number(b.process_level)
+      );
+
+      const getFlowProcessLevel = (flow: FlowTrackingDetail) => {
+        const processLevel = processLevelMap.get(String(flow.process_id));
+
+        if (
+          processLevel !== undefined &&
+          !Number.isNaN(processLevel)
+        ) {
+          return processLevel;
+        }
+
+        const fallbackLevel = Number(flow.process_id);
+        return Number.isNaN(fallbackLevel) ? 0 : fallbackLevel;
+      };
+
       const vehicleProgress: VehicleProgress[] = cars.map((car) => {
         const vehicleFlows = flowData.filter(
           (flow) => String(flow.vehicle_no) === String(car.vehicle_no)
         );
 
-        const startedSteps = vehicleFlows
+        const startedFlows = vehicleFlows
           .filter((flow) => Boolean(flow.str_date || flow.end_date))
-          .map((flow) => {
-            const processLevel = processLevelMap.get(String(flow.process_id));
+          .sort(
+            (a, b) => getFlowProcessLevel(b) - getFlowProcessLevel(a)
+          );
 
-            if (
-              processLevel !== undefined &&
-              !Number.isNaN(processLevel)
-            ) {
-              return processLevel;
-            }
+        const activeFlow = startedFlows.find(
+          (flow) => Boolean(flow.str_date) && !flow.end_date
+        );
 
-            const fallbackLevel = Number(flow.process_id);
-            return Number.isNaN(fallbackLevel) ? 0 : fallbackLevel;
-          });
+        const latestStartedFlow = startedFlows[0];
 
-        const currentStep =
-          startedSteps.length > 0 ? Math.max(...startedSteps) : 0;
+        let currentStep = 0;
+        let currentProcess = "ยังไม่เริ่มดำเนินการ";
+
+        if (activeFlow) {
+          currentStep = getFlowProcessLevel(activeFlow);
+
+          const activeStep = processStepMap.get(
+            String(activeFlow.process_id)
+          );
+
+          currentProcess =
+            activeStep?.process ||
+            `ขั้นตอนที่ ${currentStep}`;
+        } else if (latestStartedFlow) {
+          const latestLevel = getFlowProcessLevel(latestStartedFlow);
+          const nextStep = sortedSteps.find(
+            (step) => Number(step.process_level) > latestLevel
+          );
+
+          if (nextStep) {
+            currentStep = Number(nextStep.process_level);
+            currentProcess = `รอดำเนินการ: ${nextStep.process}`;
+          } else {
+            currentStep = totalSteps;
+            currentProcess = "ดำเนินการครบทุกขั้นตอน";
+          }
+        } else if (sortedSteps.length > 0) {
+          const firstStep = sortedSteps[0];
+          currentStep = Number(firstStep.process_level) || 1;
+          currentProcess = `รอเริ่ม: ${firstStep.process}`;
+        }
 
         const runningDocVehicleNo =
           car.running_doc_vehicle_no ||
@@ -357,6 +406,7 @@ export default function HomePage() {
           license: car.license || "",
           current_step: currentStep,
           total_steps: totalSteps,
+          current_process: currentProcess,
         };
       });
 
@@ -412,7 +462,7 @@ export default function HomePage() {
     if (!response.ok || result.status !== "success") {
       throw new Error(
         result.message ||
-          `โหลดข้อมูลรถ Request ${requestId} คันที่ ${vehicleNo} ไม่สำเร็จ (${response.status})`
+        `โหลดข้อมูลรถ Request ${requestId} คันที่ ${vehicleNo} ไม่สำเร็จ (${response.status})`
       );
     }
 
@@ -559,7 +609,7 @@ export default function HomePage() {
 
       setRequests(list);
 
-      // ใช้ Flow API จากหน้าก่อนหน้า เฉพาะข้อมูลกำลังดำเนินการ
+      // ใช้ Flow API จากหน้าก่อนหน้า เฉพาะข้อมูลดำเนินการตามกระบวนการ (TCAS)
       const processRequests = list.filter((item) => {
         const status = String(item.status || "").trim().toLowerCase();
 
@@ -569,7 +619,7 @@ export default function HomePage() {
           status === "confirm_request" ||
           status === "confirm request" ||
           status === "in_progress" ||
-          status === "กำลังดำเนินการ" ||
+          status === "ดำเนินการตามกระบวนการ (TCAS)" ||
           /^[0-9]$/.test(status);
 
         return isProcessStatus;
@@ -598,6 +648,7 @@ export default function HomePage() {
                 running_doc_vehicle_no: item.running_doc,
                 current_step: 0,
                 total_steps: flowDetail.totalSteps,
+                current_process: "ยังไม่พบข้อมูลขั้นตอนจาก Flow API",
               },
             ];
           }
@@ -614,6 +665,7 @@ export default function HomePage() {
             vehicle_license: vehicle.license,
             current_step: vehicle.current_step,
             total_steps: vehicle.total_steps,
+            current_process: vehicle.current_process,
             qty: 1,
             warehouse_plan_date: null,
             car_model: null,
@@ -857,7 +909,7 @@ export default function HomePage() {
     if (
       value === "center_pending" ||
       value === "pending" ||
-      value === "รอส่วนกลางอนุมัติ" ||
+      value === "กำลังประเมินกองรถ (FBP)" ||
       value === "รออนุมัติ"
     ) {
       return "center_pending";
@@ -869,7 +921,7 @@ export default function HomePage() {
       value === "confirm_request" ||
       value === "confirm request" ||
       value === "in_progress" ||
-      value === "กำลังดำเนินการ" ||
+      value === "ดำเนินการตามกระบวนการ (TCAS)" ||
       value === "0" ||
       value === "1" ||
       value === "2" ||
@@ -929,8 +981,8 @@ export default function HomePage() {
     const value = normalizeStatus(status);
 
     if (value === "gm_pending") return "รอ GM อนุมัติ";
-    if (value === "center_pending") return "รอส่วนกลางอนุมัติ";
-    if (value === "process") return "กำลังดำเนินการ";
+    if (value === "center_pending") return "กำลังประเมินกองรถ (FBP)";
+    if (value === "process") return "ดำเนินการตามกระบวนการ (TCAS)";
 
     if (
       rawValue === "reject_gm" ||
@@ -1214,25 +1266,103 @@ export default function HomePage() {
     });
   }, [groupedFilteredByRequestDate]);
 
+  const getRequestVehicleQty = (
+    item: RequestItem
+  ) => {
+    const status = normalizeStatus(item.status);
+
+    if (status === "process") {
+      const hasApprovedQty =
+        item.approved_qty !== null &&
+        item.approved_qty !== undefined &&
+        item.approved_qty !== "";
+
+      const quantity = hasApprovedQty
+        ? Number(item.approved_qty)
+        : Number(item.qty || 0);
+
+      return Number.isFinite(quantity)
+        ? Math.max(Math.floor(quantity), 0)
+        : 0;
+    }
+
+    const quantity = Number(item.qty || 0);
+
+    return Number.isFinite(quantity)
+      ? Math.max(Math.floor(quantity), 0)
+      : 0;
+  };
+
+  const getVisibleVehicleQty = (
+    item: RequestItem
+  ) => {
+    if (
+      item.vehicle_no !== null &&
+      item.vehicle_no !== undefined &&
+      item.vehicle_no !== ""
+    ) {
+      return 1;
+    }
+
+    return getRequestVehicleQty(item);
+  };
+
   const statusCounts = useMemo(() => {
-    return {
-      all: warehouseFilteredRequests.length,
-
-      gmPending: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "gm_pending"
-      ).length,
-
-      centerPending: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "center_pending"
-      ).length,
-
-      process: warehouseFilteredProcessRows.length,
-
-      rejected: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "rejected"
-      ).length,
+    const result = {
+      gmPending: 0,
+      centerPending: 0,
+      process: 0,
+      rejected: 0,
     };
-  }, [warehouseFilteredRequests, warehouseFilteredProcessRows]);
+
+    warehouseFilteredRequests.forEach((item) => {
+      const status =
+        normalizeStatus(item.status);
+
+      const vehicleQty =
+        getRequestVehicleQty(item);
+
+      if (status === "gm_pending") {
+        result.gmPending += vehicleQty;
+        return;
+      }
+
+      if (status === "center_pending") {
+        result.centerPending += vehicleQty;
+        return;
+      }
+
+      if (status === "process") {
+        result.process += vehicleQty;
+        return;
+      }
+
+      if (status === "rejected") {
+        result.rejected += vehicleQty;
+      }
+    });
+
+    return {
+      all:
+        result.gmPending +
+        result.centerPending +
+        result.process +
+        result.rejected,
+
+      gmPending: result.gmPending,
+      centerPending: result.centerPending,
+      process: result.process,
+      rejected: result.rejected,
+    };
+  }, [warehouseFilteredRequests]);
+
+  const filteredVehicleCount = useMemo(() => {
+    return filteredRequests.reduce(
+      (total, item) =>
+        total + getVisibleVehicleQty(item),
+      0
+    );
+  }, [filteredRequests]);
 
   const selectedDCLabel = useMemo(() => {
     const userWarehouse = String(
@@ -1303,7 +1433,7 @@ export default function HomePage() {
     const textMap: Record<string, string> = {
       gm_pending: "รอการอนุมัติจาก GM",
       center_pending: "รอการอนุมัติจากส่วนกลาง",
-      fbp_pending: "รอส่วนกลางอนุมัติ",
+      fbp_pending: "กำลังประเมินกองรถ (FBP)",
 
       process: "อยู่ระหว่างดำเนินการ",
       in_progress: "อยู่ระหว่างดำเนินการ",
@@ -1343,6 +1473,16 @@ export default function HomePage() {
       .trim();
   };
 
+  const getDateGroupVehicleCount = (
+    items: RequestItem[]
+  ) => {
+    return items.reduce(
+      (total, item) =>
+        total + getVisibleVehicleQty(item),
+      0
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
       <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
@@ -1376,9 +1516,9 @@ export default function HomePage() {
                   : statusFilter === "gm_pending"
                     ? "รอ GM อนุมัติ"
                     : statusFilter === "center_pending"
-                      ? "รอส่วนกลางอนุมัติ"
+                      ? "กำลังประเมินกองรถ (FBP)"
                       : statusFilter === "process"
-                        ? "กำลังดำเนินการ"
+                        ? "ดำเนินการตามกระบวนการ (TCAS)"
                         : "โดนปฏิเสธ"}
               </span>
             </div>
@@ -1390,7 +1530,7 @@ export default function HomePage() {
             className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
           >
             <span className="text-base leading-none">+</span>
-            คำขอออกรถใหม่
+            สร้างคำขอ
           </button>
         </div>
 
@@ -1409,7 +1549,7 @@ export default function HomePage() {
                 key: "all",
                 label: "ทั้งหมด",
                 count: statusCounts.all,
-                sub: "รายการทั้งหมดที่มองเห็น",
+                sub: "จำนวนรถรวมทุกสถานะ",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -1425,7 +1565,7 @@ export default function HomePage() {
                 key: "gm_pending",
                 label: "รอ GM อนุมัติ",
                 count: statusCounts.gmPending,
-                sub: "รายการที่รอ GM พิจารณา",
+                sub: "จำนวนรถที่รอ GM พิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-purple-600 via-violet-600 to-fuchsia-600 text-white ring-purple-300/40",
                 inactiveClass:
@@ -1439,7 +1579,7 @@ export default function HomePage() {
               },
               {
                 key: "center_pending",
-                label: "รอส่วนกลางอนุมัติ",
+                label: "จำนวนรถที่รอ FBP พิจารณา",
                 count: statusCounts.centerPending,
                 sub: "รายการที่รอส่วนกลางพิจารณา",
                 activeClass:
@@ -1455,9 +1595,9 @@ export default function HomePage() {
               },
               {
                 key: "process",
-                label: "กำลังดำเนินการ",
+                label: "กำลังดำเนินการ (TCAS)",
                 count: statusCounts.process,
-                sub: "รายการที่อยู่ระหว่างดำเนินการ",
+                sub: "จำนวนรถที่ได้รับการอนุมัติ",
                 activeClass:
                   "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
                 inactiveClass:
@@ -1473,7 +1613,7 @@ export default function HomePage() {
                 key: "rejected",
                 label: "ไม่อนุมัติ",
                 count: statusCounts.rejected,
-                sub: "รายการที่ไม่ผ่านการพิจารณา",
+                sub: "จำนวนรถที่ไม่ผ่านการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1556,11 +1696,11 @@ export default function HomePage() {
 
                     <span
                       className={`rounded-full px-2.5 py-1 text-[10px] font-black ${isActive
-                        ? "bg-white/15 text-white"
-                        : "bg-white/80 text-slate-400 shadow-sm"
+                          ? "bg-white/15 text-white"
+                          : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      รายการ
+                      คัน
                     </span>
                   </div>
                 </button>
@@ -1589,7 +1729,7 @@ export default function HomePage() {
             </div>
 
             <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
-              พบ {filteredRequests.length} {statusFilter === "process" ? "คัน" : "รายการ"}
+              พบ {formatNumber(filteredVehicleCount)} คัน
             </span>
           </div>
 
@@ -1955,7 +2095,13 @@ export default function HomePage() {
                               )}
 
                               <span className="font-semibold text-slate-400">
-                                · {groupedFilteredByRequestDate[date].length} รายการ
+                                ·{" "}
+                                {formatNumber(
+                                  getDateGroupVehicleCount(
+                                    groupedFilteredByRequestDate[date]
+                                  )
+                                )}{" "}
+                                คัน
                               </span>
                             </div>
                           </td>
@@ -2079,10 +2225,10 @@ export default function HomePage() {
                                   <p className="font-black text-slate-800">
                                     {statusFilter === "process"
                                       ? item.running_doc_vehicle_no ||
-                                        (item.vehicle_no !== undefined &&
+                                      (item.vehicle_no !== undefined &&
                                         item.vehicle_no !== null
-                                          ? `${item.running_doc}_${item.vehicle_no}`
-                                          : item.running_doc || "-")
+                                        ? `${item.running_doc}_${item.vehicle_no}`
+                                        : item.running_doc || "-")
                                       : item.running_doc || "-"}
                                   </p>
                                   <p className="mt-0.5 text-[10px] font-medium text-slate-400">
@@ -2187,19 +2333,26 @@ export default function HomePage() {
 
                                 <td className="whitespace-nowrap px-3 py-3">
                                   {statusFilter === "process" ? (
-                                    <div className="min-w-[175px] rounded-xl border border-blue-100 bg-blue-50 px-2.5 py-2">
+                                    <div className="min-w-[230px] rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5">
                                       {item.vehicle_no !== undefined &&
-                                      item.vehicle_no !== null ? (
+                                        item.vehicle_no !== null ? (
                                         <>
-                                          <div className="flex items-center gap-2">
-                                            <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                                            <p className="text-[10px] font-black text-blue-700">
-                                              รถคันที่ {item.vehicle_no} : {item.current_step ?? 0}/
-                                              {item.total_steps ?? 0}
-                                            </p>
+                                          <div className="flex items-start gap-2">
+                                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+
+                                            <div className="min-w-0">
+                                              <p className="text-[10px] font-black text-blue-700">
+                                                รถคันที่ {item.vehicle_no} ({item.current_step ?? 0}/{item.total_steps ?? 0})
+                                              </p>
+
+                                              <p className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-700">
+                                                ขั้นตอน: {item.current_process || "ยังไม่พบข้อมูลขั้นตอน"}{" "}
+                                              </p>
+                                            </div>
                                           </div>
-                                          <p className="mt-1 max-w-[150px] truncate pl-4 text-[9px] font-semibold text-slate-400">
-                                            {item.vehicle_license || "-"}
+
+                                          <p className="mt-1.5 break-words border-t border-blue-100 pt-1.5 text-[9px] font-semibold text-slate-400">
+                                            ทะเบียน: {item.vehicle_license || "-"}
                                           </p>
                                         </>
                                       ) : (
@@ -2221,155 +2374,182 @@ export default function HomePage() {
                                   )}
                                 </td>
 
-                                <td className="px-3 py-3 text-right">
+                                <td className="whitespace-nowrap px-3 py-3 text-right">
                                   <button
                                     type="button"
                                     onClick={() =>
                                       void handleToggleRow(item, rowKey, isOpen)
                                     }
                                     className={`rounded-xl px-3 py-1.5 text-[11px] font-black shadow-sm transition hover:-translate-y-0.5 active:translate-y-0 ${isOpen
-                                      ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-600/20"
-                                      : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600"
+                                      ? "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                                      : "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                       }`}
                                   >
-                                    {isOpen ? "ซ่อน" : "ดู"}
+                                    {isOpen ? (
+                                      <>
+                                        <PencilLine size={14} />
+                                        ซ่อน
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Eye size={14} />
+                                        ดูรายละเอียด
+                                      </>
+                                    )}
                                   </button>
                                 </td>
                               </tr>
 
                               {isOpen && (
-                                <tr className="bg-slate-50">
-                                  <td colSpan={statusFilter === "process" ? 10 : 11} className="px-4 py-3">
-                                    <div className="grid gap-2 rounded-2xl border border-slate-100 bg-white p-3 text-[11px] shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:grid-cols-2 lg:grid-cols-4">
-                                      {isProcessStatus && (
-                                        <div className="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-indigo-50 sm:col-span-2 lg:col-span-4">
-                                          <div className="flex flex-col gap-2 border-b border-blue-100 bg-blue-700 px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
-                                            <div>
-                                              <p className="text-xs font-black">
-                                                สรุปผลการอนุมัติรถ
-                                              </p>
-                                              <p className="mt-0.5 text-[10px] font-medium text-white/70">
-                                                แสดงเฉพาะรายการที่อยู่ระหว่างดำเนินการ
-                                              </p>
-                                            </div>
+                                <tr className="bg-slate-50/70">
+                                  <td
+                                    colSpan={statusFilter === "process" ? 10 : 11}
+                                    className="px-3 py-2"
+                                  >
+                                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                      {/* Header: แสดงข้อมูลสำคัญก่อน ไม่ใช้หัวข้อใหญ่ซ้ำหลายชั้น */}
+                                      <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-xs font-black text-slate-800">
+                                              {isProcessStatus
+                                                ? `รถคันที่ ${item.vehicle_no ?? "-"}`
+                                                : "รายละเอียดคำขอ"}
+                                            </p>
 
-                                            <span className="inline-flex w-fit items-center rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-black text-white">
-                                              กำลังดำเนินการ
-                                            </span>
+                                            {isProcessStatus && (
+                                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
+                                                ขั้นตอน: {item.current_process || "ยังไม่เริ่ม"} ({item.current_step ?? 0}/
+                                                {item.total_steps ?? 0})
+                                              </span>
+                                            )}
                                           </div>
 
-                                          <div className="grid gap-3 p-4 sm:grid-cols-3">
-                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center shadow-sm">
-                                              <p className="text-[10px] font-bold text-slate-400">
-                                                จำนวนที่ขอ
-                                              </p>
-                                              <p className="mt-1 text-2xl font-black text-slate-800">
-                                                {formatNumber(totalQty)}
-                                              </p>
-                                              <p className="text-[10px] font-bold text-slate-400">
-                                                คัน
-                                              </p>
-                                            </div>
-
-                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-center shadow-sm">
-                                              <p className="text-[10px] font-bold text-emerald-600">
-                                                จำนวนที่อนุมัติ
-                                              </p>
-                                              <p className="mt-1 text-2xl font-black text-emerald-700">
-                                                {formatNumber(approvedQty)}
-                                              </p>
-                                              <p className="text-[10px] font-bold text-emerald-500">
-                                                คัน
-                                              </p>
-                                            </div>
-
-                                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-center shadow-sm">
-                                              <p className="text-[10px] font-bold text-amber-600">
-                                                จำนวนที่ยังไม่อนุมัติ
-                                              </p>
-                                              <p className="mt-1 text-2xl font-black text-amber-700">
-                                                {formatNumber(rejectedQty)}
-                                              </p>
-                                              <p className="text-[10px] font-bold text-amber-500">
-                                                คัน
-                                              </p>
-                                            </div>
-                                          </div>
-
-                                          <div className="grid gap-3 border-t border-blue-100 bg-white/70 p-4 sm:grid-cols-2">
-                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                                              <p className="text-[10px] font-bold text-slate-400">
-                                                ซัพพลายเออร์ที่ได้รับอนุมัติ
-                                              </p>
-                                              <p className="mt-1 text-sm font-black text-slate-800">
-                                                {item.approved_company_name || "-"}
-                                              </p>
-                                            </div>
-
-                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                                              <p className="text-[10px] font-bold text-slate-400">
-                                                อนุมัติโดย
-                                              </p>
-                                              <p className="mt-1 text-sm font-black text-blue-700">
-                                                {formatApprovedBy(item.approved_by)}
-                                              </p>
-                                            </div>
-                                          </div>
+                                          <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
+                                            {isProcessStatus
+                                              ? `ทะเบียน ${item.car_license || item.vehicle_license || "-"}`
+                                              : item.running_doc || "-"}
+                                          </p>
                                         </div>
-                                      )}
 
-                                      <div className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-                                        <p className="font-bold text-slate-400">
-                                          Workload
-                                        </p>
-                                        <p className="mt-1 text-sm font-black text-slate-700">
-                                          {formatNumber(item.workload)}
-                                        </p>
+                                        <span
+                                          className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[10px] font-black ${isProcessStatus
+                                            ? "bg-blue-600 text-white"
+                                            : "bg-slate-200 text-slate-600"
+                                            }`}
+                                        >
+                                          {isProcessStatus ? "ดำเนินการตามกระบวนการ (TCAS)" : formatStatusText(item.status)}
+                                        </span>
                                       </div>
 
-                                      <div className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-                                        <p className="font-bold text-slate-400">
-                                          Truck Turn
-                                        </p>
-                                        <p className="mt-1 text-sm font-black text-slate-700">
-                                          {formatNumber(item.truckturn)}
-                                        </p>
-                                      </div>
-
-                                      <div className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100 sm:col-span-2">
-                                        <p className="font-bold text-slate-400">
-                                          หมายเหตุ
-                                        </p>
-                                        <p className="mt-1 font-medium text-slate-600">
-                                          {item.remark || "-"}
-                                        </p>
-                                      </div>
-
-                                      {isProcessStatus ? (
-                                        <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white sm:col-span-2 lg:col-span-4">
-                                          <div className="flex flex-col gap-2 border-b border-blue-100 bg-gradient-to-r from-blue-700 to-indigo-700 px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
-                                            <div>
-                                              <p className="text-xs font-black">
-                                                ข้อมูลรถที่จะเข้าคลัง
-                                              </p>
-                                              <p className="mt-0.5 text-[10px] font-medium text-white/70">
-                                                ข้อมูลจาก vehicle_warehouse_info.php ของรถแต่ละคัน
-                                              </p>
-                                            </div>
-
-                                            <span className="inline-flex w-fit items-center rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-black text-white">
-                                              รถคันที่ {item.vehicle_no ?? "-"}
+                                      {/* เนื้อหาหลัก: 2 คอลัมน์ ลดความสูงและลดการ์ดซ้อน */}
+                                      <div
+                                        className={`grid ${isProcessStatus ? "lg:grid-cols-[0.9fr_1.1fr]" : "lg:grid-cols-1"
+                                          }`}
+                                      >
+                                        {/* ซ้าย: สรุปคำขอ */}
+                                        <section className="min-w-0 p-4 lg:border-r lg:border-slate-200">
+                                          <div className="mb-3 flex items-center justify-between">
+                                            <h4 className="text-[11px] font-black text-slate-700">
+                                              สรุปคำขอ
+                                            </h4>
+                                            <span className="text-[10px] font-semibold text-slate-400">
+                                              {item.fleet_truck_type || "-"}
                                             </span>
                                           </div>
 
-                                          <div className="bg-gradient-to-br from-blue-50/70 via-white to-indigo-50/50 p-4">
+                                          {/* จำนวน: เปลี่ยนจากการ์ดสูง 3 ใบ เป็นแถบสรุปบรรทัดเดียว */}
+                                          {/* {isProcessStatus && (
+                                            <div className="mb-4 grid grid-cols-3 overflow-hidden rounded-lg border border-slate-200">
+                                              <div className="bg-slate-50 px-2 py-2 text-center">
+                                                <p className="text-[9px] font-bold text-slate-400">ขอ</p>
+                                                <p className="mt-0.5 text-base font-black text-slate-800">
+                                                  {formatNumber(totalQty)}
+                                                </p>
+                                              </div>
+
+                                              <div className="border-x border-slate-200 bg-emerald-50 px-2 py-2 text-center">
+                                                <p className="text-[9px] font-bold text-emerald-600">อนุมัติ</p>
+                                                <p className="mt-0.5 text-base font-black text-emerald-700">
+                                                  {formatNumber(approvedQty)}
+                                                </p>
+                                              </div>
+
+                                              <div className="bg-amber-50 px-2 py-2 text-center">
+                                                <p className="text-[9px] font-bold text-amber-600">คงเหลือ</p>
+                                                <p className="mt-0.5 text-base font-black text-amber-700">
+                                                  {formatNumber(rejectedQty)}
+                                                </p>
+                                              </div>
+                                            </div>
+                                          )} */}
+
+                                          {/* ข้อมูลทั่วไปแบบ label/value ไม่ต้องทำเป็นการ์ดแยกทุกช่อง */}
+                                          <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                                            {isProcessStatus && (
+                                              <>
+                                                <div className="min-w-0">
+                                                  <dt className="text-[9px] font-bold text-slate-400">
+                                                    ผู้ประกอบการขนส่งที่อนุมัติ
+                                                  </dt>
+                                                  <dd className="mt-0.5 break-words text-[11px] font-black text-slate-700">
+                                                    {item.approved_company_name || "-"}
+                                                  </dd>
+                                                </div>
+
+                                                <div className="min-w-0">
+                                                  <dt className="text-[9px] font-bold text-slate-400">
+                                                    อนุมัติโดย
+                                                  </dt>
+                                                  <dd className="mt-0.5 break-words text-[11px] font-black text-blue-700">
+                                                    {formatApprovedBy(item.approved_by)}
+                                                  </dd>
+                                                </div>
+                                              </>
+                                            )}
+
+                                            <div>
+                                              <dt className="text-[9px] font-bold text-slate-400">Workload</dt>
+                                              <dd className="mt-0.5 text-[11px] font-black text-slate-700">
+                                                {formatNumber(item.workload)}
+                                              </dd>
+                                            </div>
+
+                                            <div>
+                                              <dt className="text-[9px] font-bold text-slate-400">Truck Turn</dt>
+                                              <dd className="mt-0.5 text-[11px] font-black text-slate-700">
+                                                {formatNumber(item.truckturn)}
+                                              </dd>
+                                            </div>
+                                          </dl>
+
+                                          <div className="mt-4 border-t border-slate-100 pt-3">
+                                            <p className="text-[9px] font-bold text-slate-400">หมายเหตุ</p>
+                                            <p className="mt-1 whitespace-pre-wrap break-words text-[11px] font-medium leading-5 text-slate-600">
+                                              {item.remark || "-"}
+                                            </p>
+                                          </div>
+                                        </section>
+
+                                        {/* ขวา: ข้อมูลรถ */}
+                                        {isProcessStatus ? (
+                                          <section className="min-w-0 border-t border-slate-200 p-4 lg:border-t-0">
+                                            <div className="mb-3 flex items-center justify-between">
+                                              <h4 className="text-[11px] font-black text-slate-700">
+                                                ข้อมูลรถที่จะเข้าคลัง
+                                              </h4>
+                                              <span className="text-[10px] font-semibold text-slate-400">
+                                                อัปเดตล่าสุดจากคลัง
+                                              </span>
+                                            </div>
+
                                             {warehouseInfoLoading[rowKey] ? (
-                                              <div className="flex min-h-[120px] items-center justify-center rounded-xl border border-blue-100 bg-white text-xs font-black text-blue-600">
+                                              <div className="flex min-h-[96px] items-center justify-center rounded-lg border border-dashed border-blue-200 bg-blue-50/50 text-[11px] font-black text-blue-600">
                                                 กำลังโหลดข้อมูลรถคันที่ {item.vehicle_no}...
                                               </div>
                                             ) : warehouseInfoErrors[rowKey] ? (
-                                              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-                                                <p className="text-xs font-black text-rose-700">
+                                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3">
+                                                <p className="text-[11px] font-black text-rose-700">
                                                   โหลดข้อมูลรถไม่สำเร็จ
                                                 </p>
                                                 <p className="mt-1 break-words text-[10px] font-semibold text-rose-600">
@@ -2377,148 +2557,101 @@ export default function HomePage() {
                                                 </p>
                                                 <button
                                                   type="button"
-                                                  onClick={() =>
-                                                    void loadVehicleWarehouseInfo(item, rowKey)
-                                                  }
-                                                  className="mt-3 rounded-lg bg-rose-600 px-3 py-1.5 text-[10px] font-black text-white transition hover:bg-rose-700"
+                                                  onClick={() => void loadVehicleWarehouseInfo(item, rowKey)}
+                                                  className="mt-2 rounded-md bg-rose-600 px-2.5 py-1.5 text-[10px] font-black text-white transition hover:bg-rose-700"
                                                 >
                                                   โหลดใหม่
                                                 </button>
                                               </div>
                                             ) : (
-                                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                              <dl className="grid border-t border-l border-slate-200 sm:grid-cols-2">
                                                 {warehouseInfoFields.map((field) => (
                                                   <div
                                                     key={`${rowKey}-${field.key}`}
-                                                    className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm"
+                                                    className="min-w-0 border-r border-b border-slate-200 px-3 py-2.5"
                                                   >
-                                                    <p className="text-[10px] font-bold text-slate-400">
+                                                    <dt className="text-[9px] font-bold text-slate-400">
                                                       {field.label}
-                                                    </p>
-                                                    <p
-                                                      className={`mt-1 break-words text-sm font-black ${
-                                                        field.key === "warehouse_plan_date"
-                                                          ? "text-blue-700"
-                                                          : field.key === "car_license"
-                                                            ? "text-emerald-700"
-                                                            : "text-slate-800"
-                                                      }`}
+                                                    </dt>
+                                                    <dd
+                                                      className={`mt-0.5 break-words text-[11px] font-black ${field.key === "warehouse_plan_date"
+                                                        ? "text-blue-700"
+                                                        : field.key === "car_license"
+                                                          ? "text-emerald-700"
+                                                          : "text-slate-700"
+                                                        }`}
                                                     >
                                                       {field.value}
-                                                    </p>
+                                                    </dd>
                                                   </div>
                                                 ))}
-                                              </div>
+                                              </dl>
                                             )}
-                                          </div>
-                                        </div>
-                                      ) : showReplacementTruckDetails ? (
-                                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white sm:col-span-2 lg:col-span-4">
-                                        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
-                                          <div>
-                                            <p className="text-xs font-black text-slate-700">
-                                              รายละเอียดรถทดแทน
-                                            </p>
+                                          </section>
+                                        ) : showReplacementTruckDetails && replacementTruckRows.length > 0 ? (
+                                          <section className="border-t border-slate-200">
+                                            <div className="flex items-center justify-between px-4 py-2.5">
+                                              <div>
+                                                <h4 className="text-[11px] font-black text-slate-700">
+                                                  รายละเอียดรถทดแทน
+                                                </h4>
+                                                <p className="mt-0.5 text-[9px] font-medium text-slate-400">
+                                                  ทะเบียน จังหวัด ประเภทรถ และผู้ประกอบการขนส่งเดิม
+                                                </p>
+                                              </div>
 
-                                            <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-                                              ทะเบียน จังหวัด ประเภทรถ และซัพพลายเออร์เดิม
-                                            </p>
-                                          </div>
+                                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
+                                                {replacementTruckRows.length} คัน
+                                              </span>
+                                            </div>
 
-                                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
-                                            {replacementTruckRows.length} คัน
-                                          </span>
-                                        </div>
-
-                                        <div className="max-h-[260px] overflow-auto">
-                                          <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-[11px]">
-                                            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
-                                              <tr>
-                                                <th className="w-[60px] border-b border-slate-200 px-3 py-2.5 text-center font-black">
-                                                  ลำดับ
-                                                </th>
-
-                                                <th className="border-b border-slate-200 px-3 py-2.5 font-black">
-                                                  ทะเบียนรถ
-                                                </th>
-
-                                                <th className="border-b border-slate-200 px-3 py-2.5 font-black">
-                                                  จังหวัด
-                                                </th>
-
-                                                <th className="border-b border-slate-200 px-3 py-2.5 font-black">
-                                                  ประเภทรถเดิม
-                                                </th>
-
-                                                <th className="border-b border-slate-200 px-3 py-2.5 font-black">
-                                                  ซัพพลายเออร์เดิม
-                                                </th>
-                                              </tr>
-                                            </thead>
-
-                                            <tbody>
-                                              {replacementTruckRows.length === 0 ? (
-                                                <tr>
-                                                  <td
-                                                    colSpan={5}
-                                                    className="px-4 py-8 text-center font-semibold text-slate-400"
-                                                  >
-                                                    ไม่พบข้อมูลรถทดแทน
-                                                  </td>
-                                                </tr>
-                                              ) : (
-                                                replacementTruckRows.map((truck, truckIndex) => (
-                                                  <tr
-                                                    key={
-                                                      truck.id ||
-                                                      `${rowKey}-${truck.license}-${truckIndex}`
-                                                    }
-                                                    className="bg-white transition hover:bg-blue-50/40"
-                                                  >
-                                                    <td className="border-b border-slate-100 px-3 py-3 text-center">
-                                                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-black text-slate-600">
-                                                        {truckIndex + 1}
-                                                      </span>
-                                                    </td>
-
-                                                    <td className="border-b border-slate-100 px-3 py-3">
-                                                      <span className="inline-flex rounded-lg bg-blue-50 px-2.5 py-1 font-black text-blue-700 ring-1 ring-blue-100">
-                                                        {truck.license || "-"}
-                                                      </span>
-                                                    </td>
-
-                                                    <td className="border-b border-slate-100 px-3 py-3 font-bold text-slate-700">
-                                                      {truck.province || "-"}
-                                                    </td>
-
-                                                    <td className="border-b border-slate-100 px-3 py-3">
-                                                      <span className="inline-flex rounded-lg bg-violet-50 px-2.5 py-1 font-black text-violet-700 ring-1 ring-violet-100">
-                                                        {truck.truck_type || "-"}
-                                                      </span>
-                                                    </td>
-
-                                                    <td className="border-b border-slate-100 px-3 py-3">
-                                                      {truck.company_id || truck.company_name ? (
-                                                        <div>
-                                                          <p className="font-black text-slate-700">
-                                                            [{truck.company_id || "-"}] {truck.company_name || "-"}
-                                                          </p>
-
-                                                        </div>
-                                                      ) : (
-                                                        <span className="text-slate-400">-</span>
-                                                      )}
-                                                    </td>
+                                            <div className="max-h-[220px] overflow-auto border-t border-slate-200">
+                                              <table className="w-full min-w-[680px] text-left text-[10px]">
+                                                <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
+                                                  <tr>
+                                                    <th className="w-[54px] px-3 py-2 text-center font-black">#</th>
+                                                    <th className="px-3 py-2 font-black">ทะเบียนรถ</th>
+                                                    <th className="px-3 py-2 font-black">จังหวัด</th>
+                                                    <th className="px-3 py-2 font-black">ประเภทรถเดิม</th>
+                                                    <th className="px-3 py-2 font-black">ผู้ประกอบการขนส่งเดิม</th>
                                                   </tr>
-                                                ))
-                                              )}
-                                            </tbody>
-                                          </table>
-                                        </div>
+                                                </thead>
+
+                                                <tbody>
+                                                  {replacementTruckRows.map((truck, truckIndex) => (
+                                                    <tr
+                                                      key={truck.id || `${rowKey}-${truck.license}-${truckIndex}`}
+                                                      className="border-t border-slate-100 hover:bg-blue-50/40"
+                                                    >
+                                                      <td className="px-3 py-2 text-center font-black text-slate-400">
+                                                        {truckIndex + 1}
+                                                      </td>
+
+                                                      <td className="px-3 py-2 font-black text-blue-700">
+                                                        {truck.license || "-"}
+                                                      </td>
+
+                                                      <td className="px-3 py-2 font-bold text-slate-600">
+                                                        {truck.province || "-"}
+                                                      </td>
+
+                                                      <td className="px-3 py-2 font-bold text-slate-600">
+                                                        {truck.truck_type || "-"}
+                                                      </td>
+
+                                                      <td className="px-3 py-2 font-bold text-slate-700">
+                                                        {truck.company_id || truck.company_name
+                                                          ? `[${truck.company_id || "-"}] ${truck.company_name || "-"}`
+                                                          : "-"}
+                                                      </td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          </section>
+                                        ) : null}
                                       </div>
-                                      ) : null}
-
-
                                     </div>
                                   </td>
                                 </tr>

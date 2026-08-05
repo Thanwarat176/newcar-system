@@ -36,7 +36,25 @@ interface RequestItem {
     request_by: string;
     remark: string;
 
+    approved_qty?: number | string | null;
+    approved_suppliers?: ApprovedSupplierApiItem[] | string | null;
+    approved_truck_type?: string | null;
+
+    status_details?: string | null;
+    reject_reason?: string | null;
+
     details?: RequestDetailItem[];
+}
+
+interface ApprovedSupplierApiItem {
+    company_id?: string | number | null;
+    company_name?: string | null;
+    truck_type?: string | null;
+    qty?: number | string | null;
+
+    Company_ID?: string | number | null;
+    Company_Name?: string | null;
+    TRUCK_TYPE?: string | null;
 }
 
 interface SupplierItem {
@@ -47,11 +65,16 @@ interface SupplierItem {
 
 interface TruckItem {
     id?: string | number;
-    truck_type?: string;
+
+    DC_CODE?: string;
+    dc_code?: string;
+
     TRUCK_TYPE?: string;
+    truck_type?: string;
     truckType?: string;
     name?: string;
     Name?: string;
+
     [key: string]: any;
 }
 
@@ -132,7 +155,9 @@ interface FleetCheckStats {
     fleet_backhaul: number;
 }
 
-type GmDecision = "gm_rejected";
+type FbpDecision =
+    | "approve"
+    | "reject_by_fbp";
 
 export default function GMModalDetail({
     open,
@@ -143,6 +168,7 @@ export default function GMModalDetail({
 }: GMModalDetailProps) {
     const [remark, setRemark] = useState("");
     const [saving, setSaving] = useState(false);
+    const [decisionCompleted, setDecisionCompleted] = useState(false);
     const [message, setMessage] = useState<{
         type: "success" | "error";
         text: string;
@@ -176,7 +202,7 @@ export default function GMModalDetail({
     const [selectedFleetCheckDc, setSelectedFleetCheckDc] = useState("");
 
     const [confirmDecision, setConfirmDecision] =
-        useState<GmDecision | null>(null);
+        useState<FbpDecision | null>(null);
     const [activeTab, setActiveTab] = useState<
         "summary" | "fleet" | "issue" | "workload"
     >("summary");
@@ -435,19 +461,72 @@ export default function GMModalDetail({
         setRemark("");
         setMessage(null);
         setConfirmDecision(null);
-        setApprovedSuppliers([
-            {
-                rowId:
-                    typeof crypto !== "undefined" &&
-                        typeof crypto.randomUUID === "function"
-                        ? crypto.randomUUID()
-                        : `${Date.now()}-${Math.random()}`,
-                companyId: "",
-                companyName: "",
-                truckType: data.fleet_truck_type || "",
-                qty: initialQty > 0 ? initialQty : 1,
-            },
-        ]);
+        setDecisionCompleted(false);
+        const savedSupplierRows =
+            parseApprovedSuppliers(
+                data.approved_suppliers
+            );
+
+        if (savedSupplierRows.length > 0) {
+            setApprovedSuppliers(
+                savedSupplierRows.map(
+                    (supplier, index) => ({
+                        rowId:
+                            typeof crypto !==
+                                "undefined" &&
+                                typeof crypto.randomUUID ===
+                                "function"
+                                ? crypto.randomUUID()
+                                : `${Date.now()}-${index}`,
+
+                        companyId: String(
+                            supplier.company_id ??
+                            supplier.Company_ID ??
+                            ""
+                        ).trim(),
+
+                        companyName: String(
+                            supplier.company_name ??
+                            supplier.Company_Name ??
+                            ""
+                        ).trim(),
+
+                        truckType: String(
+                            supplier.truck_type ??
+                            supplier.TRUCK_TYPE ??
+                            data.approved_truck_type ??
+                            data.fleet_truck_type ??
+                            ""
+                        ).trim(),
+
+                        qty: Number(
+                            supplier.qty || 0
+                        ),
+                    })
+                )
+            );
+        } else {
+            setApprovedSuppliers([
+                {
+                    rowId:
+                        typeof crypto !==
+                            "undefined" &&
+                            typeof crypto.randomUUID ===
+                            "function"
+                            ? crypto.randomUUID()
+                            : `${Date.now()}-${Math.random()}`,
+
+                    companyId: "",
+                    companyName: "",
+                    truckType:
+                        data.fleet_truck_type || "",
+                    qty:
+                        initialQty > 0
+                            ? initialQty
+                            : 1,
+                },
+            ]);
+        }
     }, [open, data.id, data.qty, data.fleet_truck_type]);
 
     useEffect(() => {
@@ -1027,44 +1106,42 @@ export default function GMModalDetail({
     useEffect(() => {
         if (!open) return;
 
+        const dcCode = String(data.dc_code || "").trim();
+
+        if (!dcCode) {
+            setTrucks([]);
+            setTruckError("ไม่พบรหัส DC");
+            return;
+        }
+
+        const controller = new AbortController();
+
         const fetchTrucks = async () => {
             try {
                 setLoadingTrucks(true);
                 setTruckError("");
+                setTrucks([]);
 
-                const response = await fetch(
-                    "http://192.168.158.210/api_new_truck/api/trucks.php",
-                    {
-                        method: "GET",
-                        headers: {
-                            Accept: "application/json",
-                        },
-                        cache: "no-store",
-                    }
-                );
+                const url =
+                    "http://192.168.158.210/api_new_truck/api/trucks.php" +
+                    `?DC_CODE=${encodeURIComponent(dcCode)}`;
 
-                const responseText = await response.text();
+                const res = await fetch(url, {
+                    method: "GET",
+                    headers: {
+                        Accept: "application/json",
+                    },
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
 
-                let result: any = null;
-
-                try {
-                    result = responseText
-                        ? JSON.parse(responseText)
-                        : null;
-                } catch {
-                    throw new Error(
-                        `Truck API ไม่ได้ส่ง JSON กลับมา: ${responseText}`
-                    );
+                if (!res.ok) {
+                    throw new Error(`โหลดข้อมูลรถไม่สำเร็จ (${res.status})`);
                 }
 
-                if (!response.ok) {
-                    throw new Error(
-                        result?.message ||
-                        `โหลดข้อมูลรถไม่สำเร็จ HTTP ${response.status}`
-                    );
-                }
+                const result = await res.json();
 
-                const list = Array.isArray(result)
+                const list: TruckItem[] = Array.isArray(result)
                     ? result
                     : Array.isArray(result?.data)
                         ? result.data
@@ -1072,23 +1149,111 @@ export default function GMModalDetail({
                             ? result.result
                             : [];
 
-                setTrucks(list);
-            } catch (error: any) {
-                console.error("FETCH TRUCKS ERROR:", error);
+                const normalizedDcCode = normalizeText(dcCode);
 
+                /*
+                 * กรองเฉพาะข้อมูลของ DC ปัจจุบัน
+                 * หาก API กรองให้แล้วและไม่ได้ส่ง DC_CODE กลับมา
+                 * จะยังเก็บรายการนั้นไว้
+                 */
+                const matchedRows = list.filter((item) => {
+                    const itemDcCode = String(
+                        getValueIgnoreCase(item, "DC_CODE") ||
+                        getValueIgnoreCase(item, "dc_code") ||
+                        "",
+                    ).trim();
+
+                    return (
+                        !itemDcCode ||
+                        normalizeText(itemDcCode) === normalizedDcCode
+                    );
+                });
+
+                /*
+                 * ตัด TRUCK_TYPE ที่ซ้ำกัน
+                 * เช่น 6W, 6w และ " 6W " จะถือว่าเป็นค่าเดียวกัน
+                 */
+                const uniqueTruckTypeMap = new Map<string, TruckItem>();
+
+                matchedRows.forEach((item) => {
+                    const truckType = String(
+                        getValueIgnoreCase(item, "TRUCK_TYPE") ||
+                        getValueIgnoreCase(item, "truck_type") ||
+                        getValueIgnoreCase(item, "truckType") ||
+                        getValueIgnoreCase(item, "name") ||
+                        getValueIgnoreCase(item, "Name") ||
+                        "",
+                    ).trim();
+
+                    const truckTypeKey = normalizeText(truckType);
+
+                    if (truckType && !uniqueTruckTypeMap.has(truckTypeKey)) {
+                        uniqueTruckTypeMap.set(truckTypeKey, {
+                            ...item,
+                            truck_type: truckType,
+                        });
+                    }
+                });
+
+                const uniqueRows = Array.from(uniqueTruckTypeMap.values());
+
+                setTrucks(uniqueRows);
+
+                // ล้างประเภทรถเดิม หากไม่มีอยู่ในตัวเลือกของ DC นี้
+                setApprovedSuppliers((current) =>
+                    current.map((row) => {
+                        const typeExists = uniqueRows.some(
+                            (truck) =>
+                                normalizeText(
+                                    String(
+                                        getValueIgnoreCase(truck, "TRUCK_TYPE") ||
+                                        getValueIgnoreCase(truck, "truck_type") ||
+                                        "",
+                                    ),
+                                ) === normalizeText(row.truckType),
+                        );
+
+                        return typeExists
+                            ? row
+                            : {
+                                ...row,
+                                truckType: "",
+                            };
+                    }),
+                );
+
+                console.log("TRUCK DC_CODE:", dcCode);
+                console.log("TRUCK ROWS:", matchedRows);
+                console.log("UNIQUE TRUCK TYPES:", uniqueRows);
+            } catch (error: unknown) {
+                if (
+                    error instanceof DOMException &&
+                    error.name === "AbortError"
+                ) {
+                    return;
+                }
+
+                console.error("FETCH TRUCKS ERROR:", error);
                 setTrucks([]);
 
                 setTruckError(
-                    error?.message ||
-                    "เกิดข้อผิดพลาดในการโหลดข้อมูล Truck Type"
+                    error instanceof Error
+                        ? error.message
+                        : "เกิดข้อผิดพลาดในการโหลดประเภทรถ",
                 );
             } finally {
-                setLoadingTrucks(false);
+                if (!controller.signal.aborted) {
+                    setLoadingTrucks(false);
+                }
             }
         };
 
         void fetchTrucks();
-    }, [open]);
+
+        return () => {
+            controller.abort();
+        };
+    }, [open, data.dc_code]);
 
     const getTruckTypeValue = (item: TruckItem) => {
         return String(
@@ -1102,31 +1267,32 @@ export default function GMModalDetail({
     };
 
     const truckTypeOptions = useMemo(() => {
-        const values = new Set<string>();
+        const uniqueTypes = new Map<string, string>();
 
         trucks.forEach((item) => {
-            const truckType = getTruckTypeValue(item);
+            const truckType = String(
+                getValueIgnoreCase(item, "TRUCK_TYPE") ||
+                getValueIgnoreCase(item, "truck_type") ||
+                getValueIgnoreCase(item, "truckType") ||
+                getValueIgnoreCase(item, "name") ||
+                getValueIgnoreCase(item, "Name") ||
+                "",
+            ).trim();
 
-            if (truckType) {
-                values.add(truckType);
+            const key = normalizeText(truckType);
+
+            if (truckType && !uniqueTypes.has(key)) {
+                uniqueTypes.set(key, truckType);
             }
         });
 
-        const requestedTruckType = String(
-            data.fleet_truck_type || ""
-        ).trim();
-
-        if (requestedTruckType) {
-            values.add(requestedTruckType);
-        }
-
-        return Array.from(values).sort((a, b) =>
+        return Array.from(uniqueTypes.values()).sort((a, b) =>
             a.localeCompare(b, "en", {
                 numeric: true,
                 sensitivity: "base",
-            })
+            }),
         );
-    }, [trucks, data.fleet_truck_type]);
+    }, [trucks]);
 
     const issueTruckTypeSummary = useMemo(() => {
         const map = new Map<
@@ -1386,31 +1552,68 @@ export default function GMModalDetail({
         rowId: string,
         companyName: string
     ) => {
+        const normalizedCompanyName =
+            normalizeText(companyName);
+    
         const selectedSupplier = suppliers.find(
-            (item) =>
-                getSupplierCompanyName(item) ===
-                companyName
+            (supplier) =>
+                normalizeText(
+                    getSupplierCompanyName(supplier)
+                ) === normalizedCompanyName
         );
-
+    
         setApprovedSuppliers((current) =>
             current.map((item) => {
                 if (item.rowId !== rowId) {
                     return item;
                 }
-
+    
                 return {
                     ...item,
                     companyName,
                     companyId: selectedSupplier
                         ? getSupplierCompanyId(
-                            selectedSupplier
-                        )
+                              selectedSupplier
+                          )
                         : "",
                 };
             })
         );
-
+    
         setMessage(null);
+    };
+
+    const parseApprovedSuppliers = (
+        value: RequestItem["approved_suppliers"]
+    ): ApprovedSupplierApiItem[] => {
+        if (Array.isArray(value)) {
+            return value;
+        }
+
+        if (typeof value !== "string") {
+            return [];
+        }
+
+        const text = value.trim();
+
+        if (!text) {
+            return [];
+        }
+
+        try {
+            const parsed = JSON.parse(text);
+
+            return Array.isArray(parsed)
+                ? parsed
+                : [];
+        } catch {
+            console.error(
+                "approved_suppliers ไม่ใช่ JSON ที่ถูกต้อง:",
+                value
+            );
+
+            return [];
+        }
     };
 
     const totalApprovedQty = useMemo(() => {
@@ -1421,12 +1624,33 @@ export default function GMModalDetail({
         );
     }, [approvedSuppliers]);
 
-    const remainingQty = useMemo(() => {
-        return Math.max(
-            requestedQty - totalApprovedQty,
-            0
+    const savedApprovedSuppliers = useMemo(() => {
+        return parseApprovedSuppliers(
+            data.approved_suppliers
         );
-    }, [requestedQty, totalApprovedQty]);
+    }, [data.approved_suppliers]);
+
+    const approvedQtyFromApi = Math.max(
+        Number(data.approved_qty ?? 0),
+        0
+    );
+
+    const notApprovedQtyFromApi = Math.max(
+        requestedQty - approvedQtyFromApi,
+        0
+    );
+
+    const draftApprovedQty = totalApprovedQty;
+
+    const draftNotApprovedQty = Math.max(
+        requestedQty - draftApprovedQty,
+        0
+    );
+
+    if (!open) return null;
+
+    const isFbpPending =
+        normalizeStatus(data.status) === "fbp_pending";
 
     const isSupplierRowsValid = useMemo(() => {
         if (approvedSuppliers.length === 0) {
@@ -1442,56 +1666,43 @@ export default function GMModalDetail({
     }, [approvedSuppliers]);
 
     const approveRequest = async () => {
+        if (!canMakeDecision) {
+            setMessage({
+                type: "error",
+                text: "รายการนี้ดำเนินการแล้ว ไม่สามารถบันทึกซ้ำได้",
+            });
+            return;
+        }
+
         if (!data.id) {
             setMessage({
                 type: "error",
-                text: "ไม่พบ ID ของรายการนี้ ไม่สามารถอัปเดตได้",
+                text: "ไม่พบ ID ของรายการนี้",
             });
-
             return;
         }
 
-        if (approvedSuppliers.length === 0) {
+        if (!isSupplierRowsValid) {
             setMessage({
                 type: "error",
-                text: "กรุณาเพิ่มซัพพลายเออร์อย่างน้อย 1 รายการ",
+                text: "กรุณาเลือกผู้ให้บริการ ประเภทรถ และจำนวนให้ครบ",
             });
-
-            return;
-        }
-
-        const invalidSupplier =
-            approvedSuppliers.find(
-                (item) =>
-                    !item.companyName.trim() ||
-                    !item.truckType.trim() ||
-                    Number(item.qty || 0) <= 0
-            );
-
-        if (invalidSupplier) {
-            setMessage({
-                type: "error",
-                text: "กรุณาเลือกซัพพลายเออร์ ประเภทรถ และจำนวนคันให้ครบทุกแถว",
-            });
-
             return;
         }
 
         if (totalApprovedQty <= 0) {
             setMessage({
                 type: "error",
-                text: "จำนวนรถที่อนุมัติต้องมากกว่า 0",
+                text: "จำนวนรถต้องมากกว่า 0",
             });
-
             return;
         }
 
         if (totalApprovedQty > requestedQty) {
             setMessage({
                 type: "error",
-                text: `จำนวนรถที่อนุมัติรวมต้องไม่เกินจำนวนที่ขอ ${requestedQty} คัน`,
+                text: `จำนวนรถรวมต้องไม่เกิน ${requestedQty} คัน`,
             });
-
             return;
         }
 
@@ -1501,59 +1712,52 @@ export default function GMModalDetail({
 
             const approvedBy = getCurrentUserText();
 
+            if (!approvedBy) {
+                throw new Error("ไม่พบข้อมูลผู้ดำเนินการ");
+            }
+
             const payload = {
                 id: Number(data.id),
-              
-                // กดบันทึกแล้วส่งรายการเข้าสู่ Process
                 status: "progress",
-              
                 approved_by: approvedBy,
-              
-                suppliers: approvedSuppliers.map((item) => ({
-                  company_id: item.companyId,
-                  company_name: item.companyName,
-                  truck_type: item.truckType,
-                  qty: Number(item.qty),
-                })),
-              
-                approved_truck_type:
-                  approvedSuppliers[0]?.truckType ||
-                  data.fleet_truck_type ||
-                  "",
-              
-                status_details: remark.trim(),
-              };
 
-            console.log(
-                "========== REQUEST APPROVE PAYLOAD =========="
-            );
-            console.log(payload);
-            console.log(
-                "============================================="
-            );
+                suppliers: approvedSuppliers.map((item) => ({
+                    company_id: item.companyId,
+                    company_name: item.companyName,
+                    truck_type: item.truckType,
+                    qty: Number(item.qty),
+                })),
+
+                approved_truck_type:
+                    approvedSuppliers[0]?.truckType ||
+                    data.fleet_truck_type ||
+                    "",
+
+                status_details:
+                    remark.trim() || "FBP จัดรถเรียบร้อยแล้ว",
+            };
+
+            console.log("FBP APPROVE PAYLOAD:", payload);
 
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/request_approve.php",
                 {
                     method: "POST",
                     headers: {
-                        "Content-Type":
-                            "application/json",
+                        "Content-Type": "application/json",
                         Accept: "application/json",
                     },
                     body: JSON.stringify(payload),
                 }
             );
 
-            const responseText =
-                await response.text();
+            const responseText = await response.text();
 
             let result: any = null;
 
             if (responseText.trim()) {
                 try {
-                    result =
-                        JSON.parse(responseText);
+                    result = JSON.parse(responseText);
                 } catch {
                     throw new Error(
                         `API ไม่ได้ส่ง JSON กลับมา: ${responseText}`
@@ -1561,26 +1765,13 @@ export default function GMModalDetail({
                 }
             }
 
-            console.log(
-                "========== REQUEST APPROVE RESPONSE =========="
-            );
-            console.log(
-                "STATUS:",
-                response.status
-            );
-            console.log("RESULT:", result);
-            console.log(
-                "=============================================="
-            );
-
             if (
                 !response.ok ||
                 result?.status === "error" ||
                 result?.success === false
             ) {
                 throw new Error(
-                    result?.message ||
-                    "บันทึกข้อมูลไม่สำเร็จ"
+                    result?.message || "บันทึกการจัดรถไม่สำเร็จ"
                 );
             }
 
@@ -1588,21 +1779,18 @@ export default function GMModalDetail({
                 type: "success",
                 text:
                     result?.message ||
-                    "บันทึกข้อมูลสำเร็จ",
+                    "จัดรถและบันทึกข้อมูลเรียบร้อยแล้ว",
             });
 
-            await Promise.resolve(
-                onSuccess()
-            );
+            setDecisionCompleted(true);
+
+            await Promise.resolve(onSuccess());
 
             setTimeout(() => {
                 onClose();
             }, 700);
         } catch (error: any) {
-            console.error(
-                "REQUEST APPROVE ERROR:",
-                error
-            );
+            console.error("FBP APPROVE ERROR:", error);
 
             setMessage({
                 type: "error",
@@ -1667,6 +1855,14 @@ export default function GMModalDetail({
     const monthlyWorkloadDisplay = getMonthlyWorkloadDisplay();
 
     const rejectRequest = async () => {
+        if (!canMakeDecision) {
+            setMessage({
+                type: "error",
+                text: "รายการนี้ดำเนินการแล้ว ไม่สามารถบันทึกซ้ำได้",
+            });
+            return;
+        }
+
         if (!data.id) {
             setMessage({
                 type: "error",
@@ -1691,10 +1887,12 @@ export default function GMModalDetail({
 
             const payload = {
                 id: Number(data.id),
-                status: "gm_rejected",
+                status: "reject_by_fbp",
                 approved_by: approvedBy,
                 reject_reason: remark.trim(),
-                status_details: remark.trim() || "GM ไม่อนุมัติคำขอ",
+                status_details:
+                    remark.trim() || "FBP ไม่อนุมัติคำขอ",
+
             };
 
             console.log("GM REJECT PAYLOAD:", payload);
@@ -1735,6 +1933,7 @@ export default function GMModalDetail({
                 text: result?.message || "บันทึกผลไม่อนุมัติคำขอเรียบร้อยแล้ว",
             });
 
+            setDecisionCompleted(true);
             setConfirmDecision(null);
             await Promise.resolve(onSuccess());
 
@@ -1787,22 +1986,26 @@ export default function GMModalDetail({
         const value = normalizeStatus(status);
 
         if (
+            value === "fbp_pending" ||
+            value === "pending_fbp" ||
+            value === "waiting_fbp" ||
+            value === "wait_fbp"
+        ) {
+            return "รอจัดรถ";
+        }
+
+        if (
             value === "gm_pending" ||
+            value === "pending_gm" ||
+            value === "pending" ||
             value === "รออนุมัติ"
         ) {
             return "รออนุมัติ";
         }
 
         if (
-            value === "wait fleet" ||
-            value === "waiting fleet" ||
-            value === "รอประเมินกองรถ" ||
-            value === "รอกองรถประเมิน"
-        ) {
-            return "รอประเมินกองรถ";
-        }
-
-        if (
+            value === "progress" ||
+            value === "in_progress" ||
             value === "confirm request" ||
             value === "confirmed request" ||
             value === "confirm" ||
@@ -1818,13 +2021,18 @@ export default function GMModalDetail({
             value === "approved" ||
             value === "approve" ||
             value === "success" ||
+            value === "completed" ||
             value === "สำเร็จ" ||
             value === "อนุมัติ"
         ) {
-            return "อนุมัติ";
+            return "เสร็จเรียบร้อย";
         }
 
         if (
+            value === "reject_by_fbp" ||
+            value === "reject_by_gm" ||
+            value === "fbp_rejected" ||
+            value === "reject_by_fbp" ||
             value === "rejected" ||
             value === "reject" ||
             value === "not approved" ||
@@ -1845,30 +2053,91 @@ export default function GMModalDetail({
         return status || "-";
     };
 
+    const currentStatusText = formatStatusText(data.status);
+
+    const canMakeDecision =
+        !decisionCompleted &&
+        isFbpPending;
+
+    const currentStatusClass =
+        currentStatusText === "รอจัดรถ" || currentStatusText === "รออนุมัติ"
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : currentStatusText === "กำลังดำเนินการ"
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : currentStatusText === "เสร็จเรียบร้อย"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : currentStatusText === "ไม่อนุมัติ" ||
+                        currentStatusText === "ยกเลิก"
+                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-slate-50 text-slate-600";
+
     if (!open) return null;
 
     return (
         <div
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-[2px] sm:p-5"
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="ประเมินกองรถ"
             onMouseDown={(event) => {
-                if (event.target === event.currentTarget && !saving) {
+                if (
+                    event.target === event.currentTarget &&
+                    !saving
+                ) {
                     onClose();
                 }
             }}
         >
-            <div className="relative flex h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-3xl border border-white/70 bg-slate-100 shadow-[0_32px_120px_rgba(15,23,42,0.45)]">
-                {/* HEADER */}
+            <div
+                className="relative flex h-[94vh] w-full max-w-[1280px] flex-col overflow-hidden rounded-[28px] border border-white/70 bg-slate-100 shadow-[0_35px_120px_rgba(15,23,42,0.50)]"
+                onMouseDown={(event) =>
+                    event.stopPropagation()
+                }
+            >
+                {/* Header */}
                 <header className="relative shrink-0 overflow-hidden border-b border-slate-200 bg-white">
+                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-700 via-indigo-600 to-sky-500" />
 
-                    <div className="flex items-start justify-between gap-4 px-5 py-4 sm:px-6">
+                    <div className="flex items-start justify-between gap-4 px-4 pb-4 pt-5 sm:px-6">
                         <div className="flex min-w-0 items-start gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-700 to-indigo-700 text-xs font-black text-white shadow-lg shadow-blue-700/20">
+                                FBP
+                            </div>
+
+                            <div className="min-w-0">
+                                <h1 className="text-base font-black text-slate-900 sm:text-lg">
+                                    ประเมินกองรถ
+                                </h1>
+
+                                <p className="mt-1 text-[11px] font-medium text-slate-500">
+                                    ตรวจสอบข้อมูล
+                                    แล้วเลือกผู้ให้บริการและจำนวนรถ
+                                </p>
+
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-700 ring-1 ring-slate-200">
+                                        เลขที่เอกสาร:{" "}
+                                        {data.running_doc || "-"}
+                                    </span>
+
+                                    <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
+                                        DC: {data.dc_code || "-"}
+                                    </span>
+
+                                    <span
+                                        className={`rounded-lg border px-2.5 py-1 text-[10px] font-black ${currentStatusClass}`}
+                                    >
+                                        {currentStatusText}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
 
                         <button
                             type="button"
                             onClick={onClose}
                             disabled={saving}
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl font-medium text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl font-medium text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label="ปิด"
                         >
                             ×
@@ -1876,128 +2145,493 @@ export default function GMModalDetail({
                     </div>
                 </header>
 
-                {/* BODY */}
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_360px]">
+                {/* Content */}
+                <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
+                    {/* ข้อมูลด้านซ้าย */}
+                    <div className="min-h-0 overflow-y-auto bg-slate-50 p-2 sm:p-4">
+                        <CheckDC
+                            data={data}
+                            allRequests={allRequests}
+                            issuePeriods={issuePeriods}
+                        />
+                    </div>
 
-                        {/* TABS */}
-                        <div className="min-h-0 overflow-y-auto py-2 sm:p-2">
-                            <CheckDC
-                                data={data}
-                                allRequests={allRequests}
-                                issuePeriods={issuePeriods}
-                            />
-                        </div>
+                    {/* ด้านขวา */}
+                    <aside className="min-h-0 overflow-y-auto border-t border-slate-200 bg-white p-3 sm:p-5 lg:border-l lg:border-t-0">
+                        <div className="space-y-4">
+                            {/* สรุปข้อมูลคำขอ */}
+                            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                <div className="border-b border-slate-200 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-4 py-3.5 text-white">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h2 className="text-sm font-black">
+                                                สรุปข้อมูลคำขอ
+                                            </h2>
 
-                        {/* RIGHT APPROVAL PANEL */}
-                        <aside className="min-w-0">
-                            <div className="space-y-4 lg:sticky lg:top-4">
-                                <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.10)]">
-                                    {/* Header */}
-                                    <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-5 py-4 text-white">
-                                        <p className="text-sm font-black">
-                                            ขั้นตอนการพิจารณาคำขอรถใหม่
-                                        </p>
+                                            <p className="mt-0.5 text-[10px] font-medium text-white/65">
+                                                ข้อมูลสำหรับจัดรถ
+                                            </p>
+                                        </div>
 
-                                        <p className="mt-1 text-[11px] font-medium text-white/75">
-                                            กำหนดซัพพลายเออร์และจำนวนรถที่อนุมัติ
-                                        </p>
+                                        <span className="rounded-lg bg-white/10 px-2 py-1 text-[9px] font-black text-white ring-1 ring-white/15">
+                                            REQUEST
+                                        </span>
                                     </div>
+                                </div>
 
-                                    <div className="space-y-5 p-5">
-                                        {/* Message */}
-                                        {message && (
-                                            <div
-                                                className={`rounded-xl border px-3 py-2.5 text-xs font-bold ${message.type ===
+                                <div className="divide-y divide-slate-100 px-4">
+                                    {[
+                                        [
+                                            "เลขที่เอกสาร",
+                                            data.running_doc || "-",
+                                        ],
+                                        [
+                                            "DC",
+                                            data.dc_code || "-",
+                                        ],
+                                        [
+                                            "ประเภทคำขอ",
+                                            data.fleet_type || "-",
+                                        ],
+                                        [
+                                            "ประเภทรถที่ขอ",
+                                            data.fleet_truck_type ||
+                                            "-",
+                                        ],
+                                        [
+                                            "จำนวนที่ขอ",
+                                            `${formatNumber(
+                                                data.qty
+                                            )} คัน`,
+                                        ],
+                                        [
+                                            "สถานะ",
+                                            currentStatusText,
+                                        ],
+                                    ].map(([label, value]) => (
+                                        <div
+                                            key={label}
+                                            className="flex items-start justify-between gap-4 py-3 text-xs"
+                                        >
+                                            <span className="shrink-0 font-semibold text-slate-400">
+                                                {label}
+                                            </span>
+
+                                            <span className="break-words text-right font-black text-slate-800">
+                                                {value}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+
+                            {/* Message */}
+                            {message && (
+                                <div
+                                    className={`rounded-2xl border px-4 py-3 text-xs font-bold ${message.type ===
+                                            "success"
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                            : "border-rose-200 bg-rose-50 text-rose-700"
+                                        }`}
+                                >
+                                    <div className="flex items-start gap-2">
+                                        <span
+                                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] text-white ${message.type ===
                                                     "success"
-                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                                    : "border-rose-200 bg-rose-50 text-rose-700"
-                                                    }`}
-                                            >
-                                                {message.text}
-                                            </div>
-                                        )}
+                                                    ? "bg-emerald-600"
+                                                    : "bg-rose-600"
+                                                }`}
+                                        >
+                                            {message.type ===
+                                                "success"
+                                                ? "✓"
+                                                : "!"}
+                                        </span>
 
-                                        {/* Requested quantity */}
-                                        <div className="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
-                                            <div className="flex items-center justify-between gap-4 px-4 py-4">
-                                                <div>
-                                                    <p className="text-xs font-black text-blue-700">
-                                                        จำนวนรถที่ขอ
-                                                    </p>
+                                        <span className="leading-relaxed">
+                                            {message.text}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
 
-                                                    <p className="mt-1 text-[10px] font-medium text-slate-400">
-                                                        Requested Quantity
-                                                    </p>
-                                                </div>
-
-                                                <div className="text-right">
-                                                    <span className="text-3xl font-black text-blue-800">
-                                                        {formatNumber(
-                                                            requestedQty
-                                                        )}
+                            {!canMakeDecision ? (
+                                /* ========================================
+                                   ดูรายละเอียดหลังดำเนินการแล้ว
+                                ======================================== */
+                                <div className="space-y-4">
+                                    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3.5">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex items-start gap-3">
+                                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-black text-blue-600 ring-1 ring-blue-100">
+                                                        ✓
                                                     </span>
 
-                                                    <span className="ml-1 text-sm font-bold text-slate-500">
-                                                        คัน
-                                                    </span>
-                                                </div>
-                                            </div>
+                                                    <div>
+                                                        <h3 className="text-sm font-black text-slate-800">
+                                                            รายการนี้ดำเนินการแล้ว
+                                                        </h3>
 
-                                            <div className="grid grid-cols-2 border-t border-blue-100 bg-white/60">
-                                                <div className="px-4 py-3">
-                                                    <p className="text-[10px] font-bold text-slate-400">
-                                                        จำนวนที่จัดสรร
-                                                    </p>
-
-                                                    <p
-                                                        className={`mt-1 text-lg font-black ${totalApprovedQty >
-                                                            requestedQty
-                                                            ? "text-rose-700"
-                                                            : "text-emerald-700"
-                                                            }`}
-                                                    >
-                                                        {formatNumber(
-                                                            totalApprovedQty
-                                                        )}{" "}
-                                                        คัน
-                                                    </p>
+                                                        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                                                            แสดงผลการพิจารณาที่บันทึกไว้
+                                                        </p>
+                                                    </div>
                                                 </div>
 
-                                                <div className="border-l border-blue-100 px-4 py-3">
-                                                    <p className="text-[10px] font-bold text-slate-400">
-                                                        จำนวนคงเหลือ
-                                                    </p>
-
-                                                    <p
-                                                        className={`mt-1 text-lg font-black ${remainingQty === 0
-                                                            ? "text-slate-700"
-                                                            : "text-amber-700"
-                                                            }`}
-                                                    >
-                                                        {formatNumber(
-                                                            remainingQty
-                                                        )}{" "}
-                                                        คัน
-                                                    </p>
-                                                </div>
+                                                <span
+                                                    className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${currentStatusClass}`}
+                                                >
+                                                    {
+                                                        currentStatusText
+                                                    }
+                                                </span>
                                             </div>
                                         </div>
 
-                                        {/* Supplier section */}
+                                        <div className="space-y-4 p-4">
+                                            {/* จำนวนจาก request_get.php */}
+                                            <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200">
+                                                {[
+                                                    {
+                                                        label:
+                                                            "จำนวนที่ขอ",
+                                                        value:
+                                                            requestedQty,
+                                                        className:
+                                                            "text-slate-800",
+                                                        bgClass:
+                                                            "bg-slate-50",
+                                                    },
+                                                    {
+                                                        label:
+                                                            "จำนวนที่อนุมัติ",
+                                                        value:
+                                                            approvedQtyFromApi,
+                                                        className:
+                                                            "text-blue-700",
+                                                        bgClass:
+                                                            "bg-blue-50/70",
+                                                    },
+                                                    {
+                                                        label:
+                                                            "จำนวนไม่อนุมัติ",
+                                                        value:
+                                                            notApprovedQtyFromApi,
+                                                        className:
+                                                            notApprovedQtyFromApi >
+                                                                0
+                                                                ? "text-rose-700"
+                                                                : "text-emerald-700",
+                                                        bgClass:
+                                                            notApprovedQtyFromApi >
+                                                                0
+                                                                ? "bg-rose-50/70"
+                                                                : "bg-emerald-50/70",
+                                                    },
+                                                ].map(
+                                                    (
+                                                        item,
+                                                        index
+                                                    ) => (
+                                                        <div
+                                                            key={
+                                                                item.label
+                                                            }
+                                                            className={`px-2 py-3 text-center ${item.bgClass} ${index >
+                                                                    0
+                                                                    ? "border-l border-slate-200"
+                                                                    : ""
+                                                                }`}
+                                                        >
+                                                            <p className="text-[9px] font-bold text-slate-500">
+                                                                {
+                                                                    item.label
+                                                                }
+                                                            </p>
+
+                                                            <p
+                                                                className={`mt-1 text-lg font-black ${item.className}`}
+                                                            >
+                                                                {formatNumber(
+                                                                    item.value
+                                                                )}
+
+                                                                <span className="ml-1 text-[9px] font-bold text-slate-400">
+                                                                    คัน
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    )
+                                                )}
+                                            </div>
+
+                                            {/* ประเภทรถที่อนุมัติ */}
+                                            {String(
+                                                data.approved_truck_type ??
+                                                ""
+                                            ).trim() && (
+                                                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5">
+                                                        <p className="text-[9px] font-bold text-blue-500">
+                                                            ประเภทรถที่อนุมัติ
+                                                        </p>
+
+                                                        <p className="mt-1 text-xs font-black text-blue-900">
+                                                            {formatTruckTypeLabel(
+                                                                String(
+                                                                    data.approved_truck_type
+                                                                )
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                            {/* ผู้ให้บริการที่อนุมัติ */}
+                                            {savedApprovedSuppliers.length >
+                                                0 && (
+                                                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                                        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2.5">
+                                                            <div>
+                                                                <p className="text-xs font-black text-slate-800">
+                                                                    ผู้ให้บริการที่อนุมัติ
+                                                                </p>
+
+                                                                <p className="mt-0.5 text-[9px] font-medium text-slate-400">
+                                                                    รายละเอียดการจัดรถ
+                                                                </p>
+                                                            </div>
+
+                                                            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black text-blue-700">
+                                                                {
+                                                                    savedApprovedSuppliers.length
+                                                                }{" "}
+                                                                รายการ
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="divide-y divide-slate-100">
+                                                            {savedApprovedSuppliers.map(
+                                                                (
+                                                                    supplier,
+                                                                    index
+                                                                ) => {
+                                                                    const companyId =
+                                                                        String(
+                                                                            supplier.company_id ??
+                                                                            supplier.Company_ID ??
+                                                                            ""
+                                                                        ).trim();
+
+                                                                    const companyName =
+                                                                        String(
+                                                                            supplier.company_name ??
+                                                                            supplier.Company_Name ??
+                                                                            "-"
+                                                                        ).trim();
+
+                                                                    const truckType =
+                                                                        String(
+                                                                            supplier.truck_type ??
+                                                                            supplier.TRUCK_TYPE ??
+                                                                            data.approved_truck_type ??
+                                                                            "-"
+                                                                        ).trim();
+
+                                                                    const supplierQty =
+                                                                        Number(
+                                                                            supplier.qty ??
+                                                                            0
+                                                                        );
+
+                                                                    return (
+                                                                        <div
+                                                                            key={`${companyId || companyName}-${index}`}
+                                                                            className="flex items-center justify-between gap-3 px-3 py-3"
+                                                                        >
+                                                                            <div className="min-w-0">
+                                                                                <p className="break-words text-xs font-black text-slate-800">
+                                                                                    {
+                                                                                        companyName
+                                                                                    }
+                                                                                </p>
+
+                                                                                <p className="mt-0.5 break-words text-[9px] font-medium text-slate-400">
+                                                                                    {formatTruckTypeLabel(
+                                                                                        truckType
+                                                                                    )}
+
+                                                                                    {companyId
+                                                                                        ? ` · ${companyId}`
+                                                                                        : ""}
+                                                                                </p>
+                                                                            </div>
+
+                                                                            <span className="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">
+                                                                                {formatNumber(
+                                                                                    supplierQty
+                                                                                )}{" "}
+                                                                                คัน
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                            {/* รายละเอียดสถานะ */}
+                                            {String(
+                                                data.status_details ??
+                                                ""
+                                            ).trim() && (
+                                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                                                        <p className="text-[9px] font-bold text-slate-400">
+                                                            รายละเอียดสถานะ
+                                                        </p>
+
+                                                        <p className="mt-1 whitespace-pre-wrap break-words text-xs font-semibold leading-relaxed text-slate-700">
+                                                            {
+                                                                data.status_details
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                            {/* เหตุผลไม่อนุมัติ */}
+                                            {String(
+                                                data.reject_reason ??
+                                                ""
+                                            ).trim() && (
+                                                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3">
+                                                        <p className="text-[9px] font-bold text-rose-500">
+                                                            เหตุผลที่ไม่อนุมัติ
+                                                        </p>
+
+                                                        <p className="mt-1 whitespace-pre-wrap break-words text-xs font-semibold leading-relaxed text-rose-700">
+                                                            {
+                                                                data.reject_reason
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                            <button
+                                                type="button"
+                                                onClick={onClose}
+                                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 text-xs font-black text-slate-600 transition hover:border-slate-300 hover:bg-slate-100"
+                                            >
+                                                ปิด
+                                            </button>
+                                        </div>
+                                    </section>
+                                </div>
+                            ) : (
+                                /* ========================================
+                                   ฟอร์มจัดรถ
+                                ======================================== */
+                                <section className="overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+                                    <div className="border-b border-blue-100 bg-blue-50 px-4 py-3.5">
+                                        <h2 className="text-sm font-black text-blue-900">
+                                            จัดรถ
+                                        </h2>
+
+                                        <p className="mt-0.5 text-[10px] font-medium text-blue-600">
+                                            เลือกผู้ให้บริการ
+                                            ประเภทรถ
+                                            และจำนวนที่อนุมัติ
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-4 p-4">
+                                        {/* จำนวนที่กำลังกรอก */}
+                                        <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200">
+                                            {[
+                                                {
+                                                    label:
+                                                        "จำนวนที่ขอ",
+                                                    value:
+                                                        requestedQty,
+                                                    className:
+                                                        "text-slate-800",
+                                                    bgClass:
+                                                        "bg-slate-50",
+                                                },
+                                                {
+                                                    label:
+                                                        "จำนวนที่อนุมัติ",
+                                                    value:
+                                                        draftApprovedQty,
+                                                    className:
+                                                        draftApprovedQty >
+                                                            requestedQty
+                                                            ? "text-rose-700"
+                                                            : "text-blue-700",
+                                                    bgClass:
+                                                        "bg-blue-50/70",
+                                                },
+                                                {
+                                                    label:
+                                                        "จำนวนไม่อนุมัติ",
+                                                    value:
+                                                        draftNotApprovedQty,
+                                                    className:
+                                                        draftNotApprovedQty >
+                                                            0
+                                                            ? "text-rose-700"
+                                                            : "text-emerald-700",
+                                                    bgClass:
+                                                        draftNotApprovedQty >
+                                                            0
+                                                            ? "bg-rose-50/70"
+                                                            : "bg-emerald-50/70",
+                                                },
+                                            ].map(
+                                                (item, index) => (
+                                                    <div
+                                                        key={
+                                                            item.label
+                                                        }
+                                                        className={`px-2 py-3 text-center ${item.bgClass} ${index > 0
+                                                                ? "border-l border-slate-200"
+                                                                : ""
+                                                            }`}
+                                                    >
+                                                        <p className="text-[9px] font-bold text-slate-500">
+                                                            {
+                                                                item.label
+                                                            }
+                                                        </p>
+
+                                                        <p
+                                                            className={`mt-1 text-lg font-black ${item.className}`}
+                                                        >
+                                                            {formatNumber(
+                                                                item.value
+                                                            )}
+
+                                                            <span className="ml-1 text-[9px] font-bold text-slate-400">
+                                                                คัน
+                                                            </span>
+                                                        </p>
+                                                    </div>
+                                                )
+                                            )}
+                                        </div>
+
+                                        {/* ผู้ให้บริการ */}
                                         <div>
-                                            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                            <div className="mb-3 flex items-center justify-between gap-3">
                                                 <div>
-                                                    <label className="text-xs font-black text-slate-700">
-                                                        ซัพพลายเออร์ที่อนุมัติ
-                                                        & จำนวนคัน
+                                                    <p className="text-xs font-black text-slate-700">
+                                                        ผู้ให้บริการรถ
                                                         <span className="ml-1 text-rose-500">
                                                             *
                                                         </span>
-                                                    </label>
+                                                    </p>
 
-                                                    <p className="mt-1 text-[10px] font-medium leading-4 text-slate-400">
-                                                        สามารถแบ่งจำนวนรถให้หลายซัพพลายเออร์ได้
+                                                    <p className="mt-0.5 text-[9px] font-medium text-slate-400">
+                                                        แบ่งรถให้หลายรายได้
                                                     </p>
                                                 </div>
 
@@ -2007,28 +2641,33 @@ export default function GMModalDetail({
                                                     onClick={
                                                         addApprovedSupplier
                                                     }
-                                                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-[11px] font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 text-[10px] font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                                                 >
-                                                    <span className="text-base leading-none">
+                                                    <span className="text-sm">
                                                         +
                                                     </span>
-
-                                                    เพิ่มซัพพลายเออร์
+                                                    เพิ่มรายการ
                                                 </button>
                                             </div>
 
                                             <div className="space-y-3">
                                                 {approvedSuppliers.map(
-                                                    (row, index) => (
+                                                    (
+                                                        row,
+                                                        index
+                                                    ) => (
                                                         <div
-                                                            key={row.rowId}
-                                                            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                                                            key={
+                                                                row.rowId
+                                                            }
+                                                            className="rounded-xl border border-slate-200 bg-slate-50 p-3"
                                                         >
-                                                            <div className="mb-2 flex items-center justify-between gap-3">
-                                                                <p className="text-[10px] font-black text-slate-500">
-                                                                    รายการที่{" "}
-                                                                    {index + 1}
-                                                                </p>
+                                                            <div className="mb-2 flex items-center justify-between">
+                                                                <span className="text-[10px] font-black text-slate-500">
+                                                                    รายการ{" "}
+                                                                    {index +
+                                                                        1}
+                                                                </span>
 
                                                                 {approvedSuppliers.length >
                                                                     1 && (
@@ -2042,8 +2681,8 @@ export default function GMModalDetail({
                                                                                     row.rowId
                                                                                 )
                                                                             }
-                                                                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-lg leading-none text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                            aria-label="ลบซัพพลายเออร์"
+                                                                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-white text-base text-rose-500 transition hover:bg-rose-50 disabled:opacity-50"
+                                                                            aria-label="ลบรายการ"
                                                                         >
                                                                             ×
                                                                         </button>
@@ -2051,109 +2690,120 @@ export default function GMModalDetail({
                                                             </div>
 
                                                             <div className="space-y-2">
-                                                                {/* Supplier */}
-                                                                <div>
-                                                                    <label className="mb-1 block text-[10px] font-bold text-slate-500">
-                                                                        ซัพพลายเออร์
-                                                                    </label>
+                                                                <label className="block">
+                                                                    <span className="mb-1 block text-[10px] font-bold text-slate-500">
+                                                                        ผู้ให้บริการ
+                                                                    </span>
 
-                                                                    <select
-                                                                        value={
-                                                                            row.companyName
-                                                                        }
-                                                                        disabled={
-                                                                            saving ||
-                                                                            loadingSuppliers
-                                                                        }
-                                                                        onChange={(
-                                                                            event
-                                                                        ) =>
-                                                                            handleSupplierChange(
-                                                                                row.rowId,
-                                                                                event.target
-                                                                                    .value
-                                                                            )
-                                                                        }
-                                                                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                                                    >
-                                                                        <option value="">
-                                                                            {loadingSuppliers
-                                                                                ? "กำลังโหลดซัพพลายเออร์..."
-                                                                                : "-- เลือกซัพพลายเออร์ --"}
-                                                                        </option>
-
-                                                                        {supplierOptions.map(
-                                                                            (
-                                                                                supplierName
-                                                                            ) => (
-                                                                                <option
-                                                                                    key={
-                                                                                        supplierName
-                                                                                    }
-                                                                                    value={
-                                                                                        supplierName
-                                                                                    }
-                                                                                >
-                                                                                    {
-                                                                                        supplierName
-                                                                                    }
-                                                                                </option>
-                                                                            )
-                                                                        )}
-                                                                    </select>
-                                                                </div>
-
-                                                                <div className="grid grid-cols-[minmax(0,1fr)_90px] gap-2">
-                                                                    {/* Truck Type */}
-                                                                    <div>
-                                                                        <label className="mb-1 block text-[10px] font-bold text-slate-500">
-                                                                            ประเภทรถ
-                                                                        </label>
-
-                                                                        <select
-                                                                            value={row.truckType}
-                                                                            disabled={saving || loadingTrucks}
+                                                                    <div className="relative">
+                                                                        <input
+                                                                            type="text"
+                                                                            list={`supplier-options-${row.rowId}`}
+                                                                            value={row.companyName}
+                                                                            disabled={saving}
+                                                                            autoComplete="off"
+                                                                            placeholder={
+                                                                                loadingSuppliers
+                                                                                    ? "กำลังโหลดผู้ให้บริการ..."
+                                                                                    : "พิมพ์หรือเลือกผู้ให้บริการ"
+                                                                            }
                                                                             onChange={(event) =>
-                                                                                updateApprovedSupplier(
+                                                                                handleSupplierChange(
                                                                                     row.rowId,
-                                                                                    "truckType",
                                                                                     event.target.value
                                                                                 )
                                                                             }
-                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 pr-9 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                                                        />
+
+                                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                                                                            ▼
+                                                                        </span>
+
+                                                                        <datalist
+                                                                            id={`supplier-options-${row.rowId}`}
+                                                                        >
+                                                                            {supplierOptions.map(
+                                                                                (supplierName) => (
+                                                                                    <option
+                                                                                        key={supplierName}
+                                                                                        value={supplierName}
+                                                                                    />
+                                                                                )
+                                                                            )}
+                                                                        </datalist>
+                                                                    </div>
+
+                                                                    <span className="mt-1 block text-[9px] font-medium text-slate-400">
+                                                                        สามารถพิมพ์ค้นหา เลือกจากรายการ
+                                                                        หรือระบุชื่อผู้ให้บริการใหม่ได้
+                                                                    </span>
+                                                                </label>
+
+                                                                <div className="grid grid-cols-[minmax(0,1fr)_86px] gap-2">
+                                                                    <label className="block">
+                                                                        <span className="mb-1 block text-[10px] font-bold text-slate-500">
+                                                                            ประเภทรถ
+                                                                        </span>
+
+                                                                        <select
+                                                                            value={
+                                                                                row.truckType
+                                                                            }
+                                                                            disabled={
+                                                                                saving ||
+                                                                                loadingTrucks
+                                                                            }
+                                                                            onChange={(
+                                                                                event
+                                                                            ) =>
+                                                                                updateApprovedSupplier(
+                                                                                    row.rowId,
+                                                                                    "truckType",
+                                                                                    event
+                                                                                        .target
+                                                                                        .value
+                                                                                )
+                                                                            }
+                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                                                                         >
                                                                             <option value="">
                                                                                 {loadingTrucks
-                                                                                    ? "กำลังโหลดประเภทรถ..."
-                                                                                    : "-- เลือกประเภทรถ --"}
+                                                                                    ? "กำลังโหลด..."
+                                                                                    : "เลือกประเภทรถ"}
                                                                             </option>
 
-                                                                            {truckTypeOptions.map((truckType) => (
-                                                                                <option
-                                                                                    key={truckType}
-                                                                                    value={truckType}
-                                                                                >
-                                                                                    {formatTruckTypeLabel(truckType)}
-                                                                                </option>
-                                                                            ))}
+                                                                            {truckTypeOptions.map(
+                                                                                (
+                                                                                    truckType
+                                                                                ) => (
+                                                                                    <option
+                                                                                        key={
+                                                                                            truckType
+                                                                                        }
+                                                                                        value={
+                                                                                            truckType
+                                                                                        }
+                                                                                    >
+                                                                                        {formatTruckTypeLabel(
+                                                                                            truckType
+                                                                                        )}
+                                                                                    </option>
+                                                                                )
+                                                                            )}
                                                                         </select>
+                                                                    </label>
 
-                                                                        {truckError && (
-                                                                            <p className="mt-1 text-[10px] font-bold text-rose-600">
-                                                                                {truckError}
-                                                                            </p>
-                                                                        )}
-                                                                    </div>
-
-                                                                    {/* Quantity */}
-                                                                    <div>
-                                                                        <label className="mb-1 block text-[10px] font-bold text-slate-500">
+                                                                    <label className="block">
+                                                                        <span className="mb-1 block text-[10px] font-bold text-slate-500">
                                                                             จำนวน
-                                                                        </label>
+                                                                        </span>
 
                                                                         <input
                                                                             type="number"
-                                                                            min={1}
+                                                                            min={
+                                                                                1
+                                                                            }
                                                                             max={
                                                                                 requestedQty
                                                                             }
@@ -2183,15 +2833,17 @@ export default function GMModalDetail({
                                                                                         : 0
                                                                                 );
                                                                             }}
-                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-center text-sm font-black text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-2 text-center text-sm font-black text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                                                                         />
-                                                                    </div>
+                                                                    </label>
                                                                 </div>
 
                                                                 {row.companyId && (
-                                                                    <p className="text-[10px] font-medium text-slate-400">
-                                                                        Company ID:{" "}
-                                                                        {row.companyId}
+                                                                    <p className="text-[9px] font-medium text-slate-400">
+                                                                        รหัสผู้ให้บริการ:{" "}
+                                                                        {
+                                                                            row.companyId
+                                                                        }
                                                                     </p>
                                                                 )}
                                                             </div>
@@ -2201,161 +2853,324 @@ export default function GMModalDetail({
                                             </div>
                                         </div>
 
-                                        {/* Quantity errors */}
                                         {totalApprovedQty >
                                             requestedQty && (
-                                                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
-                                                    <p className="text-xs font-bold text-rose-700">
-                                                        จำนวนรถที่จัดสรรรวม{" "}
-                                                        {formatNumber(
-                                                            totalApprovedQty
-                                                        )}{" "}
-                                                        คัน เกินจำนวนที่ขอ{" "}
-                                                        {formatNumber(
-                                                            requestedQty
-                                                        )}{" "}
-                                                        คัน
-                                                    </p>
+                                                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
+                                                    จำนวนรถรวมเกินที่ขอ{" "}
+                                                    {formatNumber(
+                                                        requestedQty
+                                                    )}{" "}
+                                                    คัน
                                                 </div>
                                             )}
 
                                         {totalApprovedQty <
                                             requestedQty &&
-                                            totalApprovedQty > 0 && (
-                                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-                                                    <p className="text-xs font-bold text-amber-700">
-                                                        ยังเหลือรถที่ยังไม่ได้จัดสรร{" "}
-                                                        {formatNumber(
-                                                            remainingQty
-                                                        )}{" "}
-                                                        คัน
-                                                    </p>
+                                            totalApprovedQty >
+                                            0 && (
+                                                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
+                                                    มีจำนวนไม่อนุมัติ{" "}
+                                                    {formatNumber(
+                                                        draftNotApprovedQty
+                                                    )}{" "}
+                                                    คัน
                                                 </div>
                                             )}
 
-                                        {/* Remark */}
-                                        <div>
-                                            <label className="mb-1.5 block text-xs font-bold text-slate-600">
-                                                รายละเอียดการจัดรถ /
-                                                หมายเหตุเพิ่มเติม
-                                            </label>
+                                        <label className="block">
+                                            <span className="mb-1.5 block text-xs font-bold text-slate-600">
+                                                หมายเหตุ / เหตุผล
+                                            </span>
 
                                             <textarea
                                                 rows={3}
                                                 value={remark}
                                                 disabled={saving}
-                                                onChange={(event) => {
+                                                onChange={(
+                                                    event
+                                                ) => {
                                                     setRemark(
-                                                        event.target.value
+                                                        event.target
+                                                            .value
                                                     );
-
                                                     setMessage(null);
                                                 }}
-                                                placeholder="ระบุรายละเอียดเพิ่มเติม..."
-                                                className="w-full resize-none rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                                placeholder="เพิ่มหมายเหตุ หรือระบุเหตุผลกรณีไม่อนุมัติ"
+                                                className="w-full resize-none rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                                             />
-                                        </div>
 
-                                        {/* Submit */}
-                                        <button
-                                            type="button"
-                                            disabled={
-                                                saving ||
-                                                !isSupplierRowsValid ||
-                                                totalApprovedQty <= 0 ||
-                                                totalApprovedQty >
-                                                requestedQty
-                                            }
-                                            onClick={() =>
-                                                void approveRequest()
-                                            }
-                                            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-black text-white shadow-lg shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-                                        >
-                                            {saving && (
-                                                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                                            )}
+                                            <span className="mt-1.5 block text-[10px] font-medium text-slate-400">
+                                                ต้องระบุเหตุผลเมื่อเลือกไม่อนุมัติ
+                                            </span>
+                                        </label>
 
-                                            {saving
-                                                ? "กำลังบันทึก..."
-                                                : "ยืนยันซัพพลายเออร์และจำนวนรถ"}
-                                        </button>
+                                        {!confirmDecision ? (
+                                            <div className="space-y-2.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setMessage(
+                                                            null
+                                                        );
+                                                        setConfirmDecision(
+                                                            "approve"
+                                                        );
+                                                    }}
+                                                    disabled={
+                                                        saving ||
+                                                        !isSupplierRowsValid ||
+                                                        totalApprovedQty <=
+                                                        0 ||
+                                                        totalApprovedQty >
+                                                        requestedQty
+                                                    }
+                                                    className="group flex min-h-12 w-full items-center justify-between rounded-xl bg-gradient-to-r from-blue-700 to-indigo-700 px-4 text-left text-white shadow-lg shadow-blue-700/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                                                >
+                                                    <span>
+                                                        <span className="block text-sm font-black">
+                                                            อนุมัติการจัดรถ
+                                                        </span>
 
-                                        {/* Reject request */}
-                                        {!confirmDecision && (
-                                            <button
-                                                type="button"
-                                                disabled={saving}
-                                                onClick={() => {
-                                                    setMessage(null);
-                                                    setConfirmDecision("gm_rejected");
-                                                }}
-                                                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                ไม่อนุมัติคำขอ
-                                            </button>
-                                        )}
+                                                        <span className="mt-0.5 block text-[9px] font-medium text-white/70">
+                                                            บันทึกจำนวนรถที่อนุมัติและดำเนินการต่อ
+                                                        </span>
+                                                    </span>
 
-                                        {confirmDecision === "gm_rejected" && (
-                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
-                                                <p className="text-sm font-black text-rose-800">
-                                                    ยืนยันไม่อนุมัติคำขอ?
-                                                </p>
+                                                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-sm font-black">
+                                                        ✓
+                                                    </span>
+                                                </button>
 
-                                                <p className="mt-1 text-xs font-semibold text-slate-600">
-                                                    {data.running_doc || "-"}
-                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setMessage(
+                                                            null
+                                                        );
+                                                        setConfirmDecision(
+                                                            "reject_by_fbp"
+                                                        );
+                                                    }}
+                                                    disabled={saving}
+                                                    className="group flex min-h-12 w-full items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 text-left text-rose-700 transition hover:-translate-y-0.5 hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                                                >
+                                                    <span>
+                                                        <span className="block text-sm font-black">
+                                                            ไม่อนุมัติคำขอ
+                                                        </span>
+
+                                                        <span className="mt-0.5 block text-[9px] font-medium text-rose-500">
+                                                            ปฏิเสธรายการและบันทึกเหตุผล
+                                                        </span>
+                                                    </span>
+
+                                                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-200/70 text-sm font-black">
+                                                        ×
+                                                    </span>
+                                                </button>
+                                            </div>
+                                        ) : confirmDecision ===
+                                            "approve" ? (
+                                            /* ยืนยันอนุมัติ */
+                                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                                                <div className="flex items-start gap-3">
+                                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-sm font-black text-white">
+                                                        ✓
+                                                    </span>
+
+                                                    <div>
+                                                        <h3 className="text-sm font-black text-blue-900">
+                                                            ยืนยันอนุมัติการจัดรถ?
+                                                        </h3>
+
+                                                        <p className="mt-1 text-[10px] font-medium text-blue-600">
+                                                            กรุณาตรวจสอบจำนวนรถก่อนบันทึก
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-xl border border-blue-200 bg-white">
+                                                    {[
+                                                        {
+                                                            label:
+                                                                "จำนวนที่ขอ",
+                                                            value:
+                                                                requestedQty,
+                                                            className:
+                                                                "text-slate-800",
+                                                        },
+                                                        {
+                                                            label:
+                                                                "อนุมัติ",
+                                                            value:
+                                                                draftApprovedQty,
+                                                            className:
+                                                                "text-blue-700",
+                                                        },
+                                                        {
+                                                            label:
+                                                                "ไม่อนุมัติ",
+                                                            value:
+                                                                draftNotApprovedQty,
+                                                            className:
+                                                                draftNotApprovedQty >
+                                                                    0
+                                                                    ? "text-rose-700"
+                                                                    : "text-emerald-700",
+                                                        },
+                                                    ].map(
+                                                        (
+                                                            item,
+                                                            index
+                                                        ) => (
+                                                            <div
+                                                                key={
+                                                                    item.label
+                                                                }
+                                                                className={`px-2 py-3 text-center ${index >
+                                                                        0
+                                                                        ? "border-l border-blue-100"
+                                                                        : ""
+                                                                    }`}
+                                                            >
+                                                                <p className="text-[9px] font-bold text-slate-400">
+                                                                    {
+                                                                        item.label
+                                                                    }
+                                                                </p>
+
+                                                                <p
+                                                                    className={`mt-1 text-lg font-black ${item.className}`}
+                                                                >
+                                                                    {formatNumber(
+                                                                        item.value
+                                                                    )}
+
+                                                                    <span className="ml-1 text-[9px] text-slate-400">
+                                                                        คัน
+                                                                    </span>
+                                                                </p>
+                                                            </div>
+                                                        )
+                                                    )}
+                                                </div>
+
+                                                <div className="mt-4 grid grid-cols-2 gap-2">
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            saving
+                                                        }
+                                                        onClick={() =>
+                                                            setConfirmDecision(
+                                                                null
+                                                            )
+                                                        }
+                                                        className="h-10 rounded-xl border border-slate-300 bg-white text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+                                                    >
+                                                        ยกเลิก
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            saving ||
+                                                            !isSupplierRowsValid ||
+                                                            totalApprovedQty <=
+                                                            0 ||
+                                                            totalApprovedQty >
+                                                            requestedQty
+                                                        }
+                                                        onClick={() =>
+                                                            void approveRequest()
+                                                        }
+                                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-xs font-black text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        {saving && (
+                                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                                                        )}
+
+                                                        {saving
+                                                            ? "กำลังบันทึก..."
+                                                            : "ยืนยันอนุมัติ"}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            /* ยืนยันไม่อนุมัติ */
+                                            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                                                <div className="flex items-start gap-3">
+                                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-sm font-black text-white">
+                                                        ×
+                                                    </span>
+
+                                                    <div>
+                                                        <h3 className="text-sm font-black text-rose-800">
+                                                            ยืนยันไม่อนุมัติคำขอ?
+                                                        </h3>
+
+                                                        <p className="mt-1 text-[10px] font-medium text-rose-600">
+                                                            คำขอจำนวน{" "}
+                                                            {formatNumber(
+                                                                requestedQty
+                                                            )}{" "}
+                                                            คัน
+                                                            จะถูกปฏิเสธทั้งหมด
+                                                        </p>
+                                                    </div>
+                                                </div>
 
                                                 {!remark.trim() && (
-                                                    <p className="mt-2 text-xs font-bold text-rose-600">
-                                                        กรุณาระบุเหตุผลก่อนยืนยัน
+                                                    <p className="mt-3 rounded-lg bg-white px-3 py-2 text-[10px] font-bold text-rose-600 ring-1 ring-rose-100">
+                                                        กรุณาระบุเหตุผลที่ไม่อนุมัติ
                                                     </p>
                                                 )}
 
                                                 <div className="mt-4 grid grid-cols-2 gap-2">
                                                     <button
                                                         type="button"
-                                                        disabled={saving}
-                                                        onClick={() => setConfirmDecision(null)}
+                                                        disabled={
+                                                            saving
+                                                        }
+                                                        onClick={() =>
+                                                            setConfirmDecision(
+                                                                null
+                                                            )
+                                                        }
                                                         className="h-10 rounded-xl border border-slate-300 bg-white text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
                                                     >
-                                                        ย้อนกลับ
+                                                        ยกเลิก
                                                     </button>
 
                                                     <button
                                                         type="button"
-                                                        disabled={saving || !remark.trim()}
-                                                        onClick={() => void rejectRequest()}
+                                                        disabled={
+                                                            saving ||
+                                                            !remark.trim()
+                                                        }
+                                                        onClick={() =>
+                                                            void rejectRequest()
+                                                        }
                                                         className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-3 text-xs font-black text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
                                                     >
                                                         {saving && (
                                                             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                                                         )}
 
-                                                        {saving ? "กำลังบันทึก..." : "ยืนยันไม่อนุมัติ"}
+                                                        {saving
+                                                            ? "กำลังบันทึก..."
+                                                            : "ยืนยันไม่อนุมัติ"}
                                                     </button>
                                                 </div>
                                             </div>
                                         )}
-
-                                        <button
-                                            type="button"
-                                            onClick={onClose}
-                                            disabled={saving}
-                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            ปิดหน้าต่าง
-                                        </button>
                                     </div>
-                                </div>
-
-                            </div>
-                        </aside>
-                    </div>
+                                </section>
+                            )}
+                        </div>
+                    </aside>
                 </div>
-
             </div>
-
-
         </div>
     );
 }

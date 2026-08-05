@@ -114,6 +114,7 @@ export default function NewVehicleRequestModal({
     const [activeLicenseDropdownIndex, setActiveLicenseDropdownIndex] = useState<number | null>(null);
 
     const [selectedDC, setSelectedDC] = useState<WarehouseItem | null>(null);
+    const [isCenterMode, setIsCenterMode] = useState(false);
 
     const getValueIgnoreCase = (item: any, keyName: string) => {
         if (!item) return "";
@@ -188,8 +189,11 @@ export default function NewVehicleRequestModal({
     const canSelectWarehouse = useMemo(() => {
         const upperWarehouse = normalizeText(userWarehouse);
 
-        return upperWarehouse === "CENTER" || upperWarehouse === "GM";
-    }, [userWarehouse]);
+        // โหมดส่วนกลางอาจมาจาก user.warehouse = CENTER
+        // หรือ Sidebar เลือก selected_dc.DC_CODE = CENTER
+        // คงสิทธิ์ GM เดิมไว้เพื่อไม่กระทบการทำงานเดิม
+        return isCenterMode || upperWarehouse === "GM";
+    }, [isCenterMode, userWarehouse]);
 
     const isWarehouseUser = useMemo(() => {
         return normalizeText(userWarehouse) === "WAREHOUSE";
@@ -202,15 +206,17 @@ export default function NewVehicleRequestModal({
     }, [userInfo]);
 
     const dcCode = useMemo(() => {
-        // CENTER / GM เลือกเองได้
+        // CENTER / GM ต้องเลือก DC จริงจากรายการก่อน
         if (canSelectWarehouse) {
-            const selectedCode =
+            const selectedCode = String(
                 selectedWarehouseCode ||
                 selectedDC?.DC_CODE ||
                 selectedDC?.dc_code ||
-                "";
+                ""
+            ).trim();
 
-            return String(selectedCode).trim();
+            // CENTER เป็นเพียงบริบทส่วนกลาง ไม่ใช่ DC ปลายทาง
+            return normalizeText(selectedCode) === "CENTER" ? "" : selectedCode;
         }
 
         // WAREHOUSE ไม่ต้องให้เลือก แต่ใช้ DC ที่เลือกมาจาก Sidebar
@@ -325,18 +331,22 @@ export default function NewVehicleRequestModal({
                 ""
             ).trim();
 
-            if (code) {
+            if (code && !(isCenterMode && normalizeText(code) === "CENTER")) {
                 map.set(code, item);
             }
         });
 
         return Array.from(map.values()).sort((a, b) => {
-            const codeA = String(getValueIgnoreCase(a, "DC_CODE") || "").trim();
-            const codeB = String(getValueIgnoreCase(b, "DC_CODE") || "").trim();
+            const nameA = String(
+                getValueIgnoreCase(a, "DC_NAME") || a.DC_NAME || a.dc_name || ""
+            ).trim();
+            const nameB = String(
+                getValueIgnoreCase(b, "DC_NAME") || b.DC_NAME || b.dc_name || ""
+            ).trim();
 
-            return codeA.localeCompare(codeB);
+            return nameA.localeCompare(nameB, "th");
         });
-    }, [warehouses]);
+    }, [warehouses, isCenterMode]);
 
     const filteredWarehouseOptions = useMemo(() => {
         const keyword = normalizeText(warehouseSearchText);
@@ -386,17 +396,9 @@ export default function NewVehicleRequestModal({
             ""
         ).trim();
 
-        const type = String(
-            getValueIgnoreCase(item, "DC_TYPE") ||
-            item.DC_TYPE ||
-            item.dc_type ||
-            ""
-        ).trim();
-
         setSelectedWarehouseCode(code);
-        setWarehouseSearchText(
-            `${code}${name ? ` - ${name}` : ""}${type ? ` (${type})` : ""}`
-        );
+        setSelectedDC(item);
+        setWarehouseSearchText(name || code);
         setShowWarehouseDropdown(false);
 
         setFormData((prev) => ({
@@ -481,12 +483,16 @@ export default function NewVehicleRequestModal({
     useEffect(() => {
         if (!open) return;
 
-        const savedUser = localStorage.getItem("user");
+        const savedUser =
+            localStorage.getItem("user_info") ||
+            localStorage.getItem("user") ||
+            localStorage.getItem("userInfo");
         const savedSelectedDC = localStorage.getItem("selected_dc");
 
         if (!savedUser) {
             setUserInfo(null);
             setSelectedDC(null);
+            setIsCenterMode(false);
             setError("ไม่พบข้อมูลผู้ใช้งาน กรุณา Login ใหม่");
             return;
         }
@@ -543,24 +549,34 @@ export default function NewVehicleRequestModal({
                     ""
                 ).trim();
 
-                const selectedType = String(
-                    parsedSelectedDC?.DC_TYPE ||
-                    parsedSelectedDC?.dc_type ||
-                    ""
-                ).trim();
+                const selectedCodeIsCenter = normalizeText(selectedCode) === "CENTER";
+                const nextCenterMode =
+                    upperWarehouse === "CENTER" || selectedCodeIsCenter;
 
-                if (selectedCode) {
+                setIsCenterMode(nextCenterMode);
+
+                const canUseSavedSelectedDC =
+                    Boolean(selectedCode) && !nextCenterMode;
+
+                if (canUseSavedSelectedDC && parsedSelectedDC) {
                     setSelectedWarehouseCode(selectedCode);
-                    setWarehouseSearchText(
-                        `${selectedCode}${selectedName ? ` - ${selectedName}` : ""}${selectedType ? ` (${selectedType})` : ""}`
-                    );
+                    setSelectedDC(parsedSelectedDC);
+                    setWarehouseSearchText(selectedName || selectedCode);
                     setError("");
                 } else {
+                    // กรณี CENTER ต้องเลือกคลังจริงจาก warehouses.php
+                    // ไม่ใช้ค่า DC_CODE = CENTER เป็นคลังปลายทาง
                     setSelectedWarehouseCode("");
+                    setSelectedDC(null);
                     setWarehouseSearchText("");
-                    setError("กรุณาเลือก Warehouse / DC ก่อนทำรายการ");
+                    setError(
+                        nextCenterMode
+                            ? "กรุณาเลือกคลังปลายทางก่อนทำรายการ"
+                            : "กรุณาเลือก Warehouse / DC ก่อนทำรายการ"
+                    );
                 }
             } else {
+                setIsCenterMode(false);
                 setSelectedWarehouseCode(String(userWarehouse).trim());
                 setWarehouseSearchText("");
                 setError("");
@@ -570,6 +586,7 @@ export default function NewVehicleRequestModal({
             localStorage.removeItem("user");
             setUserInfo(null);
             setSelectedDC(null);
+            setIsCenterMode(false);
             setError("อ่านข้อมูลผู้ใช้งานไม่ได้ กรุณา Login ใหม่");
         }
     }, [open]);
@@ -693,13 +710,14 @@ export default function NewVehicleRequestModal({
 
         console.log("========== DC CODE MATCH DEBUG ==========");
         console.log("USER WAREHOUSE:", userWarehouse);
+        console.log("CENTER MODE:", isCenterMode);
         console.log("DC CODE USED FOR FILTER:", dcCode);
         console.log("NORMALIZED USER DC CODE:", normalizeText(dcCode));
         console.log("MATCHED TRUCKS BY DC_CODE:", matchedTrucksByDcCode);
         console.log("TRUCK TYPE OPTIONS:", truckTypeOptions);
         console.log("LICENSE OPTIONS:", licenseOptions);
         console.log("=========================================");
-    }, [open, userWarehouse, dcCode, matchedTrucksByDcCode, truckTypeOptions, licenseOptions,]);
+    }, [open, userWarehouse, isCenterMode, dcCode, matchedTrucksByDcCode, truckTypeOptions, licenseOptions,]);
 
     const needLicenseList = useMemo(() => {
         return formData.fleet_type === "รถทดแทน";
@@ -1016,7 +1034,16 @@ export default function NewVehicleRequestModal({
 
         setLicenseReplaceList([]);
         setLicenseCheckMessages({});
+        setLicenseDuplicateStatus({});
         setCheckingLicenseIndex(null);
+
+        if (isCenterMode) {
+            setSelectedWarehouseCode("");
+            setSelectedDC(null);
+            setWarehouseSearchText("");
+            setShowWarehouseDropdown(false);
+        }
+
         setError("");
     };
 
@@ -1079,9 +1106,11 @@ export default function NewVehicleRequestModal({
 
         if (!dcCode) {
             setError(
-                canSelectWarehouse
-                    ? "กรุณาเลือก Warehouse / DC ก่อนบันทึกคำขอ"
-                    : "ไม่พบ warehouse / dc_code ของผู้ใช้งาน"
+                isCenterMode
+                    ? "กรุณาเลือกคลังปลายทางก่อนบันทึกคำขอ"
+                    : canSelectWarehouse
+                        ? "กรุณาเลือก Warehouse / DC ก่อนบันทึกคำขอ"
+                        : "ไม่พบ warehouse / dc_code ของผู้ใช้งาน"
             );
             return;
         }
@@ -1243,7 +1272,8 @@ export default function NewVehicleRequestModal({
                             {canSelectWarehouse && (
                                 <div className="md:col-span-4" ref={warehouseDropdownRef}>
                                     <label className="mb-1 block text-xs font-semibold text-slate-500">
-                                        เลือก Warehouse / DC <span className="text-red-500">*</span>
+                                        {isCenterMode ? "เลือกคลังปลายทาง (DC_NAME)" : "เลือก Warehouse / DC"}{" "}
+                                        <span className="text-red-500">*</span>
                                     </label>
 
                                     <div className="relative">
@@ -1255,6 +1285,7 @@ export default function NewVehicleRequestModal({
 
                                                 setWarehouseSearchText(value);
                                                 setSelectedWarehouseCode("");
+                                                setSelectedDC(null);
                                                 setShowWarehouseDropdown(true);
 
                                                 setFormData((prev) => ({
@@ -1271,8 +1302,10 @@ export default function NewVehicleRequestModal({
                                             disabled={loadingWarehouses}
                                             placeholder={
                                                 loadingWarehouses
-                                                    ? "กำลังโหลด Warehouse..."
-                                                    : "พิมพ์รหัส DC หรือชื่อ Warehouse..."
+                                                    ? "กำลังโหลดรายชื่อคลัง..."
+                                                    : isCenterMode
+                                                        ? "พิมพ์หรือเลือกชื่อคลังจาก DC_NAME..."
+                                                        : "พิมพ์รหัส DC หรือชื่อ Warehouse..."
                                             }
                                             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
                                         />
@@ -1321,14 +1354,14 @@ export default function NewVehicleRequestModal({
                                                                     : "text-slate-700"
                                                                     }`}
                                                             >
-                                                                <div className="font-bold">{code}</div>
+                                                                <div className="font-bold">
+                                                                    {name || code}
+                                                                </div>
 
-                                                                {(name || type) && (
-                                                                    <div className="mt-0.5 text-xs font-medium text-slate-500">
-                                                                        {name}
-                                                                        {type ? ` (${type})` : ""}
-                                                                    </div>
-                                                                )}
+                                                                <div className="mt-0.5 text-xs font-medium text-slate-500">
+                                                                    DC Code: {code || "-"}
+                                                                    {type ? ` • ${type}` : ""}
+                                                                </div>
                                                             </button>
                                                         );
                                                     })
@@ -1342,12 +1375,16 @@ export default function NewVehicleRequestModal({
                                     </div>
 
                                     <p className="mt-1 text-[11px] text-slate-400">
-                                        พิมพ์ค้นหาได้ทั้งรหัส DC, ชื่อ Warehouse หรือประเภท DC
+                                        {isCenterMode
+                                            ? "รายชื่อคลังดึงจาก warehouses.php โดยแสดงชื่อจากฟิลด์ DC_NAME"
+                                            : "พิมพ์ค้นหาได้ทั้งรหัส DC, ชื่อ Warehouse หรือประเภท DC"}
                                     </p>
 
                                     {!selectedWarehouseCode && warehouseSearchText && (
                                         <p className="mt-1 text-[11px] font-semibold text-amber-600">
-                                            กรุณาเลือก Warehouse / DC จากรายการที่แสดง
+                                            {isCenterMode
+                                                ? "กรุณาเลือกชื่อคลังจากรายการที่แสดง"
+                                                : "กรุณาเลือก Warehouse / DC จากรายการที่แสดง"}
                                         </p>
                                     )}
                                 </div>

@@ -205,6 +205,7 @@ interface VehicleWarehouseInfoData {
   car_chassis?: string | null;
   car_engine?: string | null;
   car_license?: string | null;
+  car_province?: string | null;
   number_feb?: string | null;
   date_number_feb?: string | null;
   number_tis?: string | null;
@@ -270,6 +271,7 @@ interface VehicleExtraForm {
   car_chassis: string;
   car_engine: string;
   car_license: string;
+  car_province: string;
 }
 
 const emptyVehicleExtraForm: VehicleExtraForm = {
@@ -293,6 +295,7 @@ const emptyVehicleExtraForm: VehicleExtraForm = {
   car_chassis: "",
   car_engine: "",
   car_license: "",
+  car_province: "",
 };
 
 const VEHICLE_DETAIL_FIELDS: Array<{
@@ -300,17 +303,18 @@ const VEHICLE_DETAIL_FIELDS: Array<{
   label: string;
   type?: "text" | "date";
 }> = [
-  {
-    key: "warehouse_plan_date",
-    label: "แผนวันที่จะเข้าคลังได้",
-    type: "date",
-  },
-  { key: "car_model", label: "รุ่น" },
-  { key: "car_brand", label: "ยี่ห้อ" },
-  { key: "car_chassis", label: "เลขที่ตัวถัง" },
-  { key: "car_engine", label: "เลขที่เครื่อง" },
-  { key: "car_license", label: "ทะเบียนรถ" },
-];
+    {
+      key: "warehouse_plan_date",
+      label: "แผนวันที่จะเข้าคลังได้",
+      type: "date",
+    },
+    { key: "car_model", label: "รุ่น" },
+    { key: "car_brand", label: "ยี่ห้อ" },
+    { key: "car_chassis", label: "เลขที่ตัวถัง" },
+    { key: "car_engine", label: "เลขที่เครื่อง" },
+    { key: "car_license", label: "ทะเบียนรถ" },
+    { key: "car_province", label: "จังหวัด" },
+  ];
 
 type MemoFileKey =
   | "number_feb"
@@ -826,7 +830,7 @@ export default function FlowAssessmentModal({
     if (!response.ok || result.status !== "success") {
       throw new Error(
         result.message ||
-          `โหลดข้อมูลรายละเอียดรถไม่สำเร็จ (${response.status})`
+        `โหลดข้อมูลรายละเอียดรถไม่สำเร็จ (${response.status})`
       );
     }
 
@@ -844,6 +848,7 @@ export default function FlowAssessmentModal({
       car_chassis: info.car_chassis || "",
       car_engine: info.car_engine || "",
       car_license: info.car_license || "",
+      car_province: info.car_province || "",
       number_feb: info.number_feb || "",
       date_number_feb: toDateInputValue(info.date_number_feb),
       number_tis: info.number_tis || "",
@@ -1450,7 +1455,7 @@ export default function FlowAssessmentModal({
       if (!memoResponse.ok || memoResult.status !== "success") {
         throw new Error(
           memoResult.message ||
-            `บันทึก${field.label}ไม่สำเร็จ (${memoResponse.status})`
+          `บันทึก${field.label}ไม่สำเร็จ (${memoResponse.status})`
         );
       }
 
@@ -1517,7 +1522,7 @@ export default function FlowAssessmentModal({
         if (!fileResponse.ok || fileResult.status !== "success") {
           throw new Error(
             fileResult.message ||
-              `บันทึกเลขบันทึกแล้ว แต่อัปโหลดไฟล์ของ${field.label}ไม่สำเร็จ (${fileResponse.status})`
+            `บันทึกเลขบันทึกแล้ว แต่อัปโหลดไฟล์ของ${field.label}ไม่สำเร็จ (${fileResponse.status})`
           );
         }
 
@@ -1726,6 +1731,16 @@ export default function FlowAssessmentModal({
     return `${year}-${month}-${day}`;
   };
 
+  const getTodayDateKey = () => {
+    const now = new Date();
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  };
+
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-5">
       <button
@@ -1872,82 +1887,69 @@ export default function FlowAssessmentModal({
                       label="วันที่ขอ"
                       value={formatDateTime(request?.request_date)}
                     />
-                    <DetailItem label="ผู้ขอ" value={request?.request_by} />
+
                     <DetailItem
-                      label="จำนวนรถ"
+                      label="ผู้ขอ"
+                      value={request?.request_by}
+                    />
+
+                    <DetailItem
+                      label="จำนวนรถที่ขอ"
                       value={`${formatNumber(request?.qty)} คัน`}
                     />
+
                     <DetailItem
-                      label="Workload"
-                      value={formatNumber(request?.workload)}
+                      label="จำนวนรถที่อนุมัติ"
+                      value={`${formatNumber(request?.approved_qty ?? 0)} คัน`}
                     />
+
                     <DetailItem
-                      label="Truck Turn"
-                      value={formatNumber(request?.truckturn)}
+                      label="จำนวนรถที่ไม่อนุมัติ"
+                      value={`${formatNumber(
+                        Math.max(
+                          Number(request?.qty ?? 0) -
+                          Number(request?.approved_qty ?? 0),
+                          0
+                        )
+                      )} คัน`}
                     />
+
+
                     <DetailItem
                       label="บริษัทที่อนุมัติ"
-                      value={request?.approved_company_name || "รออนุมัติ"}
+                      value={
+                        request?.approved_company_name ||
+                        "รออนุมัติ"
+                      }
                     />
+
+                    <DetailItem
+                      label="ประเภทรถที่อนุมัติ"
+                      value={
+                        request?.approved_truck_type || "-"
+                      }
+                    />
+
                     <DetailItem
                       label="ผู้อนุมัติ"
                       value={request?.approved_by || "-"}
                     />
+
                     <DetailItem
-                      label="วันที่อนุมัติ"
-                      value={formatDateTime(request?.approved_date)}
+                      label="Workload"
+                      value={formatNumber(request?.workload)}
                     />
+
+                    <DetailItem
+                      label="Truck Turn"
+                      value={formatNumber(request?.truckturn)}
+                    />
+
+
                     <DetailItem
                       label="หมายเหตุ"
                       value={request?.remark || "-"}
                     />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-black text-slate-800">
-                      รายการรถ
-                    </h3>
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-600">
-                      {data.cars.length} คัน
-                    </span>
-                  </div>
-
-                  <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto pr-1">
-                    {data.cars.length === 0 ? (
-                      <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs font-semibold text-slate-400">
-                        ไม่พบข้อมูลรถ
-                      </p>
-                    ) : (
-                      data.cars.map((car) => (
-                        <div
-                          key={`${car.vehicle_no}-${car.license}`}
-                          className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-black text-slate-800">
-                                คันที่ {car.vehicle_no}: {car.license}
-                              </p>
-                              <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
-                                {car.truck_type || "-"} ·{" "}
-                                {String(car.province || "-").trim()}
-                              </p>
-                            </div>
-
-                            <Truck
-                              size={16}
-                              className="shrink-0 text-blue-500"
-                            />
-                          </div>
-
-                          <p className="mt-2 truncate text-[10px] font-bold text-slate-500">
-                            {car.company_name || "-"}
-                          </p>
-                        </div>
-                      ))
-                    )}
                   </div>
                 </div>
               </div>
@@ -2111,51 +2113,64 @@ export default function FlowAssessmentModal({
                             </div>
 
                             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_170px_minmax(180px,0.8fr)_110px]">
+                              {/* เลขบันทึก */}
                               <input
                                 type="text"
                                 value={vehicleExtraForm[field.key]}
-                                onChange={(event) =>
-                                  handleVehicleExtraChange(
-                                    field.key,
-                                    event.target.value
-                                  )
-                                }
+                                onChange={(event) => {
+                                  const value = event.target.value;
+
+                                  setVehicleExtraForm((previous) => {
+                                    const previousMemoNumber = String(
+                                      previous[field.key] || ""
+                                    ).trim();
+
+                                    const previousMemoDate = String(
+                                      previous[field.dateKey] || ""
+                                    ).trim();
+
+                                    const shouldSetCurrentDate =
+                                      value.trim() !== "" &&
+                                      previousMemoNumber === "" &&
+                                      previousMemoDate === "";
+
+                                    return {
+                                      ...previous,
+                                      [field.key]: value,
+                                      [field.dateKey]: shouldSetCurrentDate
+                                        ? getTodayDateKey()
+                                        : previous[field.dateKey],
+                                    };
+                                  });
+                                }}
                                 placeholder={`กรอก${field.label}`}
                                 disabled={savingMemoKey !== null}
                                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                               />
 
-                              <button
-                                type="button"
-                                onClick={(event) =>
-                                  setOpenMemoDatePicker({
-                                    dateKey: field.dateKey,
-                                    label: field.label,
-                                    position:
-                                      getCalendarPopoverPosition(
-                                        event.currentTarget
-                                      ),
-                                  })
-                                }
-                                disabled={savingMemoKey !== null}
-                                className="flex h-10 w-full items-center gap-2 rounded-xl border border-blue-100 bg-white px-3 text-left text-xs font-bold text-slate-700 outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-                              >
+                              {/* วันที่เพิ่มเลขบันทึก */}
+                              <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 text-xs font-bold text-slate-700">
                                 <CalendarDays
                                   size={14}
                                   className="shrink-0 text-blue-500"
                                 />
 
-                                <span className="truncate">
-                                  {vehicleExtraForm[field.dateKey]
-                                    ? formatDate(
-                                      vehicleExtraForm[
-                                      field.dateKey
-                                      ]
-                                    )
-                                    : "เลือกวันที่"}
-                                </span>
-                              </button>
+                                <div className="min-w-0">
+                                  <p className="truncate">
+                                    {memoDate
+                                      ? formatDate(memoDate)
+                                      : "รอกรอกเลขบันทึก"}
+                                  </p>
 
+                                  {memoDate && (
+                                    <p className="truncate text-[8px] font-semibold text-slate-400">
+                                      วันที่เพิ่มเลขบันทึก
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* แนบไฟล์ */}
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <label
                                   className={`flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-xl border px-3 text-xs font-bold transition ${selectedFile
@@ -2168,10 +2183,7 @@ export default function FlowAssessmentModal({
                                       : ""
                                     }`}
                                 >
-                                  <FileUp
-                                    size={14}
-                                    className="shrink-0"
-                                  />
+                                  <FileUp size={14} className="shrink-0" />
 
                                   <span className="truncate">
                                     {selectedFile?.name ||
@@ -2182,20 +2194,13 @@ export default function FlowAssessmentModal({
                                   <input
                                     type="file"
                                     accept={MEMO_FILE_ACCEPT}
-                                    disabled={
-                                      savingMemoKey !== null
-                                    }
+                                    disabled={savingMemoKey !== null}
                                     className="hidden"
                                     onChange={(event) => {
                                       const file =
-                                        event.target.files?.[0] ||
-                                        null;
+                                        event.target.files?.[0] || null;
 
-                                      handleMemoFileChange(
-                                        field.key,
-                                        file
-                                      );
-
+                                      handleMemoFileChange(field.key, file);
                                       event.target.value = "";
                                     }}
                                   />
@@ -2205,14 +2210,9 @@ export default function FlowAssessmentModal({
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      handleMemoFileChange(
-                                        field.key,
-                                        null
-                                      )
+                                      handleMemoFileChange(field.key, null)
                                     }
-                                    disabled={
-                                      savingMemoKey !== null
-                                    }
+                                    disabled={savingMemoKey !== null}
                                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-100 bg-white text-rose-500 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     title="ยกเลิกไฟล์ใหม่"
                                   >
@@ -2221,11 +2221,10 @@ export default function FlowAssessmentModal({
                                 )}
                               </div>
 
+                              {/* บันทึก */}
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleSaveMemo(field)
-                                }
+                                onClick={() => handleSaveMemo(field)}
                                 disabled={
                                   savingMemoKey !== null ||
                                   !memoNumber ||

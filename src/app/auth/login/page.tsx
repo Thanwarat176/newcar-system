@@ -261,14 +261,14 @@ export default function LoginPage() {
       if (!res.ok) {
         setAlertState({
           type: "error",
-          message: data.message || "สมัครสมาชิกไม่สำเร็จ",
+          message: data.message || "สร้างบัญชีผู้ใช้งานไม่สำเร็จ",
         });
         return;
       }
 
       setAlertState({
         type: "success",
-        message: "สมัครสมาชิกสำเร็จ",
+        message: "สร้างบัญชีผู้ใช้งานสำเร็จ",
       });
 
       setRegisterData({
@@ -472,7 +472,7 @@ export default function LoginPage() {
 
                     <SwitchText
                       text="ยังไม่มีบัญชี?"
-                      action="สมัครสมาชิก"
+                      action="สร้างบัญชีผู้ใช้งาน"
                       onClick={() => setIsRegister(true)}
                     />
                   </Card>
@@ -489,12 +489,8 @@ export default function LoginPage() {
                     </div>
 
                     <h2 className="text-lg font-black text-blue-800">
-                      สมัครสมาชิก
+                      สร้างบัญชีผู้ใช้งาน
                     </h2>
-
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      สร้างบัญชีสำหรับใช้งานระบบออกรถใหม่
-                    </p>
                   </div>
 
                   <form
@@ -670,7 +666,7 @@ export default function LoginPage() {
                       type="submit"
                       className="w-full rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 py-3 text-sm font-bold text-white shadow-[0_18px_40px_rgba(37,99,235,0.30)] transition hover:scale-[1.01] active:scale-[0.98]"
                     >
-                      สมัครสมาชิก
+                      สร้างบัญชีผู้ใช้งาน
                     </button>
 
                     <p className="text-center text-xs text-slate-600">

@@ -126,6 +126,11 @@ interface RequestItem {
   status: string;
   request_by: string;
   remark: string;
+
+  approved_qty?: number | string | null;
+  approved_suppliers?: unknown;
+  approved_truck_type?: string | null;
+
   running_doc_vehicle_no?: string;
   vehicle_no?: string | number;
   vehicle_license?: string;
@@ -328,8 +333,15 @@ export default function HomePage() {
       setLoading(true);
       setError("");
 
+      /*
+      |--------------------------------------------------------------------------
+      | ใช้ request_get.php เป็นข้อมูลหลัก
+      | เพราะ API นี้มี approved_qty
+      |--------------------------------------------------------------------------
+      */
+
       const res = await fetch(
-        "http://192.168.158.210/api_new_truck/api/flow_data_get.php",
+        "http://192.168.158.210/api_new_truck/api/request_get.php",
         {
           method: "GET",
           headers: {
@@ -341,82 +353,232 @@ export default function HomePage() {
       );
 
       if (!res.ok) {
-        throw new Error(`ไม่สามารถดึงข้อมูลได้ (${res.status})`);
+        throw new Error(
+          `ไม่สามารถดึงข้อมูลคำขอได้ (${res.status})`
+        );
       }
 
       const result = await res.json();
 
-      // ข้อมูลอยู่ใน result.data ซึ่งเป็น Array
-      const list: RequestItem[] = Array.isArray(result?.data)
-        ? result.data
-        : [];
+      const list: RequestItem[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.data)
+          ? result.data
+          : Array.isArray(result?.result)
+            ? result.result
+            : Array.isArray(result?.requests)
+              ? result.requests
+              : [];
 
-      // แสดงเฉพาะ status = progress
+      /*
+      |--------------------------------------------------------------------------
+      | แสดงเฉพาะ progress
+      | รถเสริมไม่แสดงในหน้านี้
+      | และต้องมี approved_qty มากกว่า 0
+      |--------------------------------------------------------------------------
+      */
+
       const progressList = list.filter((item) => {
         const status = String(item.status || "")
           .trim()
           .toLowerCase();
-      
-        const fleetType = String(item.fleet_type || "").trim();
-      
-        return status === "progress" && fleetType !== "รถเสริม";
+
+        const fleetType = String(
+          item.fleet_type || ""
+        ).trim();
+
+        const approvedQty = Math.max(
+          0,
+          Math.floor(
+            Number(item.approved_qty ?? 0)
+          )
+        );
+
+        return (
+          status === "progress" &&
+          fleetType !== "รถเสริม" &&
+          approvedQty > 0
+        );
       });
 
+      /*
+      |--------------------------------------------------------------------------
+      | สร้างแถวตาม approved_qty
+      |--------------------------------------------------------------------------
+      */
+
       const requestRows = await Promise.all(
-        progressList.map(async (item): Promise<RequestItem[]> => {
-          if (item.id === null || item.id === undefined) {
-            return [
-              {
-                ...item,
-                running_doc_vehicle_no: item.running_doc,
-                vehicle_progress: [],
-              },
-            ];
+        progressList.map(
+          async (
+            item
+          ): Promise<RequestItem[]> => {
+            const approvedQty = Math.max(
+              0,
+              Math.floor(
+                Number(item.approved_qty ?? 0)
+              )
+            );
+
+            if (approvedQty <= 0) {
+              return [];
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | กรณีไม่มี Request ID
+            | สร้างแถวรถตาม approved_qty โดยยังไม่มีข้อมูล Process
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+              item.id === null ||
+              item.id === undefined
+            ) {
+              return Array.from(
+                { length: approvedQty },
+                (_, index) => {
+                  const vehicleNo = index + 1;
+
+                  return {
+                    ...item,
+
+                    approved_qty: approvedQty,
+
+                    running_doc_vehicle_no:
+                      `${item.running_doc}_${vehicleNo}`,
+
+                    vehicle_no: vehicleNo,
+                    vehicle_license: "",
+
+                    current_step: 0,
+                    total_steps: 0,
+
+                    // หนึ่งแถวแทนหนึ่งคัน
+                    qty: 1,
+
+                    vehicle_progress: [],
+                  };
+                }
+              );
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | ดึงข้อมูล Process ของรถแต่ละคัน
+            |--------------------------------------------------------------------------
+            */
+
+            const detail =
+              await fetchVehicleProgress(item.id);
+
+            const requestBase: RequestItem = {
+              ...item,
+
+              approved_qty: approvedQty,
+
+              usage_date:
+                detail.usageDate ||
+                item.usage_date,
+
+              dc_type:
+                detail.dcType ||
+                item.dc_type,
+
+              dc_code:
+                detail.dcCode ||
+                item.dc_code,
+
+              request_by:
+                detail.requestBy ||
+                item.request_by,
+            };
+
+            /*
+            |--------------------------------------------------------------------------
+            | สร้างจำนวนแถวให้เท่ากับ approved_qty เสมอ
+            |
+            | ตัวอย่าง:
+            | approved_qty = 8
+            | แต่มีข้อมูลรถจริงเพียง 3 คัน
+            |
+            | ระบบจะแสดง:
+            | รถคันที่ 1–3 = มีข้อมูล Process
+            | รถคันที่ 4–8 = ยังไม่ได้รับข้อมูลจากส่วนกลาง
+            |--------------------------------------------------------------------------
+            */
+
+            return Array.from(
+              { length: approvedQty },
+              (_, index) => {
+                const vehicle =
+                  detail.vehicleProgress[index];
+
+                const fallbackVehicleNo =
+                  index + 1;
+
+                const vehicleNo =
+                  vehicle?.vehicle_no ??
+                  fallbackVehicleNo;
+
+                return {
+                  ...requestBase,
+
+                  running_doc_vehicle_no:
+                    vehicle
+                      ?.running_doc_vehicle_no ||
+                    `${item.running_doc}_${vehicleNo}`,
+
+                  vehicle_no: vehicleNo,
+
+                  vehicle_license:
+                    vehicle?.license || "",
+
+                  current_step:
+                    vehicle?.current_step ?? 0,
+
+                  total_steps:
+                    vehicle?.total_steps ?? 0,
+
+                  // หนึ่งแถวต่อรถหนึ่งคัน
+                  qty: 1,
+
+                  vehicle_progress: vehicle
+                    ? [vehicle]
+                    : [],
+                };
+              }
+            );
           }
-
-          const detail = await fetchVehicleProgress(item.id);
-
-          const requestBase: RequestItem = {
-            ...item,
-            usage_date: detail.usageDate || item.usage_date,
-            dc_type: detail.dcType || item.dc_type,
-            dc_code: detail.dcCode || item.dc_code,
-            request_by: detail.requestBy || item.request_by,
-          };
-
-          // ไม่มีข้อมูลรถ ให้คงไว้ 1 แถวเพื่อไม่ให้รายการหาย
-          if (detail.vehicleProgress.length === 0) {
-            return [
-              {
-                ...requestBase,
-                running_doc_vehicle_no: item.running_doc,
-                vehicle_progress: [],
-              },
-            ];
-          }
-
-          // แตก 1 Request เป็นหลายแถวตามจำนวนรถ
-          return detail.vehicleProgress.map((vehicle) => ({
-            ...requestBase,
-            running_doc_vehicle_no: vehicle.running_doc_vehicle_no || "",
-            vehicle_no: vehicle.vehicle_no,
-            vehicle_license: vehicle.license,
-            current_step: vehicle.current_step,
-            total_steps: vehicle.total_steps,
-            qty: 1,
-            vehicle_progress: [vehicle],
-          }));
-        })
+        )
       );
 
-      const listWithProgress = requestRows.flat();
+      const listWithProgress =
+        requestRows.flat();
 
-      console.log("listWithProgress:", listWithProgress);
+      console.log(
+        "REQUESTS FROM request_get.php:",
+        list
+      );
+
+      console.log(
+        "ROWS BY approved_qty:",
+        listWithProgress
+      );
+
       setRequests(listWithProgress);
     } catch (err) {
-      console.error("fetchRequests error:", err);
+      console.error(
+        "fetchRequests error:",
+        err
+      );
+
       setRequests([]);
-      setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "เกิดข้อผิดพลาดในการดึงข้อมูลจาก API"
+      );
     } finally {
       setLoading(false);
     }
@@ -744,7 +906,7 @@ export default function HomePage() {
       value === "confirm_request" ||
       value === "confirm request" ||
       value === "in_progress" ||
-      value === "รอส่วนกลางอนุมัติ"
+      value === "คำขอรอพิจารณา (TCAS)"
     ) {
       return "progress";
     }
@@ -759,9 +921,9 @@ export default function HomePage() {
   const formatStatusText = (status?: string) => {
     const value = normalizeStatus(status);
 
-    if (value === "progress") return "รอส่วนกลางอนุมัติ";
-    if (value === "reject_by_center") return "ส่วนกลางไม่อนุมัติ";
-    if (value === "approved") return "อนุมัติแล้ว";
+    if (value === "progress") return "คำขอรอพิจารณา (TCAS)";
+    if (value === "reject_by_center") return "ไม่ผ่านการประเมิน (TCAS)";
+    if (value === "approved") return "เสร็จสิ้นกระบวนการ ";
 
     return status || "-";
   };
@@ -910,14 +1072,14 @@ export default function HomePage() {
       );
     }
 
-    // ส่วนกลางไม่อนุมัติ = reject_by_center
+    // ไม่ผ่านการประเมิน (TCAS) = reject_by_center
     if (statusFilter === "reject_by_center") {
       list = list.filter(
         (item) => normalizeStatus(item.status) === "reject_by_center"
       );
     }
 
-    // อนุมัติแล้ว = โชว์ 0 รายการ
+    // TCAS  = โชว์ 0 รายการ
     if (statusFilter === "approved") {
       list = [];
     }
@@ -990,18 +1152,18 @@ export default function HomePage() {
           : "";
 
     if (statusFilter === "progress") {
-      return `รายการรอส่วนกลางอนุมัติ${dcSuffix}`;
+      return `รายการคำขอรอพิจารณา (TCAS)${dcSuffix}`;
     }
 
     if (statusFilter === "reject_by_center") {
-      return `รายการส่วนกลางไม่อนุมัติ${dcSuffix}`;
+      return `รายการไม่ผ่านการประเมิน (TCAS)${dcSuffix}`;
     }
 
     if (statusFilter === "approved") {
-      return `รายการอนุมัติแล้ว${dcSuffix}`;
+      return `รายการTCAS ${dcSuffix}`;
     }
 
-    return `รายการรอประเมินกองรถ${dcSuffix}`;
+    return `รายการติดตามกองรถออกใหม่/ทดแทน${dcSuffix}`;
   }, [
     statusFilter,
     dcFilter,
@@ -1134,7 +1296,7 @@ export default function HomePage() {
               <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
                 <Truck size={18} className="shrink-0" />
               </span>
-              <span className="truncate">รอประเมินกองรถ</span>
+              <span className="truncate">ติดตามกองรถออกใหม่/ทดแทน</span>
             </h1>
 
             <div className="mt-2 flex flex-wrap gap-2">
@@ -1154,10 +1316,10 @@ export default function HomePage() {
                 {statusFilter === "all"
                   ? "ดูทั้งหมด"
                   : statusFilter === "progress"
-                    ? "รอส่วนกลางอนุมัติ"
+                    ? "TCAS คำขอรอพิจารณา (TCAS)"
                     : statusFilter === "reject_by_center"
-                      ? "ส่วนกลางไม่อนุมัติ"
-                      : "อนุมัติแล้ว"}
+                      ? "ไม่ผ่านการประเมิน (TCAS) TCAS"
+                      : "TCAS อนุมัติแล้ว"}
               </span>
             </div>
           </div>
@@ -1202,7 +1364,7 @@ export default function HomePage() {
               },
               {
                 key: "progress",
-                label: "รอส่วนกลางอนุมัติ",
+                label: "คำขอรอพิจารณา (TCAS)",
                 count: dashboardSummary.progress,
                 sub: "รายการที่รอการพิจารณา",
                 activeClass:
@@ -1218,7 +1380,7 @@ export default function HomePage() {
               },
               {
                 key: "reject_by_center",
-                label: "ส่วนกลางไม่อนุมัติ",
+                label: "ไม่ผ่านการประเมิน (TCAS)",
                 count: dashboardSummary.rejectedByCenter,
                 sub: "รายการที่ไม่ผ่านการประเมิน",
                 activeClass:
@@ -1234,7 +1396,7 @@ export default function HomePage() {
               },
               {
                 key: "approved",
-                label: "อนุมัติแล้ว",
+                label: "เสร็จสิ้นกระบวนการ ",
                 count: dashboardSummary.approved,
                 sub: "รายการที่ผ่านการประเมิน",
                 activeClass:
@@ -1344,7 +1506,7 @@ export default function HomePage() {
                   ค้นหาและตัวกรอง
                 </p>
                 <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400">
-                  เลือกเงื่อนไขเพื่อค้นหารายการรอประเมินกองรถ
+                  เลือกเงื่อนไขเพื่อค้นหารายการติดตามกองรถออกใหม่/ทดแทน
                 </p>
               </div>
             </div>
@@ -1634,7 +1796,6 @@ export default function HomePage() {
                       "DC Type",
                       "DC",
                       "ประเภทรถ",
-                      "จำนวน",
                       "วันที่ใช้งาน",
                       "ผู้ขอ",
                       "สถานะ",
@@ -1698,11 +1859,9 @@ export default function HomePage() {
                           const statusText = formatStatusText(status);
                           const statusVisual = getStatusVisual(status);
                           const licenseList = getLicenseList(item.license_replace);
-                          const visibleLicenses = licenseList.slice(0, 2);
-                          const hiddenLicenseCount = Math.max(
-                            licenseList.length - 2,
-                            0
-                          );
+                          const hasVehicleProgress =
+                            Array.isArray(item.vehicle_progress) &&
+                            item.vehicle_progress.length > 0;
                           const rowKey =
                             item.running_doc_vehicle_no ||
                             (item.id !== null && item.id !== undefined
@@ -1722,7 +1881,8 @@ export default function HomePage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-black text-slate-800">
-                                {`${item.running_doc}_${item.vehicle_no}`}
+                                {item.running_doc_vehicle_no ||
+  `${item.running_doc}_${item.vehicle_no}`}
                                 </p>
                                 <p className="mt-0.5 text-[10px] font-medium text-slate-400">
                                   ขอ: {formatThaiDate(item.request_date || item.date)}
@@ -1747,12 +1907,6 @@ export default function HomePage() {
                                 </p>
                               </td>
 
-                              <td className="px-3 py-3 text-center">
-                                <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
-                                  {formatNumber(item.qty)}
-                                </span>
-                              </td>
-
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-black text-slate-700">
                                   {formatThaiDate(item.usage_date)}
@@ -1772,38 +1926,42 @@ export default function HomePage() {
                               </td>
 
                               <td className="px-3 py-3">
-                                <div className="min-w-[170px]">
-                                  {item.vehicle_no !== undefined &&
-                                  item.vehicle_no !== null ? (
-                                    <div className="flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 ring-1 ring-blue-100">
-                                      <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+  <div className="min-w-[190px]">
+    {hasVehicleProgress ? (
+      <div className="flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 ring-1 ring-blue-100">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
 
-                                      <div className="min-w-0">
-                                        <p className="whitespace-nowrap text-[10px] font-black text-blue-700">
-                                          รถคันที่ {item.vehicle_no} :{" "}
-                                          {item.current_step ?? 0}/{item.total_steps ?? 0}
-                                        </p>
+        <div className="min-w-0">
+          <p className="whitespace-nowrap text-[10px] font-black text-blue-700">
+            รถคันที่{" "}
+            {item.vehicle_no} :{" "}
+            {item.current_step ?? 0}/
+            {item.total_steps ?? 0}
+          </p>
 
-                                        <p className="mt-0.5 max-w-[145px] truncate text-[9px] font-semibold text-slate-400">
-                                          {item.vehicle_license || "-"}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center gap-2">
-                                      <span
-                                        className={`h-2.5 w-2.5 rounded-full ${statusVisual.dotClass}`}
-                                      />
+          <p className="mt-0.5 max-w-[155px] truncate text-[9px] font-semibold text-slate-400">
+            {item.vehicle_license || "-"}
+          </p>
+        </div>
+      </div>
+    ) : (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
 
-                                      <p
-                                        className={`text-[11px] font-black ${statusVisual.textClass}`}
-                                      >
-                                        ยังไม่เริ่มกระบวนการ
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
+          <p className="text-[10px] font-black text-amber-700">
+            รถคันที่{" "}
+            {item.vehicle_no}
+          </p>
+        </div>
+
+        <p className="mt-1 text-[9px] font-semibold text-amber-600">
+          ยังไม่ได้รับข้อมูลจากส่วนกลาง
+        </p>
+      </div>
+    )}
+  </div>
+</td>
 
                               <td className="whitespace-nowrap px-3 py-3 text-right">
                                 <button
@@ -1829,11 +1987,11 @@ export default function HomePage() {
       </main>
 
       <FlowAssessmentModal
-  open={openDetailModal}
-  requestId={selectedRequest?.id ?? null}
-  vehicleNo={selectedRequest?.vehicle_no ?? null}
-  onClose={handleCloseDetail}
-/>
+        open={openDetailModal}
+        requestId={selectedRequest?.id ?? null}
+        vehicleNo={selectedRequest?.vehicle_no ?? null}
+        onClose={handleCloseDetail}
+      />
 
     </div>
   );
