@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import AlertPopup from "../../components/alertPopup/page";
+import AlertPopup from "../../components/alertPopup/AlertPopup";
 import { PATHS } from "../../lib/paths";
 
 export default function ResetPasswordPage() {

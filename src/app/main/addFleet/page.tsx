@@ -179,6 +179,14 @@ type StatusFilter =
   | "process"
   | "rejected";
 
+  type ProcessStageFilter =
+  | "all"
+  | "not_started"
+  | "waiting"
+  | "active"
+  | "completed"
+  | "no_data";
+
 export default function HomePage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [processVehicleRows, setProcessVehicleRows] = useState<RequestItem[]>([]);
@@ -202,6 +210,8 @@ export default function HomePage() {
 
   const [openCreateModal, setOpenCreateModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [processStageFilter, setProcessStageFilter] =
+  useState<ProcessStageFilter>("all");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [searchText, setSearchText] = useState("");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
@@ -1065,6 +1075,66 @@ export default function HomePage() {
     }
 
     return [];
+  };
+
+  const getProcessStage = (
+    item: RequestItem
+  ): Exclude<ProcessStageFilter, "all"> => {
+    const currentProcess = String(
+      item.current_process || ""
+    )
+      .trim()
+      .toLowerCase();
+  
+    const hasVehicleNo =
+      item.vehicle_no !== null &&
+      item.vehicle_no !== undefined &&
+      item.vehicle_no !== "";
+  
+    if (
+      !hasVehicleNo ||
+      !currentProcess ||
+      currentProcess.includes(
+        "ยังไม่พบข้อมูลขั้นตอน"
+      ) ||
+      currentProcess.includes(
+        "ยังไม่พบข้อมูลรถ"
+      )
+    ) {
+      return "no_data";
+    }
+  
+    if (
+      currentProcess.includes(
+        "ดำเนินการครบทุกขั้นตอน"
+      ) ||
+      currentProcess.includes("เสร็จสิ้น") ||
+      currentProcess.includes("completed")
+    ) {
+      return "completed";
+    }
+  
+    if (
+      currentProcess.includes(
+        "ยังไม่เริ่มดำเนินการ"
+      ) ||
+      currentProcess.startsWith("รอเริ่ม")
+    ) {
+      return "not_started";
+    }
+  
+    if (
+      currentProcess.startsWith(
+        "รอดำเนินการ"
+      ) ||
+      currentProcess.includes(
+        "รอดำเนินการ:"
+      )
+    ) {
+      return "waiting";
+    }
+  
+    return "active";
   };
 
   const warehouseFilteredRequests = useMemo(() => {

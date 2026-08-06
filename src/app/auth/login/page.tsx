@@ -4,8 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { PATHS, IMAGE_PATHS } from "../../lib/paths";
-import AlertPopup from "../../components/alertPopup/page";
-
+import AlertPopup from "../../components/alertPopup/AlertPopup";
 
 type SelectOption = {
   value: string;

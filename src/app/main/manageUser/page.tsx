@@ -19,8 +19,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-import AlertPopup from "../../components/alertPopup/page";
-import ConfirmModal from "../manageUser/components/ConfirmModal/page";
+import AlertPopup from "../../components/alertPopup/AlertPopup";
+import ConfirmModal from "../manageUser/components/ConfirmModal";
 
 type AlertType = "success" | "error" | "warning" | "info";
 
