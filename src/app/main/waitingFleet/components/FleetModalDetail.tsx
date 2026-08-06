@@ -11,11 +11,26 @@ import CheckDC from "../../component/CheckDC";
 interface RequestDetailItem {
     id?: string | number;
     request_id?: string | number;
+
     license?: string;
     province?: string;
     truck_type?: string;
     company_id?: string;
     company_name?: string;
+
+    // ชื่อฟิลด์จริงใน details
+    license_replace?: string;
+    province_replace?: string;
+    truck_type_replace?: string;
+    company_id_replace?: string;
+    company_name_replace?: string;
+
+    // ชื่อที่ใช้ภายในหน้า
+    detail_license_replace?: string;
+    detail_province_replace?: string;
+    detail_truck_type_replace?: string;
+    detail_company_id_replace?: string;
+    detail_company_name_replace?: string;
 }
 
 interface RequestItem {
@@ -69,13 +84,63 @@ interface TruckItem {
     DC_CODE?: string;
     dc_code?: string;
 
+    LICENSE?: string;
+    license?: string;
+
+    PROVINCE?: string;
+    province?: string;
+
+    COMPANY_ID?: string;
+    company_id?: string;
+
+    ONLY_COMPANY_NAME?: string;
+    only_company_name?: string;
+
+    COMPANY_NAME?: string;
+    company_name?: string;
+
     TRUCK_TYPE?: string;
     truck_type?: string;
     truckType?: string;
+
+    STATUS?: string;
+    status?: string;
+
+    STATUS_APPROVE?: string;
+    status_approve?: string;
+
     name?: string;
     Name?: string;
 
     [key: string]: any;
+}
+
+interface ReplacementVehicleOption {
+    license: string;
+    province: string;
+    companyId: string;
+    companyName: string;
+    truckType: string;
+}
+
+type SingleVehicleDecision =
+    | "pending"
+    | "approved"
+    | "rejected";
+
+interface SingleVehicleState {
+    decision: SingleVehicleDecision;
+
+    newLicense: string;
+    newProvince: string;
+
+    companyId: string;
+    companyName: string;
+
+    truckType: string;
+
+    approvedSaved: boolean;
+    error: string;
 }
 
 interface WorkloadItem {
@@ -159,7 +224,87 @@ type FbpDecision =
     | "approve"
     | "reject_by_fbp";
 
-export default function GMModalDetail({
+const THAI_PROVINCES = [
+    "กรุงเทพมหานคร",
+    "กระบี่",
+    "กาญจนบุรี",
+    "กาฬสินธุ์",
+    "กำแพงเพชร",
+    "ขอนแก่น",
+    "จันทบุรี",
+    "ฉะเชิงเทรา",
+    "ชลบุรี",
+    "ชัยนาท",
+    "ชัยภูมิ",
+    "ชุมพร",
+    "เชียงราย",
+    "เชียงใหม่",
+    "ตรัง",
+    "ตราด",
+    "ตาก",
+    "นครนายก",
+    "นครปฐม",
+    "นครพนม",
+    "นครราชสีมา",
+    "นครศรีธรรมราช",
+    "นครสวรรค์",
+    "นนทบุรี",
+    "นราธิวาส",
+    "น่าน",
+    "บึงกาฬ",
+    "บุรีรัมย์",
+    "ปทุมธานี",
+    "ประจวบคีรีขันธ์",
+    "ปราจีนบุรี",
+    "ปัตตานี",
+    "พระนครศรีอยุธยา",
+    "พะเยา",
+    "พังงา",
+    "พัทลุง",
+    "พิจิตร",
+    "พิษณุโลก",
+    "เพชรบุรี",
+    "เพชรบูรณ์",
+    "แพร่",
+    "ภูเก็ต",
+    "มหาสารคาม",
+    "มุกดาหาร",
+    "แม่ฮ่องสอน",
+    "ยโสธร",
+    "ยะลา",
+    "ร้อยเอ็ด",
+    "ระนอง",
+    "ระยอง",
+    "ราชบุรี",
+    "ลพบุรี",
+    "ลำปาง",
+    "ลำพูน",
+    "เลย",
+    "ศรีสะเกษ",
+    "สกลนคร",
+    "สงขลา",
+    "สตูล",
+    "สมุทรปราการ",
+    "สมุทรสงคราม",
+    "สมุทรสาคร",
+    "สระแก้ว",
+    "สระบุรี",
+    "สิงห์บุรี",
+    "สุโขทัย",
+    "สุพรรณบุรี",
+    "สุราษฎร์ธานี",
+    "สุรินทร์",
+    "หนองคาย",
+    "หนองบัวลำภู",
+    "อ่างทอง",
+    "อำนาจเจริญ",
+    "อุดรธานี",
+    "อุตรดิตถ์",
+    "อุทัยธานี",
+    "อุบลราชธานี",
+] as const;
+
+export default function FleetModalDetail({
     open,
     onClose,
     data,
@@ -197,6 +342,16 @@ export default function GMModalDetail({
     const [fleetCheckStats, setFleetCheckStats] = useState<FleetCheckStats>(initialFleetCheckStats);
     const [fleetCheckError, setFleetCheckError] = useState("");
     const [trucks, setTrucks] = useState<TruckItem[]>([]);
+    const [allTruckRows, setAllTruckRows] = useState<TruckItem[]>([]);
+
+    const [singleVehicleStates, setSingleVehicleStates] = useState<
+        Record<string, SingleVehicleState>
+    >({});
+
+    const [
+        savingSingleVehicleKey,
+        setSavingSingleVehicleKey,
+    ] = useState<string | null>(null);
     const [loadingTrucks, setLoadingTrucks] = useState(false);
     const [truckError, setTruckError] = useState("");
     const [selectedFleetCheckDc, setSelectedFleetCheckDc] = useState("");
@@ -1110,6 +1265,7 @@ export default function GMModalDetail({
 
         if (!dcCode) {
             setTrucks([]);
+            setAllTruckRows([]);
             setTruckError("ไม่พบรหัส DC");
             return;
         }
@@ -1168,6 +1324,8 @@ export default function GMModalDetail({
                         normalizeText(itemDcCode) === normalizedDcCode
                     );
                 });
+
+                setAllTruckRows(matchedRows);
 
                 /*
                  * ตัด TRUCK_TYPE ที่ซ้ำกัน
@@ -1235,6 +1393,7 @@ export default function GMModalDetail({
 
                 console.error("FETCH TRUCKS ERROR:", error);
                 setTrucks([]);
+                setAllTruckRows([]);
 
                 setTruckError(
                     error instanceof Error
@@ -1430,6 +1589,43 @@ export default function GMModalDetail({
         return Array.from(dcSet).sort();
     }, [allRequests, data.dc_code]);
 
+    const isReplacementRequest =
+        normalizeText(data.fleet_type) ===
+        normalizeText("รถทดแทน");
+
+    const updateSingleVehicleState = (
+        rowKey: string,
+        patch: Partial<SingleVehicleState>
+    ) => {
+        setSingleVehicleStates((previous) => {
+            const currentState: SingleVehicleState =
+                previous[rowKey] ?? {
+                    decision: "pending",
+
+                    newLicense: "",
+                    newProvince: "",
+
+                    companyId: "",
+                    companyName: "",
+
+                    truckType:
+                        data.fleet_truck_type || "",
+
+                    approvedSaved: false,
+                    error: "",
+                };
+
+            return {
+                ...previous,
+
+                [rowKey]: {
+                    ...currentState,
+                    ...patch,
+                },
+            };
+        });
+    };
+
     const getCurrentUserText = () => {
         try {
             const rawUser =
@@ -1441,9 +1637,15 @@ export default function GMModalDetail({
 
             const user = JSON.parse(rawUser);
 
-            const name = String(user.name || user.NAME || "").trim();
-            const surname = String(user.surname || user.SURNAME || "").trim();
-            const emId = String(
+            const name = String(
+                user.name || user.NAME || ""
+            ).trim();
+
+            const surname = String(
+                user.surname || user.SURNAME || ""
+            ).trim();
+
+            const employeeId = String(
                 user.em_id ||
                 user.employee_id ||
                 user.EMPLOYEE_ID ||
@@ -1451,14 +1653,23 @@ export default function GMModalDetail({
                 ""
             ).trim();
 
-            const fullName = `${name} ${surname}`.trim();
+            const fullName =
+                `${name} ${surname}`.trim();
 
-            if (fullName && emId) return `${fullName} (${emId})`;
+            if (fullName && employeeId) {
+                return `${fullName} (${employeeId})`;
+            }
+
             if (fullName) return fullName;
-            if (emId) return emId;
+            if (employeeId) return employeeId;
 
             return "";
-        } catch {
+        } catch (error) {
+            console.error(
+                "GET CURRENT USER ERROR:",
+                error
+            );
+
             return "";
         }
     };
@@ -1485,6 +1696,53 @@ export default function GMModalDetail({
             ""
         ).trim();
     };
+
+    const replacementSupplierOptions = useMemo(() => {
+        const supplierMap = new Map<
+            string,
+            {
+                key: string;
+                companyId: string;
+                companyName: string;
+                label: string;
+            }
+        >();
+
+        suppliers.forEach((supplier) => {
+            const companyId =
+                getSupplierCompanyId(supplier);
+
+            const companyName =
+                getSupplierCompanyName(supplier);
+
+            if (!companyName) return;
+
+            const key =
+                `${companyId}|||${companyName}`;
+
+            if (!supplierMap.has(key)) {
+                supplierMap.set(key, {
+                    key,
+                    companyId,
+                    companyName,
+
+                    label: companyId
+                        ? `(${companyId}) ${companyName}`
+                        : companyName,
+                });
+            }
+        });
+
+        return Array.from(
+            supplierMap.values()
+        ).sort((a, b) =>
+            a.companyName.localeCompare(
+                b.companyName,
+                "th"
+            )
+        );
+    }, [suppliers]);
+
     const createSupplierRow = (defaultQty = 1): ApprovedSupplierRow => ({
         rowId:
             typeof crypto !== "undefined" &&
@@ -1554,32 +1812,32 @@ export default function GMModalDetail({
     ) => {
         const normalizedCompanyName =
             normalizeText(companyName);
-    
+
         const selectedSupplier = suppliers.find(
             (supplier) =>
                 normalizeText(
                     getSupplierCompanyName(supplier)
                 ) === normalizedCompanyName
         );
-    
+
         setApprovedSuppliers((current) =>
             current.map((item) => {
                 if (item.rowId !== rowId) {
                     return item;
                 }
-    
+
                 return {
                     ...item,
                     companyName,
                     companyId: selectedSupplier
                         ? getSupplierCompanyId(
-                              selectedSupplier
-                          )
+                            selectedSupplier
+                        )
                         : "",
                 };
             })
         );
-    
+
         setMessage(null);
     };
 
@@ -1647,7 +1905,113 @@ export default function GMModalDetail({
         0
     );
 
-    if (!open) return null;
+    const replacementVehicleOptions =
+        useMemo<ReplacementVehicleOption[]>(() => {
+            const vehicleMap = new Map<
+                string,
+                ReplacementVehicleOption
+            >();
+
+            allTruckRows.forEach((item) => {
+                const license = String(
+                    getValueIgnoreCase(item, "LICENSE") ||
+                    item.LICENSE ||
+                    item.license ||
+                    ""
+                ).trim();
+
+                const province = String(
+                    getValueIgnoreCase(item, "PROVINCE") ||
+                    item.PROVINCE ||
+                    item.province ||
+                    ""
+                ).trim();
+
+                const companyId = String(
+                    getValueIgnoreCase(item, "COMPANY_ID") ||
+                    item.COMPANY_ID ||
+                    item.company_id ||
+                    ""
+                ).trim();
+
+                const companyName = String(
+                    getValueIgnoreCase(
+                        item,
+                        "ONLY_COMPANY_NAME"
+                    ) ||
+                    item.ONLY_COMPANY_NAME ||
+                    item.only_company_name ||
+                    getValueIgnoreCase(
+                        item,
+                        "COMPANY_NAME"
+                    ) ||
+                    item.COMPANY_NAME ||
+                    item.company_name ||
+                    ""
+                ).trim();
+
+                const truckType = String(
+                    getValueIgnoreCase(item, "TRUCK_TYPE") ||
+                    item.TRUCK_TYPE ||
+                    item.truck_type ||
+                    item.truckType ||
+                    ""
+                ).trim();
+
+                const status = normalizeText(
+                    getValueIgnoreCase(item, "STATUS") ||
+                    item.STATUS ||
+                    item.status ||
+                    ""
+                );
+
+                const approveStatus = normalizeText(
+                    getValueIgnoreCase(
+                        item,
+                        "STATUS_APPROVE"
+                    ) ||
+                    item.STATUS_APPROVE ||
+                    item.status_approve ||
+                    ""
+                );
+
+                if (!license) return;
+
+                // ถ้ามีสถานะ ให้ใช้เฉพาะรถ Active
+                if (status && status !== "ACTIVE") return;
+
+                // ถ้ามีสถานะอนุมัติ ให้ใช้เฉพาะรถที่อนุมัติ
+                if (
+                    approveStatus &&
+                    (
+                        approveStatus.includes("ไม่อนุมัติ") ||
+                        approveStatus.includes("REJECT") ||
+                        (
+                            !approveStatus.includes("อนุมัติ") &&
+                            !approveStatus.includes("APPROV")
+                        )
+                    )
+                ) {
+                    return;
+                }
+
+                vehicleMap.set(normalizeText(license), {
+                    license,
+                    province,
+                    companyId,
+                    companyName,
+                    truckType,
+                });
+            });
+
+            return Array.from(vehicleMap.values()).sort(
+                (a, b) =>
+                    a.license.localeCompare(b.license, "th", {
+                        numeric: true,
+                    })
+            );
+        }, [allTruckRows]);
+
 
     const isFbpPending =
         normalizeStatus(data.status) === "fbp_pending";
@@ -1952,44 +2316,901 @@ export default function GMModalDetail({
         }
     };
 
-
     const replacementTruckRows = useMemo<RequestDetailItem[]>(() => {
-        if (Array.isArray(data.details) && data.details.length > 0) {
-            return data.details.map((detail) => ({
-                ...detail,
-                license: String(detail.license || "").trim(),
-                province: String(detail.province || "").trim(),
-                truck_type: String(detail.truck_type || "").trim(),
-                company_id: String(detail.company_id || "").trim(),
-                company_name: String(detail.company_name || "").trim(),
-            }));
+        const isMeaningfulValue = (value: unknown) => {
+            const normalized = String(value ?? "")
+                .trim()
+                .toLowerCase();
+
+            return ![
+                "",
+                "-",
+                "null",
+                "undefined",
+                "[]",
+                "ไม่มีข้อมูล",
+                "ไม่พบข้อมูล",
+            ].includes(normalized);
+        };
+
+        // ใช้ข้อมูลรายละเอียดจาก API ก่อน
+        if (Array.isArray(data.details)) {
+            const validDetails = data.details
+                .map((detail) => ({
+                    ...detail,
+
+                    license: String(
+                        detail.license ?? ""
+                    ).trim(),
+
+                    province: String(
+                        detail.province ?? ""
+                    ).trim(),
+
+                    truck_type: String(
+                        detail.truck_type ?? ""
+                    ).trim(),
+
+                    company_id: String(
+                        detail.company_id ?? ""
+                    ).trim(),
+
+                    company_name: String(
+                        detail.company_name ?? ""
+                    ).trim(),
+
+                    detail_license_replace: String(
+                        detail.detail_license_replace ??
+                        detail.license_replace ??
+                        ""
+                    ).trim(),
+
+                    detail_province_replace: String(
+                        detail.detail_province_replace ??
+                        detail.province_replace ??
+                        ""
+                    ).trim(),
+
+                    detail_truck_type_replace: String(
+                        detail.detail_truck_type_replace ??
+                        detail.truck_type_replace ??
+                        ""
+                    ).trim(),
+
+                    detail_company_id_replace: String(
+                        detail.detail_company_id_replace ??
+                        detail.company_id_replace ??
+                        ""
+                    ).trim(),
+
+                    detail_company_name_replace: String(
+                        detail.detail_company_name_replace ??
+                        detail.company_name_replace ??
+                        ""
+                    ).trim(),
+                }))
+                .filter((item) =>
+                    [
+                        item.license,
+                        item.province,
+                        item.truck_type,
+                        item.company_id,
+                        item.company_name,
+                    ].some(isMeaningfulValue)
+                );
+
+            if (validDetails.length > 0) {
+                return validDetails;
+            }
         }
 
-        const licenses = Array.isArray(data.license_replace)
-            ? data.license_replace
-            : String(data.license_replace || "")
-                .split(",")
-                .map((license) => license.trim())
-                .filter(Boolean);
+        // กรณีไม่มี details ให้ดึงทะเบียนจาก license_replace
+        let licenses: string[] = [];
 
-        return licenses.map((license, index) => ({
-            id: `fallback-${index}`,
-            license: String(license).trim(),
-            province: "",
-            truck_type: "",
+        if (Array.isArray(data.license_replace)) {
+            licenses = data.license_replace;
+        } else {
+            const rawValue = String(data.license_replace || "").trim();
+
+            if (rawValue) {
+                try {
+                    const parsed = JSON.parse(rawValue);
+
+                    licenses = Array.isArray(parsed)
+                        ? parsed.map(String)
+                        : [rawValue];
+                } catch {
+                    licenses = rawValue
+                        .replace(/^\[|\]$/g, "")
+                        .split(",")
+                        .map((license) =>
+                            String(license)
+                                .replace(/["']/g, "")
+                                .trim()
+                        );
+                }
+            }
+        }
+
+        return licenses
+            .filter(isMeaningfulValue)
+            .map((license, index) => ({
+                id: `fallback-${index}`,
+                license: String(license).trim(),
+                province: "",
+                truck_type: "",
+                company_id: "",
+                company_name: "",
+            }));
+    }, [data.details, data.license_replace]);
+
+    const getReplacementRowKey = (
+        item: RequestDetailItem,
+        index: number
+    ) => {
+        return String(
+            item.id ||
+            `${item.license || "vehicle"}-${index}`
+        );
+    };
+
+    useEffect(() => {
+        if (!open) return;
+
+        setSingleVehicleStates((previous) => {
+            const nextStates: Record<
+                string,
+                SingleVehicleState
+            > = {};
+
+            replacementTruckRows.forEach(
+                (item, index) => {
+                    const rowKey =
+                        getReplacementRowKey(
+                            item,
+                            index
+                        );
+
+                    const savedLicense = String(
+                        item.detail_license_replace ??
+                        item.license_replace ??
+                        ""
+                    ).trim();
+
+                    const savedProvince = String(
+                        item.detail_province_replace ??
+                        item.province_replace ??
+                        ""
+                    ).trim();
+
+                    const savedCompanyId = String(
+                        item.detail_company_id_replace ??
+                        item.company_id_replace ??
+                        ""
+                    ).trim();
+
+                    const savedCompanyName = String(
+                        item.detail_company_name_replace ??
+                        item.company_name_replace ??
+                        ""
+                    ).trim();
+
+                    const savedTruckType = String(
+                        item.detail_truck_type_replace ??
+                        item.truck_type_replace ??
+                        item.truck_type ??
+                        data.fleet_truck_type ??
+                        ""
+                    ).trim();
+
+                    const currentState =
+                        previous[rowKey];
+
+                    /*
+                     * เก็บผลการอนุมัติที่เพิ่งกดไว้
+                     * ไม่ให้ useEffect เขียนทับกลับเป็น pending
+                     */
+                    if (
+                        currentState?.approvedSaved ||
+                        currentState?.decision === "rejected"
+                    ) {
+                        nextStates[rowKey] =
+                            currentState;
+
+                        return;
+                    }
+
+                    /*
+                     * ข้อมูล Replace จาก API คือรถที่เลือกไว้
+                     * แต่ยังไม่ถือว่า FBP อนุมัติแล้ว
+                     */
+                    nextStates[rowKey] = {
+                        decision: "pending",
+
+                        newLicense:
+                            savedLicense,
+
+                        newProvince:
+                            savedProvince,
+
+                        companyId:
+                            savedCompanyId,
+
+                        companyName:
+                            savedCompanyName,
+
+                        truckType:
+                            savedTruckType,
+
+                        approvedSaved: false,
+                        error: "",
+                    };
+                }
+            );
+
+            return nextStates;
+        });
+    }, [
+        open,
+        data.id,
+        data.fleet_truck_type,
+        replacementTruckRows,
+    ]);
+
+    const singleVehicleSummary = useMemo(() => {
+        let approved = 0;
+        let rejected = 0;
+
+        replacementTruckRows.forEach((item, index) => {
+            const rowKey = getReplacementRowKey(item, index);
+            const rowState = singleVehicleStates[rowKey];
+
+            if (rowState?.approvedSaved || rowState?.decision === "approved") {
+                approved += 1;
+            } else if (rowState?.decision === "rejected") {
+                rejected += 1;
+            }
+        });
+
+        return {
+            approved,
+            rejected,
+            pending: Math.max(
+                replacementTruckRows.length - approved - rejected,
+                0
+            ),
+        };
+    }, [replacementTruckRows, singleVehicleStates]);
+
+    const handleNewVehicleChange = (
+        rowKey: string,
+        newLicense: string
+    ) => {
+        if (!newLicense) {
+            updateSingleVehicleState(rowKey, {
+                decision: "pending",
+                newLicense: "",
+                newProvince: "",
+                companyId: "",
+                companyName: "",
+                truckType: data.fleet_truck_type || "",
+                approvedSaved: false,
+                error: "",
+            });
+
+            setMessage(null);
+            return;
+        }
+
+        const selectedVehicle = replacementVehicleOptions.find(
+            (vehicle) =>
+                normalizeText(vehicle.license) ===
+                normalizeText(newLicense)
+        );
+
+        if (!selectedVehicle) {
+            updateSingleVehicleState(rowKey, {
+                decision: "pending",
+                newLicense: "",
+                newProvince: "",
+                companyId: "",
+                companyName: "",
+                truckType: data.fleet_truck_type || "",
+                approvedSaved: false,
+                error: "ไม่พบข้อมูลรถที่เลือก",
+            });
+            return;
+        }
+
+        const selectedByOtherRow = Object.entries(
+            singleVehicleStates
+        ).some(([otherRowKey, otherState]) => {
+            return (
+                otherRowKey !== rowKey &&
+                normalizeText(otherState.newLicense) ===
+                normalizeText(selectedVehicle.license) &&
+                normalizeText(otherState.newProvince) ===
+                normalizeText(selectedVehicle.province)
+            );
+        });
+
+        if (selectedByOtherRow) {
+            updateSingleVehicleState(rowKey, {
+                decision: "pending",
+                newLicense: "",
+                newProvince: "",
+                companyId: "",
+                companyName: "",
+                truckType: data.fleet_truck_type || "",
+                approvedSaved: false,
+                error: "ทะเบียนและจังหวัดนี้ถูกเลือกเป็นรถทดแทนให้รถคันอื่นแล้ว",
+            });
+            return;
+        }
+
+        updateSingleVehicleState(rowKey, {
+            decision: "pending",
+            newLicense: selectedVehicle.license,
+            newProvince: selectedVehicle.province,
+            companyId: selectedVehicle.companyId,
+            companyName: selectedVehicle.companyName,
+            truckType: selectedVehicle.truckType,
+            approvedSaved: false,
+            error: "",
+        });
+
+        setMessage(null);
+    };
+
+    const updateReplacementRequestStatus =
+        async (updatedBy: string) => {
+            if (!data.id) {
+                throw new Error(
+                    "ไม่พบ Request ID สำหรับอัปเดตสถานะ"
+                );
+            }
+
+            const statusPayload = {
+                id: Number(data.id),
+
+                status: "progress",
+
+                updated_by: updatedBy,
+
+                status_details:
+                    "อนุมัติเปิดงานเข้าสู่กระบวนการเรียบร้อยแล้ว",
+            };
+
+            console.log(
+                "UPDATE REQUEST STATUS PAYLOAD:",
+                statusPayload
+            );
+
+            const response = await fetch(
+                "http://192.168.158.210/api_new_truck/api/update_request_status.php",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+
+                        Accept:
+                            "application/json",
+                    },
+
+                    body: JSON.stringify(
+                        statusPayload
+                    ),
+                }
+            );
+
+            const responseText =
+                await response.text();
+
+            let result: any = null;
+
+            if (responseText.trim()) {
+                try {
+                    result =
+                        JSON.parse(responseText);
+                } catch {
+                    throw new Error(
+                        `API อัปเดตสถานะไม่ได้ส่ง JSON กลับมา: ${responseText}`
+                    );
+                }
+            }
+
+            if (
+                !response.ok ||
+                result?.success === false ||
+                result?.status === "error"
+            ) {
+                throw new Error(
+                    result?.message ||
+                    "อัปเดตสถานะคำขอไม่สำเร็จ"
+                );
+            }
+
+            return result;
+        };
+
+    const handleReplacementInputChange = (
+        rowKey: string,
+        patch: Partial<
+            Pick<
+                SingleVehicleState,
+                | "newLicense"
+                | "newProvince"
+                | "truckType"
+            >
+        >
+    ) => {
+        updateSingleVehicleState(rowKey, {
+            ...patch,
+
+            decision: "pending",
+            approvedSaved: false,
+            error: "",
+        });
+
+        setMessage(null);
+    };
+
+    const handleReplacementCompanyChange = (
+        rowKey: string,
+        supplierKey: string
+    ) => {
+        const selectedSupplier =
+            replacementSupplierOptions.find(
+                (supplier) =>
+                    supplier.key === supplierKey
+            );
+
+        updateSingleVehicleState(rowKey, {
+            companyId:
+                selectedSupplier?.companyId || "",
+
+            companyName:
+                selectedSupplier?.companyName || "",
+
+            decision: "pending",
+            approvedSaved: false,
+            error: "",
+        });
+
+        setMessage(null);
+    };
+
+    const approveSingleReplacementVehicle = async (
+        item: RequestDetailItem,
+        index: number
+    ) => {
+        const rowKey = getReplacementRowKey(item, index);
+        const rowState = singleVehicleStates[rowKey];
+
+        if (!canMakeDecision) {
+            updateSingleVehicleState(rowKey, {
+                error: "รายการนี้ดำเนินการแล้ว ไม่สามารถบันทึกซ้ำได้",
+            });
+            return;
+        }
+
+        if (!data.id) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบ Request ID",
+            });
+            return;
+        }
+
+        if (!rowState?.newLicense) {
+            updateSingleVehicleState(rowKey, {
+                error: "กรุณาเลือกรถที่จะนำมาทดแทน",
+            });
+            return;
+        }
+
+        const selectedNewVehicle: ReplacementVehicleOption | null =
+            replacementVehicleOptions.find(
+                (vehicle) =>
+                    normalizeText(vehicle.license) ===
+                    normalizeText(rowState.newLicense) &&
+                    normalizeText(vehicle.province) ===
+                    normalizeText(rowState.newProvince)
+            ) ??
+            (rowState.newLicense
+                ? {
+                    license: rowState.newLicense,
+                    province: rowState.newProvince,
+                    companyId: rowState.companyId,
+                    companyName: rowState.companyName,
+                    truckType: rowState.truckType,
+                }
+                : null);
+
+        if (!selectedNewVehicle) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบข้อมูลรถที่เลือก กรุณาเลือกจากรายการ",
+            });
+            return;
+        }
+
+        const originalLicense = String(item.license || "").trim();
+        const originalProvince = String(item.province || "").trim();
+
+        if (!originalLicense) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบทะเบียนรถเดิมของรายการนี้",
+            });
+            return;
+        }
+
+        if (
+            normalizeText(originalLicense) ===
+            normalizeText(selectedNewVehicle.license)
+        ) {
+            updateSingleVehicleState(rowKey, {
+                error: "รถที่จะนำมาทดแทนต้องไม่ใช่ทะเบียนเดียวกับรถเดิม",
+            });
+            return;
+        }
+
+        const selectedByOtherRow = Object.entries(
+            singleVehicleStates
+        ).some(([otherRowKey, otherState]) => {
+            return (
+                otherRowKey !== rowKey &&
+                normalizeText(otherState.newLicense) ===
+                normalizeText(selectedNewVehicle.license)
+            );
+        });
+
+        if (selectedByOtherRow) {
+            updateSingleVehicleState(rowKey, {
+                error: "ทะเบียนนี้ถูกเลือกเป็นรถทดแทนให้รถคันอื่นแล้ว",
+            });
+            return;
+        }
+
+        const approvedBy = getCurrentUserText();
+
+        if (!approvedBy) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบข้อมูลผู้อนุมัติ กรุณาเข้าสู่ระบบใหม่",
+            });
+            return;
+        }
+
+        const payload = {
+            action: "single_vehicle",
+            request_id: Number(data.id),
+            orig_license: originalLicense,
+            orig_province: originalProvince,
+            new_license: selectedNewVehicle.license,
+            new_province: selectedNewVehicle.province,
+            company_id: selectedNewVehicle.companyId,
+            company_name: selectedNewVehicle.companyName,
+            truck_type: selectedNewVehicle.truckType,
+            approved_by: approvedBy,
+        };
+
+        try {
+            setSavingSingleVehicleKey(rowKey);
+            setMessage(null);
+            updateSingleVehicleState(rowKey, { error: "" });
+
+            console.log("SINGLE VEHICLE PAYLOAD:", payload);
+
+            const response = await fetch(
+                "http://192.168.158.210/api_new_truck/api/request_save.php",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                }
+            );
+
+            const responseText = await response.text();
+            let result: any = null;
+
+            if (responseText.trim()) {
+                try {
+                    result = JSON.parse(responseText);
+                } catch {
+                    throw new Error(
+                        `API ไม่ได้ส่ง JSON กลับมา: ${responseText}`
+                    );
+                }
+            }
+
+            if (
+                !response.ok ||
+                result?.success === false ||
+                result?.status === "error"
+            ) {
+                throw new Error(
+                    result?.message || "บันทึกรถทดแทนไม่สำเร็จ"
+                );
+            }
+
+            /*
+ * ขั้นที่ 1 บันทึกผลอนุมัติรถคันนี้สำเร็จแล้ว
+ */
+            updateSingleVehicleState(rowKey, {
+                decision: "approved",
+
+                newLicense:
+                    selectedNewVehicle.license,
+
+                newProvince:
+                    selectedNewVehicle.province,
+
+                companyId:
+                    selectedNewVehicle.companyId,
+
+                companyName:
+                    selectedNewVehicle.companyName,
+
+                truckType:
+                    selectedNewVehicle.truckType,
+
+                approvedSaved: true,
+                error: "",
+            });
+
+            /*
+             * ขั้นที่ 2 เปลี่ยนสถานะคำขอเป็น progress
+             */
+            try {
+                await updateReplacementRequestStatus(
+                    approvedBy
+                );
+            } catch (statusError: unknown) {
+                console.error(
+                    "UPDATE REQUEST STATUS ERROR:",
+                    statusError
+                );
+
+                const statusErrorMessage =
+                    statusError instanceof Error
+                        ? statusError.message
+                        : "อัปเดตสถานะคำขอไม่สำเร็จ";
+
+                /*
+                 * ไม่ย้อนผลอนุมัติรถกลับ
+                 * เพราะ request_save.php บันทึกสำเร็จแล้ว
+                 */
+                updateSingleVehicleState(rowKey, {
+                    decision: "approved",
+                    approvedSaved: true,
+
+                    error:
+                        `อนุมัติรถสำเร็จแล้ว แต่${statusErrorMessage}`,
+                });
+
+                setMessage({
+                    type: "error",
+
+                    text:
+                        `อนุมัติรถ ${originalLicense} สำเร็จแล้ว ` +
+                        `แต่ไม่สามารถเปลี่ยนสถานะคำขอเป็นกำลังดำเนินการได้`,
+                });
+
+                await Promise.resolve(
+                    onSuccess()
+                );
+
+                return;
+            }
+
+            setMessage({
+                type: "success",
+
+                text:
+                    `อนุมัติรถ ${originalLicense} ` +
+                    `เปลี่ยนเป็น ${selectedNewVehicle.license} ` +
+                    `และอัปเดตสถานะเป็นกำลังดำเนินการเรียบร้อยแล้ว`,
+            });
+
+            await Promise.resolve(
+                onSuccess()
+            );
+        } catch (error: unknown) {
+            console.error("APPROVE SINGLE VEHICLE ERROR:", error);
+
+            updateSingleVehicleState(rowKey, {
+                decision: "pending",
+                approvedSaved: false,
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "เกิดข้อผิดพลาดในการบันทึกรถทดแทน",
+            });
+        } finally {
+            setSavingSingleVehicleKey(null);
+        }
+    };
+
+    const rejectSingleReplacementVehicle = async (
+        item: RequestDetailItem,
+        index: number
+    ) => {
+        const rowKey = getReplacementRowKey(
+            item,
+            index
+        );
+
+        if (!canMakeDecision) {
+            updateSingleVehicleState(rowKey, {
+                error:
+                    "รายการนี้ดำเนินการแล้ว ไม่สามารถบันทึกซ้ำได้",
+            });
+
+            return;
+        }
+
+        if (!data.id) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบ Request ID",
+            });
+
+            return;
+        }
+
+        const originalLicense = String(
+            item.license || ""
+        ).trim();
+
+        const originalProvince = String(
+            item.province || ""
+        ).trim();
+
+        const originalTruckType = String(
+            item.truck_type ||
+            data.fleet_truck_type ||
+            ""
+        ).trim();
+
+        if (!originalLicense) {
+            updateSingleVehicleState(rowKey, {
+                error:
+                    "ไม่พบทะเบียนรถเดิมของรายการนี้",
+            });
+
+            return;
+        }
+
+        const approvedBy = getCurrentUserText();
+
+        if (!approvedBy) {
+            updateSingleVehicleState(rowKey, {
+                error:
+                    "ไม่พบข้อมูลผู้ดำเนินการ กรุณาเข้าสู่ระบบใหม่",
+            });
+
+            return;
+        }
+
+        const payload = {
+            action: "single_vehicle",
+
+            request_id: Number(data.id),
+
+            orig_license: originalLicense,
+            orig_province: originalProvince,
+
+            // ไม่อนุมัติ จึงส่งข้อมูลรถใหม่เป็นค่าว่าง
+            new_license: "",
+            new_province: "",
+
             company_id: "",
             company_name: "",
-        }));
-    }, [data.details, data.license_replace]);
+
+            truck_type: originalTruckType,
+
+            approved_by: approvedBy,
+        };
+
+        try {
+            setSavingSingleVehicleKey(rowKey);
+            setMessage(null);
+
+            updateSingleVehicleState(rowKey, {
+                error: "",
+            });
+
+            console.log(
+                "REJECT SINGLE VEHICLE PAYLOAD:",
+                payload
+            );
+
+            const response = await fetch(
+                "http://192.168.158.210/api_new_truck/api/request_save.php",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        Accept: "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                }
+            );
+
+            const responseText =
+                await response.text();
+
+            let result: any = null;
+
+            if (responseText.trim()) {
+                try {
+                    result =
+                        JSON.parse(responseText);
+                } catch {
+                    throw new Error(
+                        `API ไม่ได้ส่ง JSON กลับมา: ${responseText}`
+                    );
+                }
+            }
+
+            if (
+                !response.ok ||
+                result?.success === false ||
+                result?.status === "error"
+            ) {
+                throw new Error(
+                    result?.message ||
+                    "บันทึกผลไม่อนุมัติรถไม่สำเร็จ"
+                );
+            }
+
+            updateSingleVehicleState(rowKey, {
+                decision: "rejected",
+                newLicense: "",
+                newProvince: "",
+                companyId: "",
+                companyName: "",
+                truckType: originalTruckType,
+                approvedSaved: false,
+                error: "",
+            });
+
+            setMessage({
+                type: "success",
+                text:
+                    result?.message ||
+                    `บันทึกไม่อนุมัติรถ ${originalLicense} เรียบร้อยแล้ว`,
+            });
+
+            await Promise.resolve(onSuccess());
+        } catch (error: unknown) {
+            console.error(
+                "REJECT SINGLE VEHICLE ERROR:",
+                error
+            );
+
+            updateSingleVehicleState(rowKey, {
+                decision: "pending",
+                approvedSaved: false,
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "เกิดข้อผิดพลาดในการบันทึกผลไม่อนุมัติ",
+            });
+        } finally {
+            setSavingSingleVehicleKey(null);
+        }
+    };
 
     const formatStatusText = (status?: string) => {
         const value = normalizeStatus(status);
 
         if (
             value === "fbp_pending" ||
-            value === "pending_fbp" ||
-            value === "waiting_fbp" ||
-            value === "wait_fbp"
+            value === "pending_fbp"
         ) {
             return "รอจัดรถ";
         }
@@ -2005,13 +3226,6 @@ export default function GMModalDetail({
 
         if (
             value === "progress" ||
-            value === "in_progress" ||
-            value === "confirm request" ||
-            value === "confirmed request" ||
-            value === "confirm" ||
-            value === "confirmed" ||
-            value === "in progress" ||
-            value === "processing" ||
             value === "กำลังดำเนินการ"
         ) {
             return "กำลังดำเนินการ";
@@ -2110,8 +3324,9 @@ export default function GMModalDetail({
                                 </h1>
 
                                 <p className="mt-1 text-[11px] font-medium text-slate-500">
-                                    ตรวจสอบข้อมูล
-                                    แล้วเลือกผู้ให้บริการและจำนวนรถ
+                                    {isReplacementRequest
+                                        ? "พิจารณารถทดแทนแยกเป็นรายคัน"
+                                        : "ตรวจสอบข้อมูล แล้วเลือกผู้ให้บริการและจำนวนรถ"}
                                 </p>
 
                                 <div className="mt-2 flex flex-wrap gap-2">
@@ -2136,7 +3351,7 @@ export default function GMModalDetail({
                         <button
                             type="button"
                             onClick={onClose}
-                            disabled={saving}
+                            disabled={saving || Boolean(savingSingleVehicleKey)}
                             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl font-medium text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label="ปิด"
                         >
@@ -2225,21 +3440,766 @@ export default function GMModalDetail({
                                 </div>
                             </section>
 
+                            {/* รายละเอียดรถทดแทนแบบพิจารณารายคัน */}
+                            {isReplacementRequest && (
+    <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+        {/* Header */}
+        <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+            <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-blue-600/25 to-transparent" />
+
+            <div className="relative flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            className="h-5 w-5"
+                            aria-hidden="true"
+                        >
+                            <path
+                                d="M4 16V8.8C4 7.8 4.8 7 5.8 7h8.6c.7 0 1.3.4 1.6 1l1.3 2.5h1.2c.8 0 1.5.7 1.5 1.5V16"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                            <path
+                                d="M3 16h18M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        </svg>
+                    </div>
+
+                    <div className="min-w-0">
+                        <h2 className="text-sm font-black">
+                            รายละเอียดรถทดแทน
+                        </h2>
+
+                        <p className="mt-1 text-[10px] font-medium text-white/60">
+                            กรอกข้อมูลและพิจารณารถแต่ละคันแยกกัน
+                        </p>
+                    </div>
+                </div>
+
+                <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-center ring-1 ring-white/15">
+                    <p className="text-[8px] font-bold uppercase tracking-wider text-white/50">
+                        Total
+                    </p>
+
+                    <p className="mt-0.5 text-base font-black">
+                        {replacementTruckRows.length}
+                        <span className="ml-1 text-[9px] font-bold text-white/60">
+                            คัน
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        {/* Summary */}
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="grid grid-cols-3 gap-2">
+                {[
+                    {
+                        label: "รอพิจารณา",
+                        value: singleVehicleSummary.pending,
+                        dotClass: "bg-amber-500",
+                        valueClass: "text-amber-700",
+                        bgClass: "bg-amber-50",
+                        borderClass: "border-amber-200",
+                    },
+                    {
+                        label: "อนุมัติ",
+                        value: singleVehicleSummary.approved,
+                        dotClass: "bg-emerald-500",
+                        valueClass: "text-emerald-700",
+                        bgClass: "bg-emerald-50",
+                        borderClass: "border-emerald-200",
+                    },
+                    {
+                        label: "ไม่อนุมัติ",
+                        value: singleVehicleSummary.rejected,
+                        dotClass: "bg-rose-500",
+                        valueClass: "text-rose-700",
+                        bgClass: "bg-rose-50",
+                        borderClass: "border-rose-200",
+                    },
+                ].map((summary) => (
+                    <div
+                        key={summary.label}
+                        className={`rounded-xl border px-2.5 py-2 ${summary.bgClass} ${summary.borderClass}`}
+                    >
+                        <div className="flex items-center gap-1.5">
+                            <span
+                                className={`h-1.5 w-1.5 rounded-full ${summary.dotClass}`}
+                            />
+
+                            <p className="truncate text-[8px] font-black text-slate-500">
+                                {summary.label}
+                            </p>
+                        </div>
+
+                        <p
+                            className={`mt-1 text-right text-lg font-black ${summary.valueClass}`}
+                        >
+                            {summary.value}
+                        </p>
+                    </div>
+                ))}
+            </div>
+        </div>
+
+        {/* Vehicle rows */}
+        {replacementTruckRows.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        className="h-6 w-6"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="M12 8v4m0 4h.01M10.3 4.9 3.7 16.3A2 2 0 0 0 5.4 19h13.2a2 2 0 0 0 1.7-2.7L13.7 4.9a2 2 0 0 0-3.4 0Z"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        />
+                    </svg>
+                </div>
+
+                <p className="mt-3 text-xs font-black text-slate-600">
+                    ไม่พบรายละเอียดรถทดแทน
+                </p>
+
+                <p className="mt-1 text-[10px] font-medium text-slate-400">
+                    กรุณาตรวจสอบข้อมูลรายละเอียดจากคำขอ
+                </p>
+            </div>
+        ) : (
+            <div className="space-y-4 bg-slate-100/70 p-3">
+                {replacementTruckRows.map((item, index) => {
+                    const rowKey =
+                        getReplacementRowKey(
+                            item,
+                            index
+                        );
+
+                    const rowState:
+                        SingleVehicleState =
+                        singleVehicleStates[rowKey] ?? {
+                            decision: "pending",
+
+                            newLicense: "",
+                            newProvince: "",
+
+                            companyId: "",
+                            companyName: "",
+
+                            truckType:
+                                data.fleet_truck_type ||
+                                "",
+
+                            approvedSaved: false,
+                            error: "",
+                        };
+
+                    const originalLicense = String(
+                        item.license || ""
+                    ).trim();
+
+                    const originalProvince = String(
+                        item.province || ""
+                    ).trim();
+
+                    const originalTruckType = String(
+                        item.truck_type || ""
+                    ).trim();
+
+                    const originalCompanyId = String(
+                        item.company_id || ""
+                    ).trim();
+
+                    const originalCompanyName = String(
+                        item.company_name || ""
+                    ).trim();
+
+                    const isRowSaving =
+                        savingSingleVehicleKey ===
+                        rowKey;
+
+                    const currentCompanyKey =
+                        rowState.companyName
+                            ? `${rowState.companyId}|||${rowState.companyName}`
+                            : "";
+
+                    const companyOptionsForRow = [
+                        ...(
+                            currentCompanyKey &&
+                            !replacementSupplierOptions.some(
+                                (supplier) =>
+                                    supplier.key ===
+                                    currentCompanyKey
+                            )
+                                ? [
+                                    {
+                                        key:
+                                            currentCompanyKey,
+
+                                        companyId:
+                                            rowState.companyId,
+
+                                        companyName:
+                                            rowState.companyName,
+
+                                        label:
+                                            rowState.companyId
+                                                ? `(${rowState.companyId}) ${rowState.companyName}`
+                                                : rowState.companyName,
+                                    },
+                                ]
+                                : []
+                        ),
+
+                        ...replacementSupplierOptions,
+                    ];
+
+                    const isApproved =
+                        rowState.approvedSaved;
+
+                    const isRejected =
+                        rowState.decision ===
+                        "rejected";
+
+                    return (
+                        <article
+                            key={rowKey}
+                            className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+                                isApproved
+                                    ? "border-emerald-200"
+                                    : isRejected
+                                      ? "border-rose-200"
+                                      : "border-slate-200"
+                            }`}
+                        >
+                            {/* Row heading */}
+                            <div
+                                className={`flex items-center justify-between gap-3 border-b px-3 py-3 ${
+                                    isApproved
+                                        ? "border-emerald-100 bg-emerald-50/70"
+                                        : isRejected
+                                          ? "border-rose-100 bg-rose-50/70"
+                                          : "border-slate-200 bg-white"
+                                }`}
+                            >
+                                <div className="flex min-w-0 items-center gap-2.5">
+                                    <span
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-black ${
+                                            isApproved
+                                                ? "bg-emerald-600 text-white"
+                                                : isRejected
+                                                  ? "bg-rose-600 text-white"
+                                                  : "bg-slate-900 text-white"
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </span>
+
+                                    <div className="min-w-0">
+                                        <p className="text-[9px] font-bold text-slate-400">
+                                            รถที่ขอทดแทน
+                                        </p>
+
+                                        <p className="truncate text-xs font-black text-slate-900">
+                                            {originalLicense ||
+                                                "ไม่พบทะเบียน"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {isApproved ? (
+                                    <span className="shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[9px] font-black text-emerald-700">
+                                        ✓ อนุมัติแล้ว
+                                    </span>
+                                ) : isRejected ? (
+                                    <span className="shrink-0 rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[9px] font-black text-rose-700">
+                                        × ไม่อนุมัติ
+                                    </span>
+                                ) : (
+                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-700">
+                                        รอพิจารณา
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="p-3">
+                                {/* Original vehicle */}
+                                <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                    <div className="absolute inset-y-0 left-0 w-1 bg-slate-300" />
+
+                                    <div className="px-3 py-3 pl-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                                    Original vehicle
+                                                </p>
+
+                                                <p className="mt-1 break-words text-sm font-black text-slate-900">
+                                                    {originalLicense ||
+                                                        "-"}
+
+                                                    {originalProvince
+                                                        ? ` · ${originalProvince}`
+                                                        : ""}
+                                                </p>
+                                            </div>
+
+                                            {originalTruckType && (
+                                                <span className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-black text-slate-600">
+                                                    {
+                                                        originalTruckType
+                                                    }
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {(originalCompanyId ||
+                                            originalCompanyName) && (
+                                            <p className="mt-1.5 break-words text-[10px] font-semibold leading-relaxed text-slate-500">
+                                                {originalCompanyId
+                                                    ? `(${originalCompanyId}) `
+                                                    : ""}
+
+                                                {originalCompanyName ||
+                                                    "-"}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Connector */}
+                                {!isRejected && (
+                                    <div className="relative flex h-8 items-center justify-center">
+                                        <div className="absolute bottom-0 top-0 w-px bg-slate-200" />
+
+                                        <span className="relative flex h-6 w-6 items-center justify-center rounded-full border border-blue-200 bg-white text-blue-600 shadow-sm">
+                                            <svg
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                className="h-3.5 w-3.5"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="m7 10 5 5 5-5"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Replacement form */}
+                                {!isRejected && (
+                                    <div
+                                        className={`overflow-hidden rounded-xl border ${
+                                            isApproved
+                                                ? "border-emerald-200 bg-emerald-50/30"
+                                                : "border-blue-200 bg-blue-50/30"
+                                        }`}
+                                    >
+                                        <div
+                                            className={`flex items-center justify-between gap-3 border-b px-3 py-2.5 ${
+                                                isApproved
+                                                    ? "border-emerald-100 bg-emerald-50"
+                                                    : "border-blue-100 bg-blue-50"
+                                            }`}
+                                        >
+                                            <div>
+                                                <p
+                                                    className={`text-[10px] font-black ${
+                                                        isApproved
+                                                            ? "text-emerald-900"
+                                                            : "text-blue-900"
+                                                    }`}
+                                                >
+                                                    ข้อมูลรถทดแทน
+                                                </p>
+
+                                                <p
+                                                    className={`mt-0.5 text-[8px] font-medium ${
+                                                        isApproved
+                                                            ? "text-emerald-600"
+                                                            : "text-blue-600"
+                                                    }`}
+                                                >
+                                                    กรอกข้อมูลรถที่ใช้ทดแทนคันเดิม
+                                                </p>
+                                            </div>
+
+                                            {isApproved && (
+                                                <span className="rounded-md bg-emerald-600 px-2 py-1 text-[8px] font-black text-white">
+                                                    SAVED
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-3 p-3">
+                                            {/* License + Province */}
+                                            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                                                <label className="block min-w-0">
+                                                    <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                        ทะเบียนรถ
+                                                        <span className="ml-1 text-rose-500">
+                                                            *
+                                                        </span>
+                                                    </span>
+
+                                                    <input
+                                                        type="text"
+                                                        value={
+                                                            rowState.newLicense
+                                                        }
+                                                        disabled={
+                                                            isApproved ||
+                                                            !canMakeDecision ||
+                                                            isRowSaving
+                                                        }
+                                                        onChange={(
+                                                            event
+                                                        ) =>
+                                                            handleReplacementInputChange(
+                                                                rowKey,
+                                                                {
+                                                                    newLicense:
+                                                                        event
+                                                                            .target
+                                                                            .value,
+                                                                }
+                                                            )
+                                                        }
+                                                        placeholder="เช่น 2ฒม-1181"
+                                                        autoComplete="off"
+                                                        className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                    />
+                                                </label>
+
+                                                <label className="block min-w-0">
+                                                    <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                        จังหวัด
+                                                        <span className="ml-1 text-rose-500">
+                                                            *
+                                                        </span>
+                                                    </span>
+
+                                                    <div className="relative">
+                                                        <input
+                                                            type="text"
+                                                            list={`province-options-${rowKey}`}
+                                                            value={
+                                                                rowState.newProvince
+                                                            }
+                                                            disabled={
+                                                                isApproved ||
+                                                                !canMakeDecision ||
+                                                                isRowSaving
+                                                            }
+                                                            onChange={(
+                                                                event
+                                                            ) =>
+                                                                handleReplacementInputChange(
+                                                                    rowKey,
+                                                                    {
+                                                                        newProvince:
+                                                                            event
+                                                                                .target
+                                                                                .value,
+                                                                    }
+                                                                )
+                                                            }
+                                                            placeholder="เลือกจังหวัด"
+                                                            autoComplete="off"
+                                                            className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 pr-8 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                        />
+
+                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-400">
+                                                            ▼
+                                                        </span>
+
+                                                        <datalist
+                                                            id={`province-options-${rowKey}`}
+                                                        >
+                                                            {THAI_PROVINCES.map(
+                                                                (
+                                                                    province
+                                                                ) => (
+                                                                    <option
+                                                                        key={
+                                                                            province
+                                                                        }
+                                                                        value={
+                                                                            province
+                                                                        }
+                                                                    />
+                                                                )
+                                                            )}
+                                                        </datalist>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            {/* Company */}
+                                            <label className="block">
+                                                <div className="mb-1.5 flex items-center justify-between gap-2">
+                                                    <span className="text-[9px] font-black text-slate-600">
+                                                        บริษัทผู้ให้บริการ
+                                                        <span className="ml-1 text-rose-500">
+                                                            *
+                                                        </span>
+                                                    </span>
+
+                                                    {rowState.companyId && (
+                                                        <span className="text-[8px] font-bold text-slate-400">
+                                                            ID:{" "}
+                                                            {
+                                                                rowState.companyId
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <select
+                                                    value={
+                                                        currentCompanyKey
+                                                    }
+                                                    disabled={
+                                                        isApproved ||
+                                                        !canMakeDecision ||
+                                                        isRowSaving ||
+                                                        loadingSuppliers
+                                                    }
+                                                    onChange={(
+                                                        event
+                                                    ) =>
+                                                        handleReplacementCompanyChange(
+                                                            rowKey,
+                                                            event
+                                                                .target
+                                                                .value
+                                                        )
+                                                    }
+                                                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                >
+                                                    <option value="">
+                                                        {loadingSuppliers
+                                                            ? "กำลังโหลดข้อมูลบริษัท..."
+                                                            : "-- เลือกบริษัทผู้ให้บริการ --"}
+                                                    </option>
+
+                                                    {companyOptionsForRow.map(
+                                                        (
+                                                            supplier
+                                                        ) => (
+                                                            <option
+                                                                key={
+                                                                    supplier.key
+                                                                }
+                                                                value={
+                                                                    supplier.key
+                                                                }
+                                                            >
+                                                                {
+                                                                    supplier.label
+                                                                }
+                                                            </option>
+                                                        )
+                                                    )}
+                                                </select>
+                                            </label>
+
+                                            {/* Truck type */}
+                                            <label className="block">
+                                                <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                    ประเภทรถ
+                                                    <span className="ml-1 text-rose-500">
+                                                        *
+                                                    </span>
+                                                </span>
+
+                                                <input
+                                                    type="text"
+                                                    value={
+                                                        rowState.truckType
+                                                    }
+                                                    disabled={
+                                                        isApproved ||
+                                                        !canMakeDecision ||
+                                                        isRowSaving
+                                                    }
+                                                    onChange={(
+                                                        event
+                                                    ) =>
+                                                        handleReplacementInputChange(
+                                                            rowKey,
+                                                            {
+                                                                truckType:
+                                                                    event
+                                                                        .target
+                                                                        .value,
+                                                            }
+                                                        )
+                                                    }
+                                                    placeholder="เช่น C-4W H1.9"
+                                                    autoComplete="off"
+                                                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                />
+                                            </label>
+
+                                            {/* Saved summary */}
+                                            {isApproved && (
+                                                <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2.5">
+                                                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-black text-white">
+                                                        ✓
+                                                    </span>
+
+                                                    <div className="min-w-0">
+                                                        <p className="text-[10px] font-black text-emerald-800">
+                                                            บันทึกข้อมูลเรียบร้อยแล้ว
+                                                        </p>
+
+                                                        <p className="mt-0.5 break-words text-[9px] font-medium text-emerald-600">
+                                                            {rowState.newLicense ||
+                                                                "-"}
+
+                                                            {rowState.newProvince
+                                                                ? ` · ${rowState.newProvince}`
+                                                                : ""}
+
+                                                            {rowState.companyName
+                                                                ? ` · ${rowState.companyName}`
+                                                                : ""}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Error */}
+                                {rowState.error && (
+                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[10px] font-black text-white">
+                                            !
+                                        </span>
+
+                                        <p className="pt-0.5 text-[10px] font-bold leading-relaxed text-rose-700">
+                                            {rowState.error}
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Actions */}
+                                {!isApproved &&
+                                !isRejected ? (
+                                    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_108px] gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={
+                                                !canMakeDecision ||
+                                                isRowSaving ||
+                                                !rowState.newLicense.trim() ||
+                                                !rowState.newProvince.trim() ||
+                                                !rowState.companyId.trim() ||
+                                                !rowState.companyName.trim() ||
+                                                !rowState.truckType.trim()
+                                            }
+                                            onClick={() =>
+                                                void approveSingleReplacementVehicle(
+                                                    item,
+                                                    index
+                                                )
+                                            }
+                                            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                                        >
+                                            {isRowSaving && (
+                                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                                            )}
+
+                                            {isRowSaving
+                                                ? "กำลังบันทึก..."
+                                                : "อนุมัติรถคันนี้"}
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            disabled={
+                                                !canMakeDecision ||
+                                                isRowSaving
+                                            }
+                                            onClick={() =>
+                                                void rejectSingleReplacementVehicle(
+                                                    item,
+                                                    index
+                                                )
+                                            }
+                                            className="inline-flex h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 text-[10px] font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            ไม่อนุมัติ
+                                        </button>
+                                    </div>
+                                ) : isRejected ? (
+                                    <div className="mt-3 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3">
+                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">
+                                            ×
+                                        </span>
+
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-black text-rose-800">
+                                                ไม่อนุมัติรถคันนี้
+                                            </p>
+
+                                            <p className="mt-1 break-words text-[10px] font-medium leading-relaxed text-rose-600">
+                                                บันทึกผลของรถทะเบียน{" "}
+                                                <span className="font-black">
+                                                    {originalLicense ||
+                                                        "-"}
+                                                </span>{" "}
+                                                เข้าสู่ระบบเรียบร้อยแล้ว
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </article>
+                    );
+                })}
+            </div>
+        )}
+    </section>
+)}
+
                             {/* Message */}
                             {message && (
                                 <div
                                     className={`rounded-2xl border px-4 py-3 text-xs font-bold ${message.type ===
-                                            "success"
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                            : "border-rose-200 bg-rose-50 text-rose-700"
+                                        "success"
+                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                        : "border-rose-200 bg-rose-50 text-rose-700"
                                         }`}
                                 >
                                     <div className="flex items-start gap-2">
                                         <span
                                             className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] text-white ${message.type ===
-                                                    "success"
-                                                    ? "bg-emerald-600"
-                                                    : "bg-rose-600"
+                                                "success"
+                                                ? "bg-emerald-600"
+                                                : "bg-rose-600"
                                                 }`}
                                         >
                                             {message.type ===
@@ -2255,7 +4215,7 @@ export default function GMModalDetail({
                                 </div>
                             )}
 
-                            {!canMakeDecision ? (
+                            {!isReplacementRequest && (!canMakeDecision ? (
                                 /* ========================================
                                    ดูรายละเอียดหลังดำเนินการแล้ว
                                 ======================================== */
@@ -2339,9 +4299,9 @@ export default function GMModalDetail({
                                                                 item.label
                                                             }
                                                             className={`px-2 py-3 text-center ${item.bgClass} ${index >
-                                                                    0
-                                                                    ? "border-l border-slate-200"
-                                                                    : ""
+                                                                0
+                                                                ? "border-l border-slate-200"
+                                                                : ""
                                                                 }`}
                                                         >
                                                             <p className="text-[9px] font-bold text-slate-500">
@@ -2593,8 +4553,8 @@ export default function GMModalDetail({
                                                             item.label
                                                         }
                                                         className={`px-2 py-3 text-center ${item.bgClass} ${index > 0
-                                                                ? "border-l border-slate-200"
-                                                                : ""
+                                                            ? "border-l border-slate-200"
+                                                            : ""
                                                             }`}
                                                     >
                                                         <p className="text-[9px] font-bold text-slate-500">
@@ -3028,9 +4988,9 @@ export default function GMModalDetail({
                                                                     item.label
                                                                 }
                                                                 className={`px-2 py-3 text-center ${index >
-                                                                        0
-                                                                        ? "border-l border-blue-100"
-                                                                        : ""
+                                                                    0
+                                                                    ? "border-l border-blue-100"
+                                                                    : ""
                                                                     }`}
                                                             >
                                                                 <p className="text-[9px] font-bold text-slate-400">
@@ -3166,7 +5126,7 @@ export default function GMModalDetail({
                                         )}
                                     </div>
                                 </section>
-                            )}
+                            ))}
                         </div>
                     </aside>
                 </div>

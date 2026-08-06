@@ -85,9 +85,9 @@ export default function NewVehicleRequestModal({
         Record<number, string>
     >({});
 
-    const [checkingLicenseIndex, setCheckingLicenseIndex] = useState<number | null>(
-        null
-    );
+    const [checkingLicenseIndex, setCheckingLicenseIndex] = useState<
+        number | null
+    >(null);
 
     const [saving, setSaving] = useState(false);
     const [loadingTrucks, setLoadingTrucks] = useState(false);
@@ -110,8 +110,12 @@ export default function NewVehicleRequestModal({
 
     const warehouseDropdownRef = useRef<HTMLDivElement | null>(null);
 
-    const [licenseDuplicateStatus, setLicenseDuplicateStatus] = useState<Record<number, boolean | null>>({});
-    const [activeLicenseDropdownIndex, setActiveLicenseDropdownIndex] = useState<number | null>(null);
+    const [licenseDuplicateStatus, setLicenseDuplicateStatus] = useState<
+        Record<number, boolean | null>
+    >({});
+    const [activeLicenseDropdownIndex, setActiveLicenseDropdownIndex] = useState<
+        number | null
+    >(null);
 
     const [selectedDC, setSelectedDC] = useState<WarehouseItem | null>(null);
     const [isCenterMode, setIsCenterMode] = useState(false);
@@ -258,10 +262,7 @@ export default function NewVehicleRequestModal({
     ]);
 
     const dcType = useMemo(() => {
-        const selectedType =
-            selectedDC?.DC_TYPE ||
-            selectedDC?.dc_type ||
-            "";
+        const selectedType = selectedDC?.DC_TYPE || selectedDC?.dc_type || "";
 
         if (selectedType) {
             return String(selectedType).trim();
@@ -292,7 +293,6 @@ export default function NewVehicleRequestModal({
         return `${prefix}${String(nextNumber).padStart(3, "0")}`;
     }, [existingRequests, todayDocKey, dcCode, userWarehouse]);
 
-
     const matchedTrucksByDcCode = useMemo(() => {
         if (!dcCode) return [];
 
@@ -310,7 +310,9 @@ export default function NewVehicleRequestModal({
         const set = new Set<string>();
 
         matchedTrucksByDcCode.forEach((item) => {
-            const truckType = String(getValueIgnoreCase(item, "TRUCK_TYPE") || "").trim();
+            const truckType = String(
+                getValueIgnoreCase(item, "TRUCK_TYPE") || ""
+            ).trim();
 
             if (truckType) {
                 set.add(truckType);
@@ -381,19 +383,30 @@ export default function NewVehicleRequestModal({
         });
     }, [warehouseOptions, warehouseSearchText]);
 
+    const resetLicenseFieldsAfterWarehouseChange = () => {
+        const qtyNumber = Number(formData.qty || 0);
+        const isReplacementTruck = formData.fleet_type === "รถทดแทน";
+
+        // ล้างทะเบียนของคลังเดิม แต่สร้างช่องใหม่ตามจำนวนรถเดิม
+        setLicenseReplaceList(
+            isReplacementTruck && qtyNumber > 0
+                ? Array.from({ length: qtyNumber }, () => "")
+                : []
+        );
+
+        setLicenseCheckMessages({});
+        setLicenseDuplicateStatus({});
+        setCheckingLicenseIndex(null);
+        setActiveLicenseDropdownIndex(null);
+    };
+
     const handleSelectWarehouse = (item: WarehouseItem) => {
         const code = String(
-            getValueIgnoreCase(item, "DC_CODE") ||
-            item.DC_CODE ||
-            item.dc_code ||
-            ""
+            getValueIgnoreCase(item, "DC_CODE") || item.DC_CODE || item.dc_code || ""
         ).trim();
 
         const name = String(
-            getValueIgnoreCase(item, "DC_NAME") ||
-            item.DC_NAME ||
-            item.dc_name ||
-            ""
+            getValueIgnoreCase(item, "DC_NAME") || item.DC_NAME || item.dc_name || ""
         ).trim();
 
         setSelectedWarehouseCode(code);
@@ -406,10 +419,34 @@ export default function NewVehicleRequestModal({
             fleet_truck_type: "",
         }));
 
-        setLicenseReplaceList([]);
-        setLicenseCheckMessages({});
-        setCheckingLicenseIndex(null);
+        // ล้างทะเบียนของคลังเดิม และสร้างช่องใหม่ตามจำนวนรถเดิม
+        resetLicenseFieldsAfterWarehouseChange();
+
         setError("");
+    };
+
+    const formatTruckReplaceLabel = (item: {
+        license: string;
+        province: string;
+        companyId: string;
+        companyName: string;
+    }) => {
+        return `${item.license || "-"} - ${item.province || "-"}, (${item.companyId || "-"
+            }) ${item.companyName || "-"}`;
+    };
+
+    const formatTruckReplaceTopLine = (item: {
+        license: string;
+        province: string;
+    }) => {
+        return `${item.license || "-"} - ${item.province || "-"}`;
+    };
+
+    const formatTruckReplaceBottomLine = (item: {
+        companyId: string;
+        companyName: string;
+    }) => {
+        return `(${item.companyId || "-"}) ${item.companyName || "-"}`;
     };
 
     const truckReplaceOptions = useMemo(() => {
@@ -419,6 +456,7 @@ export default function NewVehicleRequestModal({
             string,
             {
                 license: string;
+                province: string;
                 companyName: string;
                 companyId: string;
             }
@@ -429,6 +467,13 @@ export default function NewVehicleRequestModal({
                 getValueIgnoreCase(item, "LICENSE") ||
                 item.LICENSE ||
                 item.license ||
+                ""
+            ).trim();
+
+            const province = String(
+                getValueIgnoreCase(item, "PROVINCE") ||
+                item.PROVINCE ||
+                item.province ||
                 ""
             ).trim();
 
@@ -449,6 +494,7 @@ export default function NewVehicleRequestModal({
             if (license) {
                 map.set(license, {
                     license,
+                    province,
                     companyName,
                     companyId,
                 });
@@ -456,7 +502,7 @@ export default function NewVehicleRequestModal({
         });
 
         return Array.from(map.values()).sort((a, b) =>
-            a.license.localeCompare(b.license)
+            a.license.localeCompare(b.license, "th")
         );
     }, [matchedTrucksByDcCode, dcCode]);
 
@@ -538,15 +584,11 @@ export default function NewVehicleRequestModal({
 
             if (needsSelectedDC) {
                 const selectedCode = String(
-                    parsedSelectedDC?.DC_CODE ||
-                    parsedSelectedDC?.dc_code ||
-                    ""
+                    parsedSelectedDC?.DC_CODE || parsedSelectedDC?.dc_code || ""
                 ).trim();
 
                 const selectedName = String(
-                    parsedSelectedDC?.DC_NAME ||
-                    parsedSelectedDC?.dc_name ||
-                    ""
+                    parsedSelectedDC?.DC_NAME || parsedSelectedDC?.dc_name || ""
                 ).trim();
 
                 const selectedCodeIsCenter = normalizeText(selectedCode) === "CENTER";
@@ -555,8 +597,7 @@ export default function NewVehicleRequestModal({
 
                 setIsCenterMode(nextCenterMode);
 
-                const canUseSavedSelectedDC =
-                    Boolean(selectedCode) && !nextCenterMode;
+                const canUseSavedSelectedDC = Boolean(selectedCode) && !nextCenterMode;
 
                 if (canUseSavedSelectedDC && parsedSelectedDC) {
                     setSelectedWarehouseCode(selectedCode);
@@ -717,7 +758,15 @@ export default function NewVehicleRequestModal({
         console.log("TRUCK TYPE OPTIONS:", truckTypeOptions);
         console.log("LICENSE OPTIONS:", licenseOptions);
         console.log("=========================================");
-    }, [open, userWarehouse, isCenterMode, dcCode, matchedTrucksByDcCode, truckTypeOptions, licenseOptions,]);
+    }, [
+        open,
+        userWarehouse,
+        isCenterMode,
+        dcCode,
+        matchedTrucksByDcCode,
+        truckTypeOptions,
+        licenseOptions,
+    ]);
 
     const needLicenseList = useMemo(() => {
         return formData.fleet_type === "รถทดแทน";
@@ -743,7 +792,7 @@ export default function NewVehicleRequestModal({
 
             return next.slice(0, qtyNumber);
         });
-    }, [needLicenseList, formData.qty]);
+    }, [needLicenseList, formData.qty, dcCode]);
 
     useEffect(() => {
         if (!openCalendar) return;
@@ -939,7 +988,9 @@ export default function NewVehicleRequestModal({
             setCheckingLicenseIndex(index);
 
             const response = await fetch(
-                `http://192.168.158.210/api_new_truck/api/check_license_duplicate.php?license=${encodeURIComponent(cleanLicense)}`
+                `http://192.168.158.210/api_new_truck/api/check_license_duplicate.php?license=${encodeURIComponent(
+                    cleanLicense
+                )}`
             );
 
             const result = await response.json();
@@ -974,10 +1025,58 @@ export default function NewVehicleRequestModal({
         }
     };
 
+    const findDuplicateLicenseRow = (currentIndex: number, license: string) => {
+        const normalizedLicense = normalizeText(license);
+
+        if (!normalizedLicense) return -1;
+
+        return licenseReplaceList.findIndex((selectedLicense, index) => {
+            return (
+                index !== currentIndex &&
+                normalizeText(selectedLicense) === normalizedLicense
+            );
+        });
+    };
+
     const handleLicenseReplaceChange = async (index: number, value: string) => {
+        const selectedTruck = getTruckReplaceDetail(value);
+
+        // ถ้าเลือกจากรายการบริษัท ให้เปลี่ยนกลับมาเก็บเฉพาะ LICENSE
+        const finalValue = selectedTruck?.license || value;
+
+        // ตรวจทะเบียนซ้ำกับรถคันอื่นในคำขอเดียวกัน
+        if (selectedTruck?.license) {
+            const duplicateRowIndex = findDuplicateLicenseRow(
+                index,
+                selectedTruck.license
+            );
+
+            if (duplicateRowIndex >= 0) {
+                setLicenseReplaceList((prev) => {
+                    const next = [...prev];
+                    next[index] = "";
+                    return next;
+                });
+
+                setLicenseDuplicateStatus((prev) => ({
+                    ...prev,
+                    [index]: true,
+                }));
+
+                setLicenseCheckMessages((prev) => ({
+                    ...prev,
+                    [index]: `ทะเบียน ${selectedTruck.license
+                        } ถูกเลือกไว้ในรถทดแทนคันที่ ${duplicateRowIndex + 1} แล้ว`,
+                }));
+
+                setActiveLicenseDropdownIndex(null);
+                return;
+            }
+        }
+
         setLicenseReplaceList((prev) => {
             const next = [...prev];
-            next[index] = value;
+            next[index] = finalValue;
             return next;
         });
 
@@ -993,8 +1092,6 @@ export default function NewVehicleRequestModal({
 
         setActiveLicenseDropdownIndex(index);
 
-        const selectedTruck = getTruckReplaceDetail(value);
-
         if (selectedTruck?.license) {
             await checkLicenseDuplicate(index, selectedTruck.license);
         }
@@ -1004,21 +1101,54 @@ export default function NewVehicleRequestModal({
         index: number,
         item: {
             license: string;
+            province: string;
             companyName: string;
             companyId: string;
         }
     ) => {
-        const finalLicense = item.license;
+        const duplicateRowIndex = findDuplicateLicenseRow(index, item.license);
+
+        if (duplicateRowIndex >= 0) {
+            setLicenseReplaceList((prev) => {
+                const next = [...prev];
+                next[index] = "";
+                return next;
+            });
+
+            setLicenseDuplicateStatus((prev) => ({
+                ...prev,
+                [index]: true,
+            }));
+
+            setLicenseCheckMessages((prev) => ({
+                ...prev,
+                [index]: `ทะเบียน ${item.license} ถูกเลือกไว้ในรถทดแทนคันที่ ${duplicateRowIndex + 1
+                    } แล้ว`,
+            }));
+
+            setActiveLicenseDropdownIndex(null);
+            return;
+        }
 
         setLicenseReplaceList((prev) => {
             const next = [...prev];
-            next[index] = finalLicense;
+            next[index] = item.license;
             return next;
         });
 
+        setLicenseCheckMessages((prev) => ({
+            ...prev,
+            [index]: "",
+        }));
+
+        setLicenseDuplicateStatus((prev) => ({
+            ...prev,
+            [index]: null,
+        }));
+
         setActiveLicenseDropdownIndex(null);
 
-        await checkLicenseDuplicate(index, finalLicense);
+        await checkLicenseDuplicate(index, item.license);
     };
 
     const resetForm = () => {
@@ -1075,12 +1205,34 @@ export default function NewVehicleRequestModal({
             return false;
         }
 
+        // ตรวจซ้ำภายในคำขอเดียวกัน
+        const normalizedLicenses = requiredLicenses.map((license) =>
+            normalizeText(license)
+        );
+
+        const duplicateIndex = normalizedLicenses.findIndex(
+            (license, index) =>
+                Boolean(license) && normalizedLicenses.indexOf(license) !== index
+        );
+
+        if (duplicateIndex >= 0) {
+            const duplicateLicense = requiredLicenses[duplicateIndex];
+
+            setError(
+                `ทะเบียน ${duplicateLicense} ถูกเลือกซ้ำ กรุณาเลือกทะเบียนรถแต่ละคันไม่ให้ซ้ำกัน`
+            );
+
+            return false;
+        }
+
         const hasDuplicate = requiredLicenses.some((_, index) => {
             return licenseDuplicateStatus[index] === true;
         });
 
         if (hasDuplicate) {
-            setError("มีทะเบียนรถที่ซ้ำหรือถูกใช้งานแล้ว กรุณาเปลี่ยนทะเบียนก่อนบันทึก");
+            setError(
+                "มีทะเบียนรถที่ซ้ำหรือถูกใช้งานแล้ว กรุณาเปลี่ยนทะเบียนก่อนบันทึก"
+            );
             return false;
         }
 
@@ -1089,7 +1241,9 @@ export default function NewVehicleRequestModal({
         });
 
         if (hasUnchecked) {
-            setError("กรุณาเลือกทะเบียนจากรายการ และรอให้ระบบตรวจสอบครบทุกคันก่อนบันทึก");
+            setError(
+                "กรุณาเลือกทะเบียนจากรายการ และรอให้ระบบตรวจสอบครบทุกคันก่อนบันทึก"
+            );
             return false;
         }
 
@@ -1152,7 +1306,9 @@ export default function NewVehicleRequestModal({
                 formData.fleet_type === "รถออกใหม่" ||
                 formData.fleet_type === "รถทดแทน"
             ) {
-                setError("รถออกใหม่/รถทดแทน ต้องเลือกวันที่ใช้งานหลังจากวันนี้อย่างน้อย 126 วัน");
+                setError(
+                    "รถออกใหม่/รถทดแทน ต้องเลือกวันที่ใช้งานหลังจากวันนี้อย่างน้อย 126 วัน"
+                );
                 return;
             }
 
@@ -1187,10 +1343,9 @@ export default function NewVehicleRequestModal({
                 fleet_type: formData.fleet_type,
                 fleet_truck_type: formData.fleet_truck_type,
 
-                license_replace:
-                    needLicenseList
-                        ? licenseReplaceList.map((license) => license.trim()).filter(Boolean)
-                        : [],
+                license_replace: needLicenseList
+                    ? licenseReplaceList.map((license) => license.trim()).filter(Boolean)
+                    : [],
 
                 qty: Number(formData.qty),
 
@@ -1272,7 +1427,9 @@ export default function NewVehicleRequestModal({
                             {canSelectWarehouse && (
                                 <div className="md:col-span-4" ref={warehouseDropdownRef}>
                                     <label className="mb-1 block text-xs font-semibold text-slate-500">
-                                        {isCenterMode ? "เลือกคลังปลายทาง (DC_NAME)" : "เลือก Warehouse / DC"}{" "}
+                                        {isCenterMode
+                                            ? "เลือกคลังปลายทาง (DC_NAME)"
+                                            : "เลือก Warehouse / DC"}{" "}
                                         <span className="text-red-500">*</span>
                                     </label>
 
@@ -1354,9 +1511,7 @@ export default function NewVehicleRequestModal({
                                                                     : "text-slate-700"
                                                                     }`}
                                                             >
-                                                                <div className="font-bold">
-                                                                    {name || code}
-                                                                </div>
+                                                                <div className="font-bold">{name || code}</div>
 
                                                                 <div className="mt-0.5 text-xs font-medium text-slate-500">
                                                                     DC Code: {code || "-"}
@@ -1391,24 +1546,20 @@ export default function NewVehicleRequestModal({
                             )}
 
                             <div>
-                                <p className="font-semibold text-slate-400">
-                                    วันที่สร้างคำขอ
+                                <p className="font-semibold text-slate-400">วันที่สร้างคำขอ</p>
+                                <p className="mt-1 font-bold text-slate-700">
+                                    {formatShowDate(today)}
                                 </p>
-                                <p className="mt-1 font-bold text-slate-700">{formatShowDate(today)}</p>
                             </div>
 
                             <div>
                                 <p className="font-semibold text-slate-400">DC Code</p>
-                                <p className="mt-1 font-bold text-slate-700">
-                                    {dcCode || "-"}
-                                </p>
+                                <p className="mt-1 font-bold text-slate-700">{dcCode || "-"}</p>
                             </div>
 
                             <div>
                                 <p className="font-semibold text-slate-400">DC Type</p>
-                                <p className="mt-1 font-bold text-slate-700">
-                                    {dcType || "-"}
-                                </p>
+                                <p className="mt-1 font-bold text-slate-700">{dcType || "-"}</p>
                             </div>
 
                             <div>
@@ -1439,7 +1590,8 @@ export default function NewVehicleRequestModal({
 
                             <div>
                                 <label className="mb-1 block text-xs font-semibold text-slate-500">
-                                    ประเภทกองรถ (Fleet Type) <span className="text-red-500">*</span>
+                                    ประเภทกองรถ (Fleet Type){" "}
+                                    <span className="text-red-500">*</span>
                                 </label>
                                 <select
                                     name="fleet_truck_type"
@@ -1466,7 +1618,8 @@ export default function NewVehicleRequestModal({
                                 </select>
 
                                 <p className="mt-1 text-[11px] text-slate-400">
-                                    Match DC_CODE: {dcCode || "-"} / พบ {truckTypeOptions.length} ประเภท
+                                    Match DC_CODE: {dcCode || "-"} / พบ {truckTypeOptions.length}{" "}
+                                    ประเภท
                                 </p>
                             </div>
 
@@ -1531,7 +1684,10 @@ export default function NewVehicleRequestModal({
                                             minDate={new Date(minUsageDate)}
                                             onChange={(date: Date) => {
                                                 const year = date.getFullYear();
-                                                const month = String(date.getMonth() + 1).padStart(2, "0");
+                                                const month = String(date.getMonth() + 1).padStart(
+                                                    2,
+                                                    "0"
+                                                );
                                                 const day = String(date.getDate()).padStart(2, "0");
 
                                                 setFormData((prev) => ({
@@ -1558,81 +1714,86 @@ export default function NewVehicleRequestModal({
                                         </div>
 
                                         <style jsx global>{`
-                                            .rdrCalendarWrapper {
-                                                width: 100%;
-                                                border-radius: 16px;
-                                                font-family: inherit;
-                                                color: #334155;
-                                            }
+                      .rdrCalendarWrapper {
+                        width: 100%;
+                        border-radius: 16px;
+                        font-family: inherit;
+                        color: #334155;
+                      }
 
-                                            .rdrMonth {
-                                                width: 100%;
-                                                padding: 0;
-                                            }
+                      .rdrMonth {
+                        width: 100%;
+                        padding: 0;
+                      }
 
-                                            .rdrMonthAndYearWrapper {
-                                                height: 44px;
-                                                padding-top: 0;
-                                            }
+                      .rdrMonthAndYearWrapper {
+                        height: 44px;
+                        padding-top: 0;
+                      }
 
-                                            .rdrMonthAndYearPickers select {
-                                                border-radius: 10px;
-                                                background-color: #f8fafc;
-                                                color: #334155;
-                                                font-size: 13px;
-                                                font-weight: 700;
-                                            }
+                      .rdrMonthAndYearPickers select {
+                        border-radius: 10px;
+                        background-color: #f8fafc;
+                        color: #334155;
+                        font-size: 13px;
+                        font-weight: 700;
+                      }
 
-                                            .rdrWeekDay {
-                                                color: #64748b;
-                                                font-size: 11px;
-                                                font-weight: 700;
-                                            }
+                      .rdrWeekDay {
+                        color: #64748b;
+                        font-size: 11px;
+                        font-weight: 700;
+                      }
 
-                                            .rdrDay {
-                                                height: 38px;
-                                            }
+                      .rdrDay {
+                        height: 38px;
+                      }
 
-                                            .rdrDayNumber span {
-                                                color: #334155;
-                                                font-size: 12px;
-                                                font-weight: 700;
-                                            }
+                      .rdrDayNumber span {
+                        color: #334155;
+                        font-size: 12px;
+                        font-weight: 700;
+                      }
 
-                                            .rdrDayToday .rdrDayNumber span:after {
-                                                background: #4f46e5;
-                                            }
+                      .rdrDayToday .rdrDayNumber span:after {
+                        background: #4f46e5;
+                      }
 
-                                            .rdrSelected {
-                                                border-radius: 999px;
-                                                background: linear-gradient(135deg, #4f46e5, #38bdf8) !important;
-                                                box-shadow: 0 8px 18px rgba(79, 70, 229, 0.25);
-                                            }
+                      .rdrSelected {
+                        border-radius: 999px;
+                        background: linear-gradient(
+                          135deg,
+                          #4f46e5,
+                          #38bdf8
+                        ) !important;
+                        box-shadow: 0 8px 18px rgba(79, 70, 229, 0.25);
+                      }
 
-                                            .rdrDayDisabled {
-                                                background-color: transparent;
-                                            }
+                      .rdrDayDisabled {
+                        background-color: transparent;
+                      }
 
-                                            .rdrDayDisabled .rdrDayNumber span {
-                                                color: #cbd5e1 !important;
-                                                text-decoration: line-through;
-                                            }
+                      .rdrDayDisabled .rdrDayNumber span {
+                        color: #cbd5e1 !important;
+                        text-decoration: line-through;
+                      }
 
-                                            .rdrNextPrevButton {
-                                                border-radius: 10px;
-                                                background: #eef2ff;
-                                            }
+                      .rdrNextPrevButton {
+                        border-radius: 10px;
+                        background: #eef2ff;
+                      }
 
-                                            .rdrNextPrevButton:hover {
-                                                background: #dbeafe;
-                                            }
-                                        `}</style>
+                      .rdrNextPrevButton:hover {
+                        background: #dbeafe;
+                      }
+                    `}</style>
                                     </div>
                                 )}
 
                                 <div className="mt-2 mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
                                     <span className="font-bold">เงื่อนไขวันที่ใช้งาน:</span>{" "}
-                                    รถออกใหม่/รถทดแทน ต้องรอทำการอย่างน้อย 126 วัน • รถเสริม ต้องรอทำการอย่างน้อย 30 วัน
+                                    รถออกใหม่/รถทดแทน ต้องรอทำการอย่างน้อย 126 วัน • รถเสริม
+                                    ต้องรอทำการอย่างน้อย 30 วัน
                                     {formData.fleet_type && (
                                         <span className="ml-1 font-bold">
                                             เลือกได้ตั้งแต่ {formatShowDate(minUsageDate)} เป็นต้นไป
@@ -1643,7 +1804,8 @@ export default function NewVehicleRequestModal({
 
                             <div>
                                 <label className="mb-1 block text-xs font-semibold text-slate-500">
-                                    ปริมาณงาน (Workload - ชิ้น)<span className="text-red-500">*</span>
+                                    ปริมาณงาน (Workload - ชิ้น)
+                                    <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
@@ -1674,176 +1836,173 @@ export default function NewVehicleRequestModal({
                                 />
                             </div>
 
-                            {needLicenseList &&
-                                Number(formData.qty || 0) > 0 && (
-                                    <div className="md:col-span-2 lg:col-span-3">
-                                        <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
-                                            <div className="mb-3">
-                                                <p className="text-xs font-bold text-orange-700">
-                                                    ทะเบียนรถสำหรับ{formData.fleet_type}
-                                                </p>
-                                                <p className="mt-0.5 text-xs text-orange-600">
-                                                    กรุณาเลือกให้ครบตามจำนวน {formData.qty} คัน
-                                                </p>
-                                                <p className="mt-0.5 text-[11px] text-orange-500">
-                                                    อ้างอิงจาก DC_CODE: {dcCode || "-"} / พบทะเบียน {truckReplaceOptions.length} รายการ
-                                                </p>
-                                            </div>
+                            {needLicenseList && Number(formData.qty || 0) > 0 && (
+                                <div className="md:col-span-2 lg:col-span-3">
+                                    <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
+                                        <div className="mb-3">
+                                            <p className="text-xs font-bold text-orange-700">
+                                                ทะเบียนรถสำหรับ{formData.fleet_type}
+                                            </p>
+                                            <p className="mt-0.5 text-xs text-orange-600">
+                                                กรุณาเลือกให้ครบตามจำนวน {formData.qty} คัน
+                                            </p>
+                                            <p className="mt-0.5 text-[11px] text-orange-500">
+                                                อ้างอิงจาก DC_CODE: {dcCode || "-"} / พบทะเบียน{" "}
+                                                {truckReplaceOptions.length} รายการ
+                                            </p>
+                                        </div>
 
-                                            <div className="space-y-2">
-                                                {licenseReplaceList.map((license, index) => {
-                                                    const truckDetail = getTruckReplaceDetail(license);
-                                                    const checkMessage = licenseCheckMessages[index] || "";
+                                        <div className="space-y-2">
+                                            {licenseReplaceList.map((license, index) => {
+                                                const truckDetail = getTruckReplaceDetail(license);
+                                                const checkMessage = licenseCheckMessages[index] || "";
 
-                                                    const duplicateStatus = licenseDuplicateStatus[index];
+                                                const duplicateStatus = licenseDuplicateStatus[index];
 
-                                                    const isChecking = checkingLicenseIndex === index;
+                                                const isChecking = checkingLicenseIndex === index;
 
-                                                    const isAvailable =
-                                                        license &&
-                                                        !isChecking &&
-                                                        duplicateStatus === false;
+                                                const isAvailable =
+                                                    license && !isChecking && duplicateStatus === false;
 
-                                                    const isError =
-                                                        license &&
-                                                        !isChecking &&
-                                                        duplicateStatus === true;
+                                                const isError =
+                                                    license && !isChecking && duplicateStatus === true;
 
-                                                    return (
-                                                        <div
-                                                            key={index}
-                                                            className="rounded-xl border border-orange-100 bg-white p-3 shadow-sm"
-                                                        >
-                                                            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[120px_1.2fr_1fr_120px]">
-                                                                <div>
-                                                                    <p className="text-[11px] font-bold text-slate-400">
-                                                                        คันที่
-                                                                    </p>
-                                                                    <p className="text-sm font-bold text-slate-700">
-                                                                        {formData.fleet_type} {index + 1}
-                                                                        <span className="text-red-500"> *</span>
-                                                                    </p>
-                                                                </div>
-
-                                                                <div>
-                                                                    <label className="mb-1 block text-[11px] font-bold text-slate-500">
-                                                                        ทะเบียน / ชื่อบริษัท
-                                                                    </label>
-
-                                                                    <input
-                                                                        list={`license-options-${index}`}
-                                                                        value={license}
-                                                                        onChange={(e) =>
-                                                                            handleLicenseReplaceChange(index, e.target.value)
-                                                                        }
-                                                                        className={`w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold outline-none transition ${isAvailable
-                                                                            ? "border-emerald-300 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50"
-                                                                            : isError
-                                                                                ? "border-red-300 focus:border-red-500 focus:ring-4 focus:ring-red-50"
-                                                                                : "border-slate-300 focus:border-orange-500 focus:ring-4 focus:ring-orange-50"
-                                                                            }`}
-                                                                        placeholder={
-                                                                            truckReplaceOptions.length > 0
-                                                                                ? "เลือกทะเบียน หรือชื่อบริษัท"
-                                                                                : "พิมพ์ทะเบียน"
-                                                                        }
-                                                                    />
-
-                                                                    <datalist id={`license-options-${index}`}>
-                                                                        {truckReplaceOptions.map((item) => (
-                                                                            <React.Fragment key={item.license}>
-                                                                                <option
-                                                                                    value={item.license}
-                                                                                    label={`${item.companyName || "-"}${item.companyId ? ` / ${item.companyId}` : ""
-                                                                                        }`}
-                                                                                />
-
-                                                                                {item.companyName && (
-                                                                                    <option
-                                                                                        value={item.companyName}
-                                                                                        label={`${item.license}${item.companyId ? ` / ${item.companyId}` : ""
-                                                                                            }`}
-                                                                                    />
-                                                                                )}
-                                                                            </React.Fragment>
-                                                                        ))}
-                                                                    </datalist>
-                                                                </div>
-
-                                                                <div>
-                                                                    <p className="mb-1 text-[11px] font-bold text-slate-500">
-                                                                        ข้อมูลรถ
-                                                                    </p>
-
-                                                                    {truckDetail ? (
-                                                                        <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                                                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                                                                                <span className="font-bold text-slate-700">
-                                                                                    {truckDetail.license || "-"}
-                                                                                </span>
-
-                                                                                <span className="text-slate-300">|</span>
-
-                                                                                <span className="text-slate-600">
-                                                                                    {truckDetail.companyName || "-"}
-                                                                                </span>
-
-                                                                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                                                                                    ID: {truckDetail.companyId || "-"}
-                                                                                </span>
-                                                                            </div>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
-                                                                            ยังไม่ได้เลือกข้อมูลรถ
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-
-                                                                <div className="lg:text-right">
-                                                                    <p className="mb-1 text-[11px] font-bold text-slate-500">
-                                                                        สถานะ
-                                                                    </p>
-
-                                                                    {isChecking ? (
-                                                                        <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
-                                                                            กำลังตรวจสอบ...
-                                                                        </span>
-                                                                    ) : isAvailable ? (
-                                                                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
-                                                                            ✅ ใช้งานได้
-                                                                        </span>
-                                                                    ) : isError ? (
-                                                                        <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600 ring-1 ring-red-200">
-                                                                            ❌ ทะเบียนซ้ำ
-                                                                        </span>
-                                                                    ) : license ? (
-                                                                        <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-600 ring-1 ring-amber-200">
-                                                                            รอตรวจสอบ
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
-                                                                            รอเลือก
-                                                                        </span>
-                                                                    )}
-                                                                </div>
+                                                return (
+                                                    <div
+                                                        key={index}
+                                                        className="rounded-xl border border-orange-100 bg-white p-3 shadow-sm"
+                                                    >
+                                                        <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[120px_1.2fr_1fr_120px]">
+                                                            <div>
+                                                                <p className="text-[11px] font-bold text-slate-400">
+                                                                    คันที่
+                                                                </p>
+                                                                <p className="text-sm font-bold text-slate-700">
+                                                                    {formData.fleet_type} {index + 1}
+                                                                    <span className="text-red-500"> *</span>
+                                                                </p>
                                                             </div>
 
-                                                            {checkMessage && !isChecking && (
-                                                                <p
-                                                                    className={`mt-2 text-[11px] font-medium ${isAvailable ? "text-emerald-600" : "text-red-600"
+                                                            <div>
+                                                                <label className="mb-1 block text-[11px] font-bold text-slate-500">
+                                                                    ทะเบียน / ชื่อบริษัท
+                                                                </label>
+
+                                                                <input
+                                                                    list={`license-options-${index}`}
+                                                                    value={license}
+                                                                    onChange={(e) =>
+                                                                        handleLicenseReplaceChange(
+                                                                            index,
+                                                                            e.target.value
+                                                                        )
+                                                                    }
+                                                                    className={`w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold outline-none transition ${isAvailable
+                                                                        ? "border-emerald-300 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50"
+                                                                        : isError
+                                                                            ? "border-red-300 focus:border-red-500 focus:ring-4 focus:ring-red-50"
+                                                                            : "border-slate-300 focus:border-orange-500 focus:ring-4 focus:ring-orange-50"
                                                                         }`}
-                                                                >
-                                                                    {checkMessage}
+                                                                    placeholder={
+                                                                        truckReplaceOptions.length > 0
+                                                                            ? "เลือกทะเบียน หรือชื่อบริษัท"
+                                                                            : "พิมพ์ทะเบียน"
+                                                                    }
+                                                                />
+
+                                                                <datalist id={`license-options-${index}`}>
+                                                                    {truckReplaceOptions
+                                                                        .filter((item) => {
+                                                                            const selectedIndex =
+                                                                                licenseReplaceList.findIndex(
+                                                                                    (
+                                                                                        selectedLicense,
+                                                                                        selectedLicenseIndex
+                                                                                    ) =>
+                                                                                        selectedLicenseIndex !== index &&
+                                                                                        normalizeText(selectedLicense) ===
+                                                                                        normalizeText(item.license)
+                                                                                );
+
+                                                                            return selectedIndex === -1;
+                                                                        })
+                                                                        .map((item) => (
+                                                                            <option
+                                                                                key={item.license}
+                                                                                value={item.license}
+                                                                                label={`(${item.companyId || "-"}) ${item.companyName || "-"}`}
+                                                                            />
+                                                                        ))}
+                                                                </datalist>
+                                                            </div>
+
+                                                            <div>
+                                                                <p className="mb-1 text-[11px] font-bold text-slate-500">
+                                                                    ข้อมูลรถ
                                                                 </p>
-                                                            )}
+
+                                                                {truckDetail ? (
+                                                                    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                                                        <p className="text-sm font-bold text-slate-800">
+                                                                            {formatTruckReplaceTopLine(truckDetail)}
+                                                                        </p>
+                                                                        <p className="mt-1 text-xs text-slate-500">
+                                                                            {formatTruckReplaceBottomLine(truckDetail)}
+                                                                        </p>
+                                                                    </div>
+                                                                ) : (
+                                                                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                                                                    ยังไม่ได้เลือกข้อมูลรถ
+                                                                </div>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="lg:text-right">
+                                                                <p className="mb-1 text-[11px] font-bold text-slate-500">
+                                                                    สถานะ
+                                                                </p>
+
+                                                                {isChecking ? (
+                                                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                                                                        กำลังตรวจสอบ...
+                                                                    </span>
+                                                                ) : isAvailable ? (
+                                                                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
+                                                                        ✅ ใช้งานได้
+                                                                    </span>
+                                                                ) : isError ? (
+                                                                    <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600 ring-1 ring-red-200">
+                                                                        ❌ ทะเบียนซ้ำ
+                                                                    </span>
+                                                                ) : license ? (
+                                                                    <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-600 ring-1 ring-amber-200">
+                                                                        รอตรวจสอบ
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+                                                                        รอเลือก
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                    );
-                                                })}
-                                            </div>
+
+                                                        {checkMessage && !isChecking && (
+                                                            <p
+                                                                className={`mt-2 text-[11px] font-medium ${isAvailable
+                                                                    ? "text-emerald-600"
+                                                                    : "text-red-600"
+                                                                    }`}
+                                                            >
+                                                                {checkMessage}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
-                                )}
+                                </div>
+                            )}
 
                             <div className="md:col-span-2 lg:col-span-3">
                                 <label className="mb-1 block text-xs font-semibold text-slate-500">

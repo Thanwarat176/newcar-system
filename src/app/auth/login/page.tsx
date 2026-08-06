@@ -295,13 +295,6 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#eef4ff] px-4 py-6">
-      {/* Background Image */}
-      <div
-        className="fixed inset-0 z-0 bg-cover bg-center opacity-[0.06]"
-        style={{
-          backgroundImage: `url(${IMAGE_PATHS.backgroundlogris})`,
-        }}
-      />
 
       {/* Decorative Background */}
       <div className="fixed -top-32 -left-32 z-0 h-96 w-96 rounded-full bg-blue-300/30 blur-3xl" />

@@ -106,8 +106,8 @@ interface CarItem {
   company_name: string;
   detail_id: string | null;
 
-  number_feb?: string | null;
-  date_number_feb?: string | null;
+  number_fbp?: string | null;
+  date_number_fbp?: string | null;
   number_tis?: string | null;
   date_number_tis?: string | null;
   number_til?: string | null;
@@ -206,8 +206,8 @@ interface VehicleWarehouseInfoData {
   car_engine?: string | null;
   car_license?: string | null;
   car_province?: string | null;
-  number_feb?: string | null;
-  date_number_feb?: string | null;
+  number_fbp?: string | null;
+  date_number_fbp?: string | null;
   number_tis?: string | null;
   date_number_tis?: string | null;
   number_til?: string | null;
@@ -251,8 +251,8 @@ interface CalendarPopoverPosition {
 }
 
 interface VehicleExtraForm {
-  number_feb: string;
-  date_number_feb: string;
+  number_fbp: string;
+  date_number_fbp: string;
   number_tis: string;
   date_number_tis: string;
   number_til: string;
@@ -275,8 +275,8 @@ interface VehicleExtraForm {
 }
 
 const emptyVehicleExtraForm: VehicleExtraForm = {
-  number_feb: "",
-  date_number_feb: "",
+  number_fbp: "",
+  date_number_fbp: "",
   number_tis: "",
   date_number_tis: "",
   number_til: "",
@@ -317,7 +317,7 @@ const VEHICLE_DETAIL_FIELDS: Array<{
   ];
 
 type MemoFileKey =
-  | "number_feb"
+  | "number_fbp"
   | "number_tis"
   | "number_til"
   | "number_ask"
@@ -355,8 +355,8 @@ const MEMO_FIELDS: Array<{
   label: string;
 }> = [
     {
-      key: "number_feb",
-      dateKey: "date_number_feb",
+      key: "number_fbp",
+      dateKey: "date_number_fbp",
       label: "เลขบันทึกแจ้ง FBP",
     },
     {
@@ -849,8 +849,8 @@ export default function FlowAssessmentModal({
       car_engine: info.car_engine || "",
       car_license: info.car_license || "",
       car_province: info.car_province || "",
-      number_feb: info.number_feb || "",
-      date_number_feb: toDateInputValue(info.date_number_feb),
+      number_fbp: info.number_fbp || "",
+      date_number_fbp: toDateInputValue(info.date_number_fbp),
       number_tis: info.number_tis || "",
       date_number_tis: toDateInputValue(info.date_number_tis),
       number_til: info.number_til || "",
