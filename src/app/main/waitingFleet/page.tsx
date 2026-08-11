@@ -422,25 +422,6 @@ export default function HomePage() {
     return status || "-";
   };
 
-  const getStatusClass = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    if (value === "fbp_pending") {
-      return "bg-amber-50 text-amber-700 border-amber-200";
-    }
-
-    if (value === "reject_by_fbp") {
-      return "bg-red-50 text-red-700 border-red-200";
-    }
-
-    if (value === "approved") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    }
-
-    return "bg-slate-50 text-slate-600 border-slate-200";
-  };
-
-
   const getStatusVisual = (status?: string) => {
     const value = normalizeStatus(status);
 

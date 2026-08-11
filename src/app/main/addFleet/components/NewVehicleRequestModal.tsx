@@ -205,8 +205,29 @@ export default function NewVehicleRequestModal({
 
     const requestBy = useMemo(() => {
         if (!userInfo) return "";
-
-        return String(userInfo.employee_id || userInfo.em_id || userInfo.id || "");
+    
+        const name = String(
+            getValueIgnoreCase(userInfo, "name") || ""
+        ).trim();
+    
+        const surname = String(
+            getValueIgnoreCase(userInfo, "surname") || ""
+        ).trim();
+    
+        const emId = String(
+            userInfo.em_id ||
+            userInfo.employee_id ||
+            userInfo.id ||
+            ""
+        ).trim();
+    
+        const fullName = `${name} ${surname}`.trim();
+    
+        if (fullName && emId) {
+            return `${fullName} (${emId})`;
+        }
+    
+        return fullName || emId;
     }, [userInfo]);
 
     const dcCode = useMemo(() => {

@@ -6,7 +6,20 @@ import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
-import { CalendarDays, Eraser, Eye, Filter, PencilLine, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
+import {
+  CalendarDays,
+  Download,
+  Eraser,
+  Eye,
+  Filter,
+  PencilLine,
+  Search,
+  SlidersHorizontal,
+  Truck,
+  Warehouse,
+  X,
+} from "lucide-react";
+import ExportRequestModal from "./components/ExportRequestModal";
 
 const VEHICLE_WAREHOUSE_INFO_API_URL =
   "http://192.168.158.210/api_new_truck/api/vehicle_warehouse_info.php";
@@ -179,7 +192,7 @@ type StatusFilter =
   | "process"
   | "rejected";
 
-  type ProcessStageFilter =
+type ProcessStageFilter =
   | "all"
   | "not_started"
   | "waiting"
@@ -209,12 +222,18 @@ export default function HomePage() {
   >({});
 
   const [openCreateModal, setOpenCreateModal] = useState(false);
+  const [openExportModal, setOpenExportModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [processStageFilter, setProcessStageFilter] =
-  useState<ProcessStageFilter>("all");
+
+  // Filter ขั้นตอนปัจจุบันของรถใน TCAS
+  // value จะผูกกับ current_process + current_step + total_steps
+  const [currentProcessFilter, setCurrentProcessFilter] = useState("all");
+
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [searchText, setSearchText] = useState("");
+  const [truckTypeSearch, setTruckTypeSearch] = useState("");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
+  const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
 
   const [requestDateRange, setRequestDateRange] = useState([
@@ -909,6 +928,7 @@ export default function HomePage() {
   const normalizeStatus = (status?: string) => {
     const value = String(status || "").trim().toLowerCase();
 
+    // รอ GM อนุมัติ
     if (
       value === "gm_pending" ||
       value === "รอ gm อนุมัติ"
@@ -916,22 +936,25 @@ export default function HomePage() {
       return "gm_pending";
     }
 
+    // รอ FBP / ส่วนกลางพิจารณา
     if (
       value === "center_pending" ||
+      value === "fbp_pending" ||
       value === "pending" ||
-      value === "กำลังประเมินกองรถ (FBP)" ||
+      value === "กำลังประเมินกองรถ (fbp)" ||
       value === "รออนุมัติ"
     ) {
       return "center_pending";
     }
 
+    // กำลังดำเนินการ TCAS
     if (
       value === "process" ||
       value === "progress" ||
       value === "confirm_request" ||
       value === "confirm request" ||
       value === "in_progress" ||
-      value === "ดำเนินการตามกระบวนการ (TCAS)" ||
+      value === "ดำเนินการตามกระบวนการ (tcas)" ||
       value === "0" ||
       value === "1" ||
       value === "2" ||
@@ -946,16 +969,26 @@ export default function HomePage() {
       return "process";
     }
 
+    // ไม่อนุมัติ / ยกเลิก
     if (
       value === "rejected" ||
+      value === "fbp_rejected" ||
+
+      // GM ไม่อนุมัติ
       value === "reject_gm" ||
       value === "reject_by_gm" ||
       value === "rejected_by_gm" ||
       value === "gm_rejected" ||
+      value === "9. ยกเลิกหนังสือ" ||
+
+      // ส่วนกลาง / FBP ไม่อนุมัติ
+      value === "reject_by_fbp" ||
       value === "reject_center" ||
       value === "reject_by_center" ||
       value === "rejected_by_center" ||
       value === "center_rejected" ||
+
+      // ขั้นตอน TCAS ไม่อนุมัติ
       value === "reject_0" ||
       value === "reject_1" ||
       value === "reject_2" ||
@@ -966,6 +999,7 @@ export default function HomePage() {
       value === "reject_7" ||
       value === "reject_8" ||
       value === "reject_9" ||
+
       value === "ไม่อนุมัติ" ||
       value === "ปฏิเสธ" ||
       value === "ยกเลิก"
@@ -973,6 +1007,7 @@ export default function HomePage() {
       return "rejected";
     }
 
+    // เสร็จสิ้น
     if (
       value === "completed" ||
       value === "approved" ||
@@ -998,12 +1033,16 @@ export default function HomePage() {
       rawValue === "reject_gm" ||
       rawValue === "reject_by_gm" ||
       rawValue === "rejected_by_gm" ||
-      rawValue === "gm_rejected"
+      rawValue === "gm_rejected" ||
+      rawValue === "9. ยกเลิกหนังสือ" ||
+      rawValue === "rejected_by_gm"
     ) {
       return "GM ไม่อนุมัติ";
     }
 
     if (
+      rawValue === "reject_by_fbp" ||
+      rawValue === "fbp_rejected" ||
       rawValue === "reject_center" ||
       rawValue === "reject_by_center" ||
       rawValue === "rejected_by_center" ||
@@ -1048,6 +1087,89 @@ export default function HomePage() {
     return "bg-slate-50 text-slate-600 border-slate-200";
   };
 
+  const getStatusVisual = (status?: string) => {
+    const rawValue = String(status || "")
+      .trim()
+      .toLowerCase();
+
+    const value = normalizeStatus(status);
+
+    // FBP กำลังพิจารณา
+    // normalizeStatus("fbp_pending") จะได้ center_pending
+    if (
+      rawValue === "fbp_pending" ||
+      value === "center_pending"
+    ) {
+      return {
+        dotClass: "bg-amber-500",
+        textClass: "text-amber-700",
+        hint: "รอการพิจารณา",
+      };
+    }
+
+    // FBP ไม่อนุมัติ
+    if (
+      rawValue === "reject_by_fbp" ||
+      rawValue === "fbp_rejected" ||
+      rawValue === "reject_center" ||
+      rawValue === "reject_by_center" ||
+      rawValue === "rejected_by_center" ||
+      rawValue === "center_rejected"
+    ) {
+      return {
+        dotClass: "bg-rose-500",
+        textClass: "text-rose-700",
+        hint: "ไม่ผ่านการประเมิน",
+      };
+    }
+
+    // อนุมัติ / เสร็จสิ้น
+    // normalizeStatus("approved") จะได้ completed
+    if (
+      rawValue === "approved" ||
+      value === "completed"
+    ) {
+      return {
+        dotClass: "bg-emerald-500",
+        textClass: "text-emerald-700",
+        hint: "ผ่านการประเมิน",
+      };
+    }
+
+    // รอ GM
+    if (value === "gm_pending") {
+      return {
+        dotClass: "bg-purple-500",
+        textClass: "text-purple-700",
+        hint: "รอ GM พิจารณา",
+      };
+    }
+
+    // อยู่ระหว่าง TCAS
+    if (value === "process") {
+      return {
+        dotClass: "bg-blue-500",
+        textClass: "text-blue-700",
+        hint: "กำลังดำเนินการ",
+      };
+    }
+
+    // สถานะไม่อนุมัติอื่น ๆ
+    if (value === "rejected") {
+      return {
+        dotClass: "bg-rose-500",
+        textClass: "text-rose-700",
+        hint: "ไม่อนุมัติ",
+      };
+    }
+
+    return {
+      dotClass: "bg-slate-400",
+      textClass: "text-slate-600",
+      hint: "สถานะรายการ",
+    };
+  };
+
   const getLicenseList = (licenseReplace: string[] | string) => {
     if (Array.isArray(licenseReplace)) {
       return licenseReplace.map((item) => String(item).trim()).filter(Boolean);
@@ -1085,12 +1207,12 @@ export default function HomePage() {
     )
       .trim()
       .toLowerCase();
-  
+
     const hasVehicleNo =
       item.vehicle_no !== null &&
       item.vehicle_no !== undefined &&
       item.vehicle_no !== "";
-  
+
     if (
       !hasVehicleNo ||
       !currentProcess ||
@@ -1103,7 +1225,7 @@ export default function HomePage() {
     ) {
       return "no_data";
     }
-  
+
     if (
       currentProcess.includes(
         "ดำเนินการครบทุกขั้นตอน"
@@ -1113,7 +1235,7 @@ export default function HomePage() {
     ) {
       return "completed";
     }
-  
+
     if (
       currentProcess.includes(
         "ยังไม่เริ่มดำเนินการ"
@@ -1122,7 +1244,7 @@ export default function HomePage() {
     ) {
       return "not_started";
     }
-  
+
     if (
       currentProcess.startsWith(
         "รอดำเนินการ"
@@ -1133,7 +1255,7 @@ export default function HomePage() {
     ) {
       return "waiting";
     }
-  
+
     return "active";
   };
 
@@ -1248,6 +1370,61 @@ export default function HomePage() {
     return Array.from(uniqueDC).sort();
   }, [warehouseFilteredRequests, dcTypeFilter]);
 
+  const currentProcessOptions = useMemo(() => {
+    const optionMap = new Map<
+      string,
+      {
+        value: string;
+        label: string;
+        currentStep: number;
+        totalSteps: number;
+      }
+    >();
+
+    warehouseFilteredProcessRows.forEach((item) => {
+      const processText =
+        String(item.current_process || "").trim() || "ยังไม่เริ่ม";
+
+      const currentStep = Number(item.current_step ?? 0);
+      const totalSteps = Number(item.total_steps ?? 0);
+
+      const value = `${currentStep}|${totalSteps}|${processText}`;
+
+      optionMap.set(value, {
+        value,
+        label: `${processText} (${currentStep}/${totalSteps})`,
+        currentStep,
+        totalSteps,
+      });
+    });
+
+    return Array.from(optionMap.values()).sort((a, b) => {
+      if (a.totalSteps !== b.totalSteps) {
+        return a.totalSteps - b.totalSteps;
+      }
+
+      if (a.currentStep !== b.currentStep) {
+        return a.currentStep - b.currentStep;
+      }
+
+      return a.label.localeCompare(b.label, "th");
+    });
+  }, [warehouseFilteredProcessRows]);
+
+  const truckTypeOptions = useMemo(() => {
+    const uniqueTruckTypes = new Set<string>();
+
+    warehouseFilteredRequests.forEach((item) => {
+      const truckType = String(item.fleet_truck_type || "").trim();
+
+      if (truckType) {
+        uniqueTruckTypes.add(truckType);
+      }
+    });
+
+    return Array.from(uniqueTruckTypes).sort();
+  }, [warehouseFilteredRequests]);
+
   const filteredRequests = useMemo(() => {
     const sourceRequests =
       statusFilter === "process"
@@ -1260,6 +1437,21 @@ export default function HomePage() {
       const matchStatus =
         statusFilter === "all" || normalizedItemStatus === statusFilter;
 
+      const itemProcessText =
+        String(item.current_process || "").trim() || "ยังไม่เริ่ม";
+
+      const itemCurrentStep = Number(item.current_step ?? 0);
+      const itemTotalSteps = Number(item.total_steps ?? 0);
+
+      const itemCurrentProcessValue =
+        `${itemCurrentStep}|${itemTotalSteps}|${itemProcessText}`;
+
+      // ใช้ Filter ขั้นตอนเฉพาะตอนดูรายการ TCAS
+      const matchCurrentProcess =
+        statusFilter !== "process" ||
+        currentProcessFilter === "all" ||
+        itemCurrentProcessValue === currentProcessFilter;
+
       const matchDCType =
         dcTypeFilter === "all" ||
         String(item.dc_type || "").trim().toUpperCase() ===
@@ -1269,6 +1461,14 @@ export default function HomePage() {
         dcFilter === "all" ||
         String(item.dc_code || "").trim().toUpperCase() ===
         dcFilter.trim().toUpperCase();
+
+      const truckTypeKeyword = truckTypeSearch.trim().toLowerCase();
+      const matchTruckType =
+        !truckTypeKeyword ||
+        String(item.fleet_truck_type || "")
+          .trim()
+          .toLowerCase()
+          .includes(truckTypeKeyword);
 
       const itemRequestDateKey = getRequestDateKey(item);
       const startDateKey = formatDateToKey(requestDateRange[0].startDate);
@@ -1300,12 +1500,22 @@ export default function HomePage() {
           .toLowerCase()
           .includes(keyword);
 
-      return matchStatus && matchDCType && matchDC && matchRequestDate && matchSearch;
+      return (
+        matchStatus &&
+        matchCurrentProcess &&
+        matchTruckType &&
+        matchDCType &&
+        matchDC &&
+        matchRequestDate &&
+        matchSearch
+      );
     });
   }, [
     warehouseFilteredRequests,
     warehouseFilteredProcessRows,
     statusFilter,
+    currentProcessFilter,
+    truckTypeSearch,
     dcTypeFilter,
     dcFilter,
     requestDateRange,
@@ -1379,6 +1589,7 @@ export default function HomePage() {
 
   const statusCounts = useMemo(() => {
     const result = {
+      all: 0,
       gmPending: 0,
       centerPending: 0,
       process: 0,
@@ -1386,11 +1597,11 @@ export default function HomePage() {
     };
 
     warehouseFilteredRequests.forEach((item) => {
-      const status =
-        normalizeStatus(item.status);
+      const status = normalizeStatus(item.status);
+      const vehicleQty = getRequestVehicleQty(item);
 
-      const vehicleQty =
-        getRequestVehicleQty(item);
+      // ✅ ทุกสถานะต้องถูกนับใน "ทั้งหมด"
+      result.all += vehicleQty;
 
       if (status === "gm_pending") {
         result.gmPending += vehicleQty;
@@ -1412,18 +1623,7 @@ export default function HomePage() {
       }
     });
 
-    return {
-      all:
-        result.gmPending +
-        result.centerPending +
-        result.process +
-        result.rejected,
-
-      gmPending: result.gmPending,
-      centerPending: result.centerPending,
-      process: result.process,
-      rejected: result.rejected,
-    };
+    return result;
   }, [warehouseFilteredRequests]);
 
   const filteredVehicleCount = useMemo(() => {
@@ -1502,23 +1702,12 @@ export default function HomePage() {
 
     const textMap: Record<string, string> = {
       gm_pending: "รอการอนุมัติจาก GM",
-      center_pending: "รอการอนุมัติจากส่วนกลาง",
       fbp_pending: "กำลังประเมินกองรถ (FBP)",
 
       process: "อยู่ระหว่างดำเนินการ",
-      in_progress: "อยู่ระหว่างดำเนินการ",
-      confirm_request: "ยืนยันคำขอแล้ว",
 
-      reject_gm: "GM ไม่อนุมัติ",
       reject_by_gm: "GM ไม่อนุมัติ",
-      rejected_by_gm: "GM ไม่อนุมัติ",
-      gm_rejected: "GM ไม่อนุมัติ",
-      fbp_rejected: "ส่วนกลางไม่อนุมัติ",
-
-      reject_center: "ส่วนกลางไม่อนุมัติ",
-      reject_by_center: "ส่วนกลางไม่อนุมัติ",
-      rejected_by_center: "ส่วนกลางไม่อนุมัติ",
-      center_rejected: "ส่วนกลางไม่อนุมัติ",
+      reject_by_fbp: "ส่วนกลางไม่อนุมัติ",
 
       approved: "อนุมัติแล้ว",
       completed: "ดำเนินการเสร็จสิ้น",
@@ -1552,6 +1741,25 @@ export default function HomePage() {
       0
     );
   };
+
+  const exportRequests = useMemo(() => {
+    // รายการที่ยังไม่เข้า TCAS ใช้ข้อมูลระดับ Request ตามเดิม
+    const normalRequests = warehouseFilteredRequests.filter(
+      (item) => normalizeStatus(item.status) !== "process"
+    );
+
+    // รายการ TCAS ใช้ processVehicleRows
+    // ซึ่งถูกแตกเป็น 1 รถ = 1 row อยู่แล้ว
+    const processRequests = warehouseFilteredProcessRows;
+
+    return [
+      ...normalRequests,
+      ...processRequests,
+    ];
+  }, [
+    warehouseFilteredRequests,
+    warehouseFilteredProcessRows,
+  ]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
@@ -1594,14 +1802,35 @@ export default function HomePage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setOpenCreateModal(true)}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
-          >
-            <span className="text-base leading-none">+</span>
-            สร้างคำขอ
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setOpenExportModal(true)
+              }
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-900 via-accent-900 to-green-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+            >
+              <Download
+                size={16}
+              />
+
+              ดึงรายงาน
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setOpenCreateModal(true)
+              }
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+            >
+              <span className="text-base leading-none">
+                +
+              </span>
+
+              สร้างคำขอ
+            </button>
+          </div>
         </div>
 
         {/* ── ERROR ── */}
@@ -1717,7 +1946,12 @@ export default function HomePage() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setStatusFilter(key)}
+                  onClick={() => {
+                    setStatusFilter(key);
+                    if (key !== "process") {
+                      setCurrentProcessFilter("all");
+                    }
+                  }}
                   className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
                     }`}
                 >
@@ -1766,8 +2000,8 @@ export default function HomePage() {
 
                     <span
                       className={`rounded-full px-2.5 py-1 text-[10px] font-black ${isActive
-                          ? "bg-white/15 text-white"
-                          : "bg-white/80 text-slate-400 shadow-sm"
+                        ? "bg-white/15 text-white"
+                        : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
                       คัน
@@ -1806,9 +2040,9 @@ export default function HomePage() {
           {/* FILTER INPUTS */}
           <div className="relative z-30 rounded-[24px] mb-3 bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 sm:px-5">
 
-            <div className="grid gap-3 lg:grid-cols-12">
+            <div className="grid gap-3 lg:grid-cols-[repeat(14,minmax(0,1fr))]">
               {/* SEARCH */}
-              <div className="lg:col-span-4">
+              <div className={statusFilter === "process" ? "lg:col-span-2" : "lg:col-span-4"}>
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   ค้นหา
                 </label>
@@ -1836,6 +2070,38 @@ export default function HomePage() {
                       <X size={13} />
                     </button>
                   )}
+                </div>
+              </div>
+
+              {/* TRUCK TYPE SEARCH */}
+              <div className="lg:col-span-2">
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  ประเภทรถ
+                </label>
+
+                <div className="relative">
+                  <Truck
+                    size={14}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                  />
+
+                  <select
+                    value={truckTypeFilter}
+                    onChange={(e) => setTruckTypeFilter(e.target.value)}
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  >
+                    <option value="all">ทุกประเภทรถ</option>
+
+                    {truckTypeOptions.map((truckType) => (
+                      <option key={truckType} value={truckType}>
+                        {truckType}
+                      </option>
+                    ))}
+                  </select>
+
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                    ▼
+                  </span>
                 </div>
               </div>
 
@@ -1906,8 +2172,42 @@ export default function HomePage() {
                 </div>
               </div>
 
+              {/* CURRENT PROCESS / TCAS STEP */}
+              {statusFilter === "process" && (
+                <div className="lg:col-span-3">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    สถานะ / ขั้นตอน
+                  </label>
+
+                  <div className="relative">
+                    <Filter
+                      size={14}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                    />
+
+                    <select
+                      value={currentProcessFilter}
+                      onChange={(e) => setCurrentProcessFilter(e.target.value)}
+                      className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    >
+                      <option value="all">ทุกขั้นตอน</option>
+
+                      {currentProcessOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                      ▼
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* DATE */}
-              <div className="lg:col-span-3">
+              <div className={statusFilter === "process" ? "lg:col-span-2" : "lg:col-span-3"}>
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   วันที่ขอ
                 </label>
@@ -2042,9 +2342,11 @@ export default function HomePage() {
                   type="button"
                   onClick={() => {
                     setSearchText("");
+                    setTruckTypeSearch("");
                     setDcTypeFilter("all");
                     setDcFilter("all");
                     setStatusFilter("all");
+                    setCurrentProcessFilter("all");
                     setHasRequestDateRange(false);
                     setRequestDateRange([
                       {
@@ -2181,6 +2483,7 @@ export default function HomePage() {
                           const status = item.status || "pending";
                           const statusClass = getStatusClass(status);
                           const statusText = formatStatusText(status);
+                          const statusVisual = getStatusVisual(status);
                           const isProcessStatus =
                             normalizeStatus(item.status) === "process";
 
@@ -2416,7 +2719,7 @@ export default function HomePage() {
                                               </p>
 
                                               <p className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-700">
-                                                ขั้นตอน: {item.current_process || "ยังไม่พบข้อมูลขั้นตอน"}{" "}
+                                                {item.current_process || "ยังไม่พบข้อมูลขั้นตอน"}{" "}
                                               </p>
                                             </div>
                                           </div>
@@ -2435,12 +2738,23 @@ export default function HomePage() {
                                       )}
                                     </div>
                                   ) : (
-                                    <span
-                                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm ${statusClass}`}
-                                    >
-                                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                                      {statusText}
-                                    </span>
+                                    <div className="flex min-w-[135px] items-center gap-2.5">
+                                      <span
+                                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusVisual.dotClass}`}
+                                      />
+
+                                      <div className="min-w-0">
+                                        <p
+                                          className={`whitespace-nowrap text-[11px] font-black ${statusVisual.textClass}`}
+                                        >
+                                          {statusText}
+                                        </p>
+
+                                        <p className="mt-0.5 whitespace-nowrap text-[9px] font-semibold text-slate-400">
+                                          {statusVisual.hint}
+                                        </p>
+                                      </div>
+                                    </div>
                                   )}
                                 </td>
 
@@ -2489,7 +2803,7 @@ export default function HomePage() {
 
                                             {isProcessStatus && (
                                               <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
-                                                ขั้นตอน: {item.current_process || "ยังไม่เริ่ม"} ({item.current_step ?? 0}/
+                                                {item.current_process || "ยังไม่เริ่ม"} ({item.current_step ?? 0}/
                                                 {item.total_steps ?? 0})
                                               </span>
                                             )}
@@ -2738,14 +3052,26 @@ export default function HomePage() {
           </div>
         </div>
 
+        <ExportRequestModal
+          open={openExportModal}
+          onClose={() =>
+            setOpenExportModal(false)
+          }
+          requests={exportRequests}
+          dcLabel={selectedDCLabel}
+        />
         <NewVehicleRequestModal
           open={openCreateModal}
-          onClose={() => setOpenCreateModal(false)}
+          onClose={() =>
+            setOpenCreateModal(false)
+          }
           onSuccess={() => {
             setOpenCreateModal(false);
             fetchRequests();
           }}
-          existingRequests={requests}
+          existingRequests={
+            requests
+          }
         />
       </main>
     </div>
