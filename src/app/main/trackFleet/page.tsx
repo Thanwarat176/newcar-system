@@ -26,89 +26,6 @@ interface SelectedDC {
   dc_type?: string;
 }
 
-interface FlowStepDetail {
-  id: string;
-  process: string;
-  detail: string | null;
-  process_level: string;
-}
-
-interface FlowCarDetail {
-  vehicle_no: string | number;
-  running_doc_vehicle_no?: string | null;
-  license: string;
-  province: string;
-  truck_type: string;
-  company_name: string;
-  detail_id: string | null;
-}
-
-interface FlowTrackingDetail {
-  id: string;
-  request_id: string;
-  process_id: string;
-  str_date: string | null;
-  end_date: string | null;
-  sla: string | number | null;
-  created_by: string | null;
-  created_at: string | null;
-  updated_by: string | null;
-  updated_at: string | null;
-  vehicle_no: string | number;
-  running_doc_vehicle_no?: string | null;
-  license: string;
-  request_truck_detail_id: string | null;
-}
-
-interface FlowRequestDetail {
-  id: string;
-  running_doc: string;
-  dc_type: string;
-  dc_code: string;
-  date: string;
-  fleet_type: string;
-  fleet_truck_type: string;
-  license_replace: string;
-  qty: string | number;
-  usage_date: string;
-  workload: string | number;
-  truckturn: string | number;
-  remark: string;
-  status: string;
-  request_date: string;
-  request_by: string;
-  approved_by: string | null;
-  approved_date: string | null;
-  reject_reason: string | null;
-  approved_company_id: string | null;
-  approved_company_name: string | null;
-  approved_truck_type: string | null;
-  approved_qty: string | number | null;
-  status_details: string | null;
-}
-
-interface FlowDetailData {
-  request: FlowRequestDetail;
-  steps: FlowStepDetail[];
-  cars: FlowCarDetail[];
-  flow_data: FlowTrackingDetail[];
-  is_initialized: boolean;
-}
-
-interface FlowDetailApiResponse {
-  status: string;
-  message?: string;
-  data: FlowDetailData;
-}
-
-interface FetchVehicleProgressResult {
-  vehicleProgress: VehicleProgress[];
-  usageDate: string;
-  dcType: string;
-  dcCode: string;
-  requestBy: string;
-}
-
 interface RequestItem {
   id: string | number | null;
   running_doc: string;
@@ -130,13 +47,36 @@ interface RequestItem {
   approved_qty?: number | string | null;
   approved_suppliers?: unknown;
   approved_truck_type?: string | null;
+  details?: RequestDetailItem[];
+  latest_process_id?: string | number | null;
+  latest_process_name?: string | null;
+  latest_process_level?: string | number | null;
+  latest_str_date?: string | null;
+  latest_end_date?: string | null;
 
   running_doc_vehicle_no?: string;
   vehicle_no?: string | number;
   vehicle_license?: string;
   current_step?: number;
   total_steps?: number;
+  current_process?: string;
   vehicle_progress?: VehicleProgress[];
+}
+
+interface RequestDetailItem {
+  id: string;
+  request_id: string;
+  license: string | null;
+  province: string | null;
+  truck_type: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  license_replace: string | null;
+  province_replace: string | null;
+  truck_type_replace: string | null;
+  company_id_replace: string | null;
+  company_name_replace: string | null;
+  status: string;
 }
 
 interface VehicleProgress {
@@ -145,6 +85,7 @@ interface VehicleProgress {
   license: string;
   current_step: number;
   total_steps: number;
+  current_process: string;
 }
 
 interface UserInfo {
@@ -156,7 +97,7 @@ interface UserInfo {
 
 type StatusFilter = "all" | "progress" | "reject_by_center" | "approved";
 
-export default function HomePage() {
+export default function TrackFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
@@ -172,6 +113,9 @@ export default function HomePage() {
   const [openDetailModal, setOpenDetailModal] = useState(false);
 
   const [searchText, setSearchText] = useState("");
+  const [fleetTypeFilter, setFleetTypeFilter] = useState("all");
+  const [truckTypeFilter, setTruckTypeFilter] = useState("all");
+  const [currentProcessFilter, setCurrentProcessFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
 
@@ -194,362 +138,198 @@ export default function HomePage() {
     left: 0,
   });
 
-  const fetchVehicleProgress = async (
-    requestId: string | number
-  ): Promise<FetchVehicleProgressResult> => {
-    const emptyResult: FetchVehicleProgressResult = {
-      vehicleProgress: [],
-      usageDate: "",
-      dcType: "",
-      dcCode: "",
-      requestBy: "",
-    };
-
-    try {
-      const response = await fetch(
-        `http://192.168.158.210/api_new_truck/api/flow_data_get.php?request_id=${encodeURIComponent(
-          String(requestId)
-        )}`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `โหลดรายละเอียด Request ID ${requestId} ไม่สำเร็จ (${response.status})`
-        );
-      }
-
-      const result =
-        (await response.json()) as FlowDetailApiResponse;
-
-      if (result.status !== "success" || !result.data) {
-        throw new Error(
-          result.message || "API ไม่ได้ส่งข้อมูลรายละเอียดกลับมา"
-        );
-      }
-
-      const { request, steps, cars, flow_data: flowData } = result.data;
-
-      const totalSteps = steps.length;
-
-      /*
-       * จับคู่ process_id กับ process_level
-       * เผื่อ ID ของ Process ไม่ตรงกับลำดับขั้นตอน
-       */
-      const processLevelMap = new Map<string, number>(
-        steps.map((step) => [
-          String(step.id),
-          Number(step.process_level),
-        ])
-      );
-
-      const vehicleProgress: VehicleProgress[] = cars.map((car) => {
-        const vehicleFlows = flowData.filter(
-          (flow) =>
-            String(flow.vehicle_no) === String(car.vehicle_no)
-        );
-
-        /*
-         * ขั้นตอนที่ถือว่าเริ่มดำเนินการแล้ว คือมีวันที่เริ่ม
-         * หรือมีวันที่สิ้นสุดอย่างใดอย่างหนึ่ง
-         */
-        const startedSteps = vehicleFlows
-          .filter((flow) => Boolean(flow.str_date || flow.end_date))
-          .map((flow) => {
-            const processLevel = processLevelMap.get(
-              String(flow.process_id)
-            );
-
-            if (
-              processLevel !== undefined &&
-              !Number.isNaN(processLevel)
-            ) {
-              return processLevel;
-            }
-
-            const fallbackLevel = Number(flow.process_id);
-
-            return Number.isNaN(fallbackLevel)
-              ? 0
-              : fallbackLevel;
-          });
-
-        /*
-         * หาลำดับขั้นตอนสูงสุดที่ดำเนินการแล้ว
-         * ตัวอย่าง Process 1, 2, 3 มีวันที่ จะได้ 3/10
-         */
-        const currentStep =
-          startedSteps.length > 0
-            ? Math.max(...startedSteps)
-            : 0;
-
-        const runningDocVehicleNo =
-          car.running_doc_vehicle_no ||
-          vehicleFlows.find((flow) => flow.running_doc_vehicle_no)
-            ?.running_doc_vehicle_no ||
-          "";
-
-        return {
-          vehicle_no: car.vehicle_no,
-          running_doc_vehicle_no: runningDocVehicleNo,
-          license: car.license,
-          current_step: currentStep,
-          total_steps: totalSteps,
-        };
-      });
-
-      return {
-        vehicleProgress,
-        usageDate: request.usage_date || "",
-        dcType: request.dc_type || "",
-        dcCode: request.dc_code || "",
-        requestBy: request.request_by || "",
-      };
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        console.error(
-          "fetchVehicleProgress error:",
-          error.message
-        );
-      } else {
-        console.error(
-          "fetchVehicleProgress unknown error:",
-          error
-        );
-      }
-
-      return emptyResult;
-    }
-  };
-
   const fetchRequests = async () => {
     try {
       setLoading(true);
       setError("");
 
-      /*
-      |--------------------------------------------------------------------------
-      | ใช้ request_get.php เป็นข้อมูลหลัก
-      | เพราะ API นี้มี approved_qty
-      |--------------------------------------------------------------------------
-      */
 
-      const res = await fetch(
-        "http://192.168.158.210/api_new_truck/api/request_get.php",
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          cache: "no-store",
-        }
-      );
+      const [requestResponse, flowSummaryResponse] = await Promise.all([
+        fetch(
+          "http://192.168.158.210/api_new_truck/api/request_get.php",
+          {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }
+        ),
+        fetch(
+          "http://192.168.158.210/api_new_truck/api/flow_data_get.php",
+          {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }
+        ),
+      ]);
 
-      if (!res.ok) {
+      if (!requestResponse.ok) {
         throw new Error(
-          `ไม่สามารถดึงข้อมูลคำขอได้ (${res.status})`
+          `ไม่สามารถดึงข้อมูลคำขอได้ (${requestResponse.status})`
         );
       }
 
-      const result = await res.json();
+      if (!flowSummaryResponse.ok) {
+        throw new Error(
+          `ไม่สามารถดึงข้อมูลขั้นตอนล่าสุดได้ (${flowSummaryResponse.status})`
+        );
+      }
 
-      const list: RequestItem[] = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.data)
-          ? result.data
-          : Array.isArray(result?.result)
-            ? result.result
-            : Array.isArray(result?.requests)
-              ? result.requests
+      const requestJson = await requestResponse.json();
+      const flowSummaryJson = await flowSummaryResponse.json();
+
+      const requestList: RequestItem[] = Array.isArray(requestJson)
+        ? requestJson
+        : Array.isArray(requestJson?.data)
+          ? requestJson.data
+          : Array.isArray(requestJson?.result)
+            ? requestJson.result
+            : Array.isArray(requestJson?.requests)
+              ? requestJson.requests
               : [];
 
-      /*
-      |--------------------------------------------------------------------------
-      | แสดงเฉพาะ progress
-      | รถเสริมไม่แสดงในหน้านี้
-      | และต้องมี approved_qty มากกว่า 0
-      |--------------------------------------------------------------------------
-      */
+      const flowSummaryList: RequestItem[] = Array.isArray(flowSummaryJson)
+        ? flowSummaryJson
+        : Array.isArray(flowSummaryJson?.data)
+          ? flowSummaryJson.data
+          : Array.isArray(flowSummaryJson?.result)
+            ? flowSummaryJson.result
+            : Array.isArray(flowSummaryJson?.requests)
+              ? flowSummaryJson.requests
+              : [];
+
+      const requestMap = new Map(
+        requestList.map((item) => [String(item.id), item])
+      );
+
+      const list: RequestItem[] = flowSummaryList.map((flowItem) => {
+        const requestItem = requestMap.get(String(flowItem.id));
+        const latestProcessLevel = Number(flowItem.latest_process_level);
+        const flowStatus =
+          latestProcessLevel === 8
+            ? "approved"
+            : latestProcessLevel === 9 || latestProcessLevel === 10
+              ? "reject_by_center"
+              : "progress";
+
+        return {
+          ...(requestItem || {}),
+          ...flowItem,
+          status: flowStatus,
+          details: requestItem?.details || flowItem.details || [],
+          approved_qty:
+            requestItem?.approved_qty ?? flowItem.approved_qty ?? flowItem.qty,
+          usage_date:
+            requestItem?.usage_date || flowItem.usage_date || "",
+          dc_type:
+            requestItem?.dc_type || flowItem.dc_type || "",
+          request_by:
+            requestItem?.request_by || flowItem.request_by || "",
+          license_replace:
+            requestItem?.license_replace || flowItem.license_replace || "",
+          fleet_truck_type:
+            requestItem?.fleet_truck_type || flowItem.fleet_truck_type || "",
+          workload:
+            requestItem?.workload ?? flowItem.workload ?? 0,
+          truckturn:
+            requestItem?.truckturn ?? flowItem.truckturn ?? 0,
+          remark:
+            requestItem?.remark || flowItem.remark || "",
+        };
+      });
 
       const progressList = list.filter((item) => {
-        const status = String(item.status || "")
-          .trim()
-          .toLowerCase();
-
         const fleetType = String(
           item.fleet_type || ""
         ).trim();
 
-        const approvedQty = Math.max(
+        const approvedQtyFromApi = Math.max(
           0,
           Math.floor(
             Number(item.approved_qty ?? 0)
           )
         );
 
+        const detailCount = Array.isArray(item.details)
+          ? item.details.length
+          : 0;
+
+        const approvedQty =
+          approvedQtyFromApi > 0
+            ? approvedQtyFromApi
+            : detailCount > 0
+              ? detailCount
+              : Math.max(
+                0,
+                Math.floor(Number(item.qty ?? 0))
+              );
+
         return (
-          status === "progress" &&
           fleetType !== "รถเสริม" &&
           approvedQty > 0
         );
       });
 
-      /*
-      |--------------------------------------------------------------------------
-      | สร้างแถวตาม approved_qty
-      |--------------------------------------------------------------------------
-      */
 
-      const requestRows = await Promise.all(
-        progressList.map(
-          async (
-            item
-          ): Promise<RequestItem[]> => {
-            const approvedQty = Math.max(
-              0,
-              Math.floor(
-                Number(item.approved_qty ?? 0)
-              )
-            );
+      const requestRows = progressList.map(
+        (item): RequestItem[] => {
+          const approvedQtyFromApi = Math.max(
+            0,
+            Math.floor(
+              Number(item.approved_qty ?? 0)
+            )
+          );
 
-            if (approvedQty <= 0) {
-              return [];
-            }
+          const detailCount = Array.isArray(item.details)
+            ? item.details.length
+            : 0;
 
-            /*
-            |--------------------------------------------------------------------------
-            | กรณีไม่มี Request ID
-            | สร้างแถวรถตาม approved_qty โดยยังไม่มีข้อมูล Process
-            |--------------------------------------------------------------------------
-            */
+          const approvedQty =
+            approvedQtyFromApi > 0
+              ? approvedQtyFromApi
+              : detailCount > 0
+                ? detailCount
+                : Math.max(
+                  0,
+                  Math.floor(Number(item.qty ?? 0))
+                );
 
-            if (
-              item.id === null ||
-              item.id === undefined
-            ) {
-              return Array.from(
-                { length: approvedQty },
-                (_, index) => {
-                  const vehicleNo = index + 1;
-
-                  return {
-                    ...item,
-
-                    approved_qty: approvedQty,
-
-                    running_doc_vehicle_no:
-                      `${item.running_doc}_${vehicleNo}`,
-
-                    vehicle_no: vehicleNo,
-                    vehicle_license: "",
-
-                    current_step: 0,
-                    total_steps: 0,
-
-                    // หนึ่งแถวแทนหนึ่งคัน
-                    qty: 1,
-
-                    vehicle_progress: [],
-                  };
-                }
-              );
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | ดึงข้อมูล Process ของรถแต่ละคัน
-            |--------------------------------------------------------------------------
-            */
-
-            const detail =
-              await fetchVehicleProgress(item.id);
-
-            const requestBase: RequestItem = {
-              ...item,
-
-              approved_qty: approvedQty,
-
-              usage_date:
-                detail.usageDate ||
-                item.usage_date,
-
-              dc_type:
-                detail.dcType ||
-                item.dc_type,
-
-              dc_code:
-                detail.dcCode ||
-                item.dc_code,
-
-              request_by:
-                detail.requestBy ||
-                item.request_by,
-            };
-
-            /*
-            |--------------------------------------------------------------------------
-            | สร้างจำนวนแถวให้เท่ากับ approved_qty เสมอ
-            |
-            | ตัวอย่าง:
-            | approved_qty = 8
-            | แต่มีข้อมูลรถจริงเพียง 3 คัน
-            |
-            | ระบบจะแสดง:
-            | รถคันที่ 1–3 = มีข้อมูล Process
-            | รถคันที่ 4–8 = ยังไม่ได้รับข้อมูลจากส่วนกลาง
-            |--------------------------------------------------------------------------
-            */
-
-            return Array.from(
-              { length: approvedQty },
-              (_, index) => {
-                const vehicle =
-                  detail.vehicleProgress[index];
-
-                const fallbackVehicleNo =
-                  index + 1;
-
-                const vehicleNo =
-                  vehicle?.vehicle_no ??
-                  fallbackVehicleNo;
-
-                return {
-                  ...requestBase,
-
-                  running_doc_vehicle_no:
-                    vehicle
-                      ?.running_doc_vehicle_no ||
-                    `${item.running_doc}_${vehicleNo}`,
-
-                  vehicle_no: vehicleNo,
-
-                  vehicle_license:
-                    vehicle?.license || "",
-
-                  current_step:
-                    vehicle?.current_step ?? 0,
-
-                  total_steps:
-                    vehicle?.total_steps ?? 0,
-
-                  // หนึ่งแถวต่อรถหนึ่งคัน
-                  qty: 1,
-
-                  vehicle_progress: vehicle
-                    ? [vehicle]
-                    : [],
-                };
-              }
-            );
+          if (approvedQty <= 0) {
+            return [];
           }
-        )
+
+          return Array.from(
+            { length: approvedQty },
+            (_, index) => {
+              const vehicleNo = index + 1;
+              const vehicleDetail = item.details?.[index];
+              const hasLatestProcess =
+                item.latest_process_level !== null &&
+                item.latest_process_level !== undefined &&
+                item.latest_process_level !== "";
+
+              return {
+                ...item,
+                approved_qty: approvedQty,
+                running_doc_vehicle_no: `${item.running_doc}_${vehicleNo}`,
+                vehicle_no: vehicleNo,
+                vehicle_license:
+                  vehicleDetail?.license_replace ||
+                  vehicleDetail?.license ||
+                  "",
+                current_step: hasLatestProcess
+                  ? Number(item.latest_process_level)
+                  : 0,
+                total_steps: 8,
+                current_process:
+                  item.latest_process_name ||
+                  "ยังไม่พบข้อมูลขั้นตอน",
+                qty: 1,
+                vehicle_progress: [],
+              };
+            }
+          );
+        }
       );
 
       const listWithProgress =
@@ -698,12 +478,10 @@ export default function HomePage() {
     userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
 
   const sidebarFilteredRequests = useMemo(() => {
-    // CENTER เห็นข้อมูลทั้งหมด
     if (isCenterUser) {
       return requests;
     }
 
-    // คนที่ไม่ใช่ CENTER ถ้ามี DC จาก Sidebar ให้เห็นเฉพาะ DC นั้น
     if (selectedDcFromSidebar) {
       return requests.filter((item) => {
         const itemDcCode = String(item.dc_code || "")
@@ -714,7 +492,6 @@ export default function HomePage() {
       });
     }
 
-    // คนที่ไม่ใช่ CENTER และไม่มี selected_dc ให้เห็นเฉพาะ warehouse ตัวเอง
     if (userWarehouse) {
       return requests.filter((item) => {
         const itemDcCode = String(item.dc_code || "")
@@ -808,17 +585,14 @@ export default function HomePage() {
       (1000 * 60 * 60 * 24)
     );
 
-    // เกินกำหนด
     if (remainingDays < 0) {
       return "text-red-600";
     }
 
-    // เหลือไม่เกิน 10 วัน รวมถึงวันนี้
     if (remainingDays <= 10) {
       return "text-orange-600";
     }
 
-    // เหลือมากกว่า 10 วัน
     return "text-emerald-600";
   };
 
@@ -915,7 +689,13 @@ export default function HomePage() {
   };
 
   const isAllowedCardStatus = (status?: string) => {
-    return normalizeStatus(status) === "progress";
+    const value = normalizeStatus(status);
+
+    return (
+      value === "progress" ||
+      value === "reject_by_center" ||
+      value === "approved"
+    );
   };
 
   const formatStatusText = (status?: string) => {
@@ -1019,15 +799,124 @@ export default function HomePage() {
       (item) => normalizeStatus(item.status) === "reject_by_center"
     ).length;
 
+    const approved = sidebarFilteredRequests.filter(
+      (item) => normalizeStatus(item.status) === "approved"
+    ).length;
+
     return {
-      total: progress + rejectedByCenter,
+      total: progress + rejectedByCenter + approved,
       progress,
       rejectedByCenter,
-      approved: 0,
+      approved,
     };
   }, [sidebarFilteredRequests]);
 
 
+  const fleetTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+
+    sidebarFilteredRequests.forEach((item) => {
+      const value = String(item.fleet_type || "").trim();
+      if (value) values.add(value);
+    });
+
+    return Array.from(values).sort();
+  }, [sidebarFilteredRequests]);
+
+  const truckTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+
+    sidebarFilteredRequests.forEach((item) => {
+      const value = String(item.fleet_truck_type || "").trim();
+      if (value) values.add(value);
+    });
+
+    return Array.from(values).sort();
+  }, [sidebarFilteredRequests]);
+
+  const processFilterSource = useMemo(() => {
+    let list = sidebarFilteredRequests;
+  
+    if (statusFilter !== "all") {
+      list = list.filter(
+        (item) => normalizeStatus(item.status) === statusFilter
+      );
+    }
+  
+    if (fleetTypeFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.fleet_type || "").trim() === fleetTypeFilter
+      );
+    }
+  
+    if (truckTypeFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.fleet_truck_type || "").trim() === truckTypeFilter
+      );
+    }
+  
+    if (dcTypeFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.dc_type || "").trim().toUpperCase() ===
+          dcTypeFilter.trim().toUpperCase()
+      );
+    }
+  
+    if (dcFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.dc_code || "").trim().toUpperCase() ===
+          dcFilter.trim().toUpperCase()
+      );
+    }
+  
+    return list;
+  }, [
+    sidebarFilteredRequests,
+    statusFilter,
+    fleetTypeFilter,
+    truckTypeFilter,
+    dcTypeFilter,
+    dcFilter,
+  ]);
+
+  const currentProcessOptions = useMemo(() => {
+    const options = new Map<string, string>();
+  
+    processFilterSource.forEach((item) => {
+      const step = Number(
+        item.current_step ?? item.latest_process_level ?? 0
+      );
+  
+      const process = String(
+        item.current_process ||
+          item.latest_process_name ||
+          "ยังไม่พบข้อมูลขั้นตอน"
+      ).trim();
+  
+      const value = `${step}|${process}`;
+  
+      const label =
+        statusFilter === "reject_by_center"
+          ? `${step} : ${process}`
+          : `${step}/8 : ${process}`;
+  
+      options.set(value, label);
+    });
+  
+    return Array.from(options, ([value, label]) => ({
+      value,
+      label,
+    })).sort(
+      (a, b) =>
+        Number(a.value.split("|")[0]) -
+        Number(b.value.split("|")[0])
+    );
+  }, [processFilterSource, statusFilter]);
+  
   const dcTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>();
 
@@ -1061,7 +950,6 @@ export default function HomePage() {
   const filteredRequests = useMemo(() => {
     let list = sidebarFilteredRequests;
 
-    // ทั้งหมด = progress + reject_by_center เท่านั้น
     if (statusFilter === "all") {
       list = list.filter((item) => isAllowedCardStatus(item.status));
     }
@@ -1072,16 +960,40 @@ export default function HomePage() {
       );
     }
 
-    // ไม่ผ่านการประเมิน (TCAS) = reject_by_center
     if (statusFilter === "reject_by_center") {
       list = list.filter(
         (item) => normalizeStatus(item.status) === "reject_by_center"
       );
     }
 
-    // TCAS  = โชว์ 0 รายการ
     if (statusFilter === "approved") {
-      list = [];
+      list = list.filter(
+        (item) => normalizeStatus(item.status) === "approved"
+      );
+    }
+
+    if (fleetTypeFilter !== "all") {
+      list = list.filter(
+        (item) => String(item.fleet_type || "").trim() === fleetTypeFilter
+      );
+    }
+
+    if (truckTypeFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.fleet_truck_type || "").trim() === truckTypeFilter
+      );
+    }
+
+    if (currentProcessFilter !== "all") {
+      list = list.filter((item) => {
+        const step = Number(item.current_step ?? item.latest_process_level ?? 0);
+        const process = String(
+          item.current_process || item.latest_process_name || "ยังไม่พบข้อมูลขั้นตอน"
+        ).trim();
+
+        return `${step}|${process}` === currentProcessFilter;
+      });
     }
 
     if (dcTypeFilter !== "all") {
@@ -1136,12 +1048,17 @@ export default function HomePage() {
   }, [
     sidebarFilteredRequests,
     statusFilter,
+    fleetTypeFilter,
+    truckTypeFilter,
+    currentProcessFilter,
     dcTypeFilter,
     dcFilter,
     searchText,
     hasRequestDateRange,
     requestDateRange,
   ]);
+
+  const filteredVehicleCount = filteredRequests.length;
 
   const pageTitle = useMemo(() => {
     const dcSuffix =
@@ -1282,7 +1199,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
       <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
-        {/* ── HEADER ── */}
         <div className="mb-4 flex flex-col gap-3 overflow-hidden rounded-3xl border border-white/70 bg-white/90 px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -1335,14 +1251,12 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* ── ERROR ── */}
         {error && (
           <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600 shadow-[0_10px_30px_rgba(239,68,68,0.1)]">
             {error}
           </div>
         )}
 
-        {/* ── STATUS CARDS ── */}
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {(
             [
@@ -1432,7 +1346,12 @@ export default function HomePage() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setStatusFilter(key)}
+                  onClick={() => {
+                    setStatusFilter(key);
+                    if (key !== "progress") {
+                      setCurrentProcessFilter("all");
+                    }
+                  }}
                   className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
                     }`}
                 >
@@ -1493,8 +1412,7 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* ── FILTER ── */}
-        <div className="relative z-30 mb-3 rounded-[24px] bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 sm:px-5">
+        <div className="relative z-30 mb-4 overflow-visible rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 shadow-[0_10px_30px_rgba(15,23,42,0.07)] sm:px-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
@@ -1510,11 +1428,18 @@ export default function HomePage() {
                 </p>
               </div>
             </div>
+
+            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
+              พบ {formatNumber(filteredVehicleCount)} คัน
+            </span>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-12">
-            {/* SEARCH */}
-            <div className="lg:col-span-4">
+          <div className="grid gap-3 lg:grid-cols-[repeat(16,minmax(0,1fr))]">
+            <div
+              className={
+                "lg:col-span-2"
+              }
+            >
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1544,7 +1469,62 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* DC TYPE */}
+            <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทคำขอ
+              </label>
+
+              <div className="relative">
+                <Filter
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+                <select
+                  value={fleetTypeFilter}
+                  onChange={(e) => setFleetTypeFilter(e.target.value)}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทคำขอ</option>
+                  {fleetTypeOptions.map((fleetType) => (
+                    <option key={fleetType} value={fleetType}>
+                      {fleetType}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทรถ
+              </label>
+
+              <div className="relative">
+                <Truck
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+                <select
+                  value={truckTypeFilter}
+                  onChange={(e) => setTruckTypeFilter(e.target.value)}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทรถ</option>
+                  {truckTypeOptions.map((truckType) => (
+                    <option key={truckType} value={truckType}>
+                      {truckType}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
             <div className="lg:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
@@ -1576,7 +1556,6 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* DC */}
             <div className="lg:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
@@ -1605,8 +1584,42 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* DATE */}
             <div className="lg:col-span-3">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                สถานะ
+              </label>
+
+              <div className="relative">
+                <Filter
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+
+                <select
+                  value={currentProcessFilter}
+                  onChange={(e) => setCurrentProcessFilter(e.target.value)}
+                  className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกสถานะ</option>
+
+                  {currentProcessOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
+            <div
+              className={
+                statusFilter === "progress" ? "lg:col-span-2" : "lg:col-span-3"
+              }
+            >
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1734,12 +1747,14 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* CLEAR */}
             <div className="flex items-end lg:col-span-1">
               <button
                 type="button"
                 onClick={() => {
                   setSearchText("");
+                  setFleetTypeFilter("all");
+                  setTruckTypeFilter("all");
+                  setCurrentProcessFilter("all");
                   setDcTypeFilter("all");
                   setDcFilter("all");
                   setStatusFilter("all");
@@ -1765,7 +1780,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* ── TABLE ── */}
         <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1856,12 +1870,8 @@ export default function HomePage() {
 
                         {groupedByRequestDate[date].map((item, index) => {
                           const status = item.status || "progress";
-                          const statusText = formatStatusText(status);
-                          const statusVisual = getStatusVisual(status);
-                          const licenseList = getLicenseList(item.license_replace);
-                          const hasVehicleProgress =
-                            Array.isArray(item.vehicle_progress) &&
-                            item.vehicle_progress.length > 0;
+                          const isRejected =
+                            normalizeStatus(status) === "reject_by_center";
                           const rowKey =
                             item.running_doc_vehicle_no ||
                             (item.id !== null && item.id !== undefined
@@ -1881,8 +1891,8 @@ export default function HomePage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-black text-slate-800">
-                                {item.running_doc_vehicle_no ||
-  `${item.running_doc}_${item.vehicle_no}`}
+                                  {item.running_doc_vehicle_no ||
+                                    `${item.running_doc}_${item.vehicle_no}`}
                                 </p>
                                 <p className="mt-0.5 text-[10px] font-medium text-slate-400">
                                   ขอ: {formatThaiDate(item.request_date || item.date)}
@@ -1912,56 +1922,72 @@ export default function HomePage() {
                                   {formatThaiDate(item.usage_date)}
                                 </p>
 
-                                <p
-                                  className={`mt-1 text-[10px] font-black ${getRemainingUsageDaysClass(
-                                    item.usage_date
-                                  )}`}
-                                >
-                                  {getRemainingUsageDays(item.usage_date)}
-                                </p>
+                                {!isRejected && (
+                                  <p
+                                    className={`mt-1 text-[10px] font-black ${getRemainingUsageDaysClass(
+                                      item.usage_date
+                                    )}`}
+                                  >
+                                    {getRemainingUsageDays(item.usage_date)}
+                                  </p>
+                                )}
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700">
                                 {item.request_by || "-"}
                               </td>
 
-                              <td className="px-3 py-3">
-  <div className="min-w-[190px]">
-    {hasVehicleProgress ? (
-      <div className="flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 ring-1 ring-blue-100">
-        <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                              <td className="whitespace-nowrap px-3 py-3">
+                                <div
+                                  className={`min-w-[230px] rounded-xl border px-3 py-2.5 ${isRejected
+                                    ? "border-red-200 bg-red-50"
+                                    : "border-blue-100 bg-blue-50"
+                                    }`}
+                                >
+                                  {item.vehicle_no !== undefined &&
+                                    item.vehicle_no !== null ? (
+                                    <>
+                                      <div className="flex items-start gap-2">
+                                        <span
+                                          className={`mt-1 h-2 w-2 shrink-0 rounded-full ${isRejected
+                                            ? "bg-red-500"
+                                            : "bg-blue-500"
+                                            }`}
+                                        />
 
-        <div className="min-w-0">
-          <p className="whitespace-nowrap text-[10px] font-black text-blue-700">
-            รถคันที่{" "}
-            {item.vehicle_no} :{" "}
-            {item.current_step ?? 0}/
-            {item.total_steps ?? 0}
-          </p>
+                                        <div className="min-w-0">
+                                          <p
+                                            className={`break-words text-[10px] font-black leading-4 ${isRejected
+                                              ? "text-red-700"
+                                              : "text-blue-700"
+                                              }`}
+                                          >
+                                            {isRejected
+                                              ? item.current_process || "ไม่ผ่านการประเมิน"
+                                              : `${item.current_step ?? 0}/${item.total_steps || 8} : ${item.current_process || "ยังไม่พบข้อมูลขั้นตอน"}`}
+                                          </p>
+                                        </div>
+                                      </div>
 
-          <p className="mt-0.5 max-w-[155px] truncate text-[9px] font-semibold text-slate-400">
-            {item.vehicle_license || "-"}
-          </p>
-        </div>
-      </div>
-    ) : (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-
-          <p className="text-[10px] font-black text-amber-700">
-            รถคันที่{" "}
-            {item.vehicle_no}
-          </p>
-        </div>
-
-        <p className="mt-1 text-[9px] font-semibold text-amber-600">
-          ยังไม่ได้รับข้อมูลจากส่วนกลาง
-        </p>
-      </div>
-    )}
-  </div>
-</td>
+                                      <p
+                                        className={`mt-1.5 break-words border-t pt-1.5 text-[9px] font-semibold text-slate-400 ${isRejected
+                                          ? "border-red-200"
+                                          : "border-blue-100"
+                                          }`}
+                                      >
+                                        ทะเบียน: {item.vehicle_license || "-"}
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
+                                      <p className="text-[10px] font-black text-slate-600">
+                                        ยังไม่พบข้อมูลรถจาก Flow API
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
 
                               <td className="whitespace-nowrap px-3 py-3 text-right">
                                 <button

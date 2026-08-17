@@ -429,27 +429,34 @@ export default function LoginPage() {
                       </p>
                     </div>
 
-                    <Input
-                      label="รหัสพนักงาน"
-                      value={employeeId}
-                      onChange={setEmployeeId}
-                      placeholder="Employee ID"
-                    />
-
-                    <PasswordBox
-                      label="รหัสผ่าน"
-                      value={password}
-                      show={showPassword}
-                      onToggle={() => setShowPassword(!showPassword)}
-                      onChange={setPassword}
-                    />
-
-                    <button
-                      onClick={handleLogin}
-                      className="mt-5 w-full rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 py-3 text-sm font-bold text-white shadow-[0_18px_40px_rgba(37,99,235,0.32)] transition hover:scale-[1.01] active:scale-[0.98]"
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleLogin();
+                      }}
                     >
-                      เข้าสู่ระบบ
-                    </button>
+                      <Input
+                        label="รหัสพนักงาน"
+                        value={employeeId}
+                        onChange={setEmployeeId}
+                        placeholder="Employee ID"
+                      />
+
+                      <PasswordBox
+                        label="รหัสผ่าน"
+                        value={password}
+                        show={showPassword}
+                        onToggle={() => setShowPassword(!showPassword)}
+                        onChange={setPassword}
+                      />
+
+                      <button
+                        type="submit"
+                        className="mt-5 w-full rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 py-3 text-sm font-bold text-white shadow-[0_18px_40px_rgba(37,99,235,0.32)] transition hover:scale-[1.01] active:scale-[0.98]"
+                      >
+                        เข้าสู่ระบบ
+                      </button>
+                    </form>
 
                     <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-3">
                       <p className="text-xs font-semibold text-blue-800">
@@ -563,27 +570,27 @@ export default function LoginPage() {
                     <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50/80 to-white p-3 shadow-[0_10px_30px_rgba(37,99,235,0.08)]">
                       <div className="space-y-3">
                         <SearchableSelectBox
-  label="Warehouse / Team"
-  value={registerData.team}
-  onChange={(value) =>
-    setRegisterData({
-      ...registerData,
-      team: value,
-      department:
-        value === "CENTER"
-          ? registerData.department || ""
-          : null,
-    })
-  }
-  options={warehouses}
-  isLoading={loadingWarehouses}
-  disabled={loadingWarehouses || warehouses.length === 0}
-  placeholder={
-    loadingWarehouses
-      ? "กำลังโหลด Warehouse..."
-      : "เลือกหรือพิมพ์ Warehouse"
-  }
-/>
+                          label="Warehouse / Team"
+                          value={registerData.team}
+                          onChange={(value) =>
+                            setRegisterData({
+                              ...registerData,
+                              team: value,
+                              department:
+                                value === "CENTER"
+                                  ? registerData.department || ""
+                                  : null,
+                            })
+                          }
+                          options={warehouses}
+                          isLoading={loadingWarehouses}
+                          disabled={loadingWarehouses || warehouses.length === 0}
+                          placeholder={
+                            loadingWarehouses
+                              ? "กำลังโหลด Warehouse..."
+                              : "เลือกหรือพิมพ์ Warehouse"
+                          }
+                        />
 
                         {registerData.team === "CENTER" && (
                           <motion.div
@@ -969,15 +976,13 @@ function SearchableSelectBox({
           onChange={(e) => onChange(e.target.value)}
           className={`
             w-full rounded-2xl border px-3 py-2.5 pr-9 text-xs outline-none transition
-            ${
-              value
-                ? "border-blue-300 bg-white text-slate-800 shadow-[0_8px_20px_rgba(37,99,235,0.08)]"
-                : "border-blue-100 bg-white/80 text-slate-500"
+            ${value
+              ? "border-blue-300 bg-white text-slate-800 shadow-[0_8px_20px_rgba(37,99,235,0.08)]"
+              : "border-blue-100 bg-white/80 text-slate-500"
             }
-            ${
-              disabled
-                ? "cursor-not-allowed opacity-60"
-                : "cursor-text group-hover:border-blue-300"
+            ${disabled
+              ? "cursor-not-allowed opacity-60"
+              : "cursor-text group-hover:border-blue-300"
             }
             focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100
           `}

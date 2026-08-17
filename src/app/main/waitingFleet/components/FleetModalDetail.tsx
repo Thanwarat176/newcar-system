@@ -2085,6 +2085,11 @@ export default function FleetModalDetail({
                 status: "progress",
                 approved_by: approvedBy,
 
+                approved_qty: totalApprovedQty,
+                not_approved_qty: draftNotApprovedQty,
+                reject_reason:
+                    draftNotApprovedQty > 0 ? remark.trim() : "",
+
                 suppliers: approvedSuppliers.map((item) => ({
                     company_id: item.companyId,
                     company_name: item.companyName,
@@ -2139,6 +2144,14 @@ export default function FleetModalDetail({
                 );
             }
 
+            if (draftNotApprovedQty > 0 && !remark.trim()) {
+                setMessage({
+                    type: "error",
+                    text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`,
+                });
+                return;
+            }
+
             setMessage({
                 type: "success",
                 text:
@@ -2147,12 +2160,8 @@ export default function FleetModalDetail({
             });
 
             setDecisionCompleted(true);
-
-            await Promise.resolve(onSuccess());
-
-            setTimeout(() => {
-                onClose();
-            }, 700);
+            onClose();
+            void Promise.resolve(onSuccess());
         } catch (error: any) {
             console.error("FBP APPROVE ERROR:", error);
 
@@ -2796,16 +2805,30 @@ export default function FleetModalDetail({
             return;
         }
 
-        if (!data.id) {
+        if (!rowState) {
             updateSingleVehicleState(rowKey, {
-                error: "ไม่พบ Request ID",
+                error: "ไม่พบข้อมูลรถทดแทน",
             });
             return;
         }
-
-        if (!rowState?.newLicense) {
+        
+        if (!rowState.newProvince.trim()) {
             updateSingleVehicleState(rowKey, {
-                error: "กรุณาเลือกรถที่จะนำมาทดแทน",
+                error: "กรุณาเลือกจังหวัด",
+            });
+            return;
+        }
+        
+        if (!rowState.companyName.trim()) {
+            updateSingleVehicleState(rowKey, {
+                error: "กรุณาเลือกบริษัทผู้ให้บริการ",
+            });
+            return;
+        }
+        
+        if (!rowState.truckType.trim()) {
+            updateSingleVehicleState(rowKey, {
+                error: "กรุณาเลือกประเภทรถ",
             });
             return;
         }
@@ -2886,11 +2909,13 @@ export default function FleetModalDetail({
             request_id: Number(data.id),
             orig_license: originalLicense,
             orig_province: originalProvince,
-            new_license: selectedNewVehicle.license,
-            new_province: selectedNewVehicle.province,
-            company_id: selectedNewVehicle.companyId,
-            company_name: selectedNewVehicle.companyName,
-            truck_type: selectedNewVehicle.truckType,
+        
+            new_license: rowState.newLicense.trim(),
+            new_province: rowState.newProvince.trim(),
+            company_id: rowState.companyId.trim(),
+            company_name: rowState.companyName.trim(),
+            truck_type: rowState.truckType.trim(),
+        
             approved_by: approvedBy,
         };
 
@@ -3271,7 +3296,13 @@ export default function FleetModalDetail({
 
     const canMakeDecision =
         !decisionCompleted &&
-        isFbpPending;
+        (
+            isFbpPending ||
+            (
+                isReplacementRequest &&
+                normalizeStatus(data.status) === "progress"
+            )
+        );
 
     const currentStatusClass =
         currentStatusText === "รอจัดรถ" || currentStatusText === "รออนุมัติ"
@@ -3442,748 +3473,738 @@ export default function FleetModalDetail({
 
                             {/* รายละเอียดรถทดแทนแบบพิจารณารายคัน */}
                             {isReplacementRequest && (
-    <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-        {/* Header */}
-        <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
-            <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-blue-600/25 to-transparent" />
+                                <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                                    {/* Header */}
+                                    <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+                                        <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-blue-600/25 to-transparent" />
 
-            <div className="relative flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            className="h-5 w-5"
-                            aria-hidden="true"
-                        >
-                            <path
-                                d="M4 16V8.8C4 7.8 4.8 7 5.8 7h8.6c.7 0 1.3.4 1.6 1l1.3 2.5h1.2c.8 0 1.5.7 1.5 1.5V16"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                            <path
-                                d="M3 16h18M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
-                        </svg>
-                    </div>
+                                        <div className="relative flex items-start justify-between gap-3">
+                                            <div className="flex min-w-0 items-start gap-3">
+                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        className="h-5 w-5"
+                                                        aria-hidden="true"
+                                                    >
+                                                        <path
+                                                            d="M4 16V8.8C4 7.8 4.8 7 5.8 7h8.6c.7 0 1.3.4 1.6 1l1.3 2.5h1.2c.8 0 1.5.7 1.5 1.5V16"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.8"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                        />
+                                                        <path
+                                                            d="M3 16h18M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.8"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                        />
+                                                    </svg>
+                                                </div>
 
-                    <div className="min-w-0">
-                        <h2 className="text-sm font-black">
-                            รายละเอียดรถทดแทน
-                        </h2>
+                                                <div className="min-w-0">
+                                                    <h2 className="text-sm font-black">
+                                                        รายละเอียดรถทดแทน
+                                                    </h2>
 
-                        <p className="mt-1 text-[10px] font-medium text-white/60">
-                            กรอกข้อมูลและพิจารณารถแต่ละคันแยกกัน
-                        </p>
-                    </div>
-                </div>
-
-                <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-center ring-1 ring-white/15">
-                    <p className="text-[8px] font-bold uppercase tracking-wider text-white/50">
-                        Total
-                    </p>
-
-                    <p className="mt-0.5 text-base font-black">
-                        {replacementTruckRows.length}
-                        <span className="ml-1 text-[9px] font-bold text-white/60">
-                            คัน
-                        </span>
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        {/* Summary */}
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="grid grid-cols-3 gap-2">
-                {[
-                    {
-                        label: "รอพิจารณา",
-                        value: singleVehicleSummary.pending,
-                        dotClass: "bg-amber-500",
-                        valueClass: "text-amber-700",
-                        bgClass: "bg-amber-50",
-                        borderClass: "border-amber-200",
-                    },
-                    {
-                        label: "อนุมัติ",
-                        value: singleVehicleSummary.approved,
-                        dotClass: "bg-emerald-500",
-                        valueClass: "text-emerald-700",
-                        bgClass: "bg-emerald-50",
-                        borderClass: "border-emerald-200",
-                    },
-                    {
-                        label: "ไม่อนุมัติ",
-                        value: singleVehicleSummary.rejected,
-                        dotClass: "bg-rose-500",
-                        valueClass: "text-rose-700",
-                        bgClass: "bg-rose-50",
-                        borderClass: "border-rose-200",
-                    },
-                ].map((summary) => (
-                    <div
-                        key={summary.label}
-                        className={`rounded-xl border px-2.5 py-2 ${summary.bgClass} ${summary.borderClass}`}
-                    >
-                        <div className="flex items-center gap-1.5">
-                            <span
-                                className={`h-1.5 w-1.5 rounded-full ${summary.dotClass}`}
-                            />
-
-                            <p className="truncate text-[8px] font-black text-slate-500">
-                                {summary.label}
-                            </p>
-                        </div>
-
-                        <p
-                            className={`mt-1 text-right text-lg font-black ${summary.valueClass}`}
-                        >
-                            {summary.value}
-                        </p>
-                    </div>
-                ))}
-            </div>
-        </div>
-
-        {/* Vehicle rows */}
-        {replacementTruckRows.length === 0 ? (
-            <div className="px-6 py-14 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        className="h-6 w-6"
-                        aria-hidden="true"
-                    >
-                        <path
-                            d="M12 8v4m0 4h.01M10.3 4.9 3.7 16.3A2 2 0 0 0 5.4 19h13.2a2 2 0 0 0 1.7-2.7L13.7 4.9a2 2 0 0 0-3.4 0Z"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                    </svg>
-                </div>
-
-                <p className="mt-3 text-xs font-black text-slate-600">
-                    ไม่พบรายละเอียดรถทดแทน
-                </p>
-
-                <p className="mt-1 text-[10px] font-medium text-slate-400">
-                    กรุณาตรวจสอบข้อมูลรายละเอียดจากคำขอ
-                </p>
-            </div>
-        ) : (
-            <div className="space-y-4 bg-slate-100/70 p-3">
-                {replacementTruckRows.map((item, index) => {
-                    const rowKey =
-                        getReplacementRowKey(
-                            item,
-                            index
-                        );
-
-                    const rowState:
-                        SingleVehicleState =
-                        singleVehicleStates[rowKey] ?? {
-                            decision: "pending",
-
-                            newLicense: "",
-                            newProvince: "",
-
-                            companyId: "",
-                            companyName: "",
-
-                            truckType:
-                                data.fleet_truck_type ||
-                                "",
-
-                            approvedSaved: false,
-                            error: "",
-                        };
-
-                    const originalLicense = String(
-                        item.license || ""
-                    ).trim();
-
-                    const originalProvince = String(
-                        item.province || ""
-                    ).trim();
-
-                    const originalTruckType = String(
-                        item.truck_type || ""
-                    ).trim();
-
-                    const originalCompanyId = String(
-                        item.company_id || ""
-                    ).trim();
-
-                    const originalCompanyName = String(
-                        item.company_name || ""
-                    ).trim();
-
-                    const isRowSaving =
-                        savingSingleVehicleKey ===
-                        rowKey;
-
-                    const currentCompanyKey =
-                        rowState.companyName
-                            ? `${rowState.companyId}|||${rowState.companyName}`
-                            : "";
-
-                    const companyOptionsForRow = [
-                        ...(
-                            currentCompanyKey &&
-                            !replacementSupplierOptions.some(
-                                (supplier) =>
-                                    supplier.key ===
-                                    currentCompanyKey
-                            )
-                                ? [
-                                    {
-                                        key:
-                                            currentCompanyKey,
-
-                                        companyId:
-                                            rowState.companyId,
-
-                                        companyName:
-                                            rowState.companyName,
-
-                                        label:
-                                            rowState.companyId
-                                                ? `(${rowState.companyId}) ${rowState.companyName}`
-                                                : rowState.companyName,
-                                    },
-                                ]
-                                : []
-                        ),
-
-                        ...replacementSupplierOptions,
-                    ];
-
-                    const isApproved =
-                        rowState.approvedSaved;
-
-                    const isRejected =
-                        rowState.decision ===
-                        "rejected";
-
-                    return (
-                        <article
-                            key={rowKey}
-                            className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
-                                isApproved
-                                    ? "border-emerald-200"
-                                    : isRejected
-                                      ? "border-rose-200"
-                                      : "border-slate-200"
-                            }`}
-                        >
-                            {/* Row heading */}
-                            <div
-                                className={`flex items-center justify-between gap-3 border-b px-3 py-3 ${
-                                    isApproved
-                                        ? "border-emerald-100 bg-emerald-50/70"
-                                        : isRejected
-                                          ? "border-rose-100 bg-rose-50/70"
-                                          : "border-slate-200 bg-white"
-                                }`}
-                            >
-                                <div className="flex min-w-0 items-center gap-2.5">
-                                    <span
-                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-black ${
-                                            isApproved
-                                                ? "bg-emerald-600 text-white"
-                                                : isRejected
-                                                  ? "bg-rose-600 text-white"
-                                                  : "bg-slate-900 text-white"
-                                        }`}
-                                    >
-                                        {index + 1}
-                                    </span>
-
-                                    <div className="min-w-0">
-                                        <p className="text-[9px] font-bold text-slate-400">
-                                            รถที่ขอทดแทน
-                                        </p>
-
-                                        <p className="truncate text-xs font-black text-slate-900">
-                                            {originalLicense ||
-                                                "ไม่พบทะเบียน"}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {isApproved ? (
-                                    <span className="shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[9px] font-black text-emerald-700">
-                                        ✓ อนุมัติแล้ว
-                                    </span>
-                                ) : isRejected ? (
-                                    <span className="shrink-0 rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[9px] font-black text-rose-700">
-                                        × ไม่อนุมัติ
-                                    </span>
-                                ) : (
-                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-700">
-                                        รอพิจารณา
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="p-3">
-                                {/* Original vehicle */}
-                                <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                                    <div className="absolute inset-y-0 left-0 w-1 bg-slate-300" />
-
-                                    <div className="px-3 py-3 pl-4">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                                <p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">
-                                                    Original vehicle
-                                                </p>
-
-                                                <p className="mt-1 break-words text-sm font-black text-slate-900">
-                                                    {originalLicense ||
-                                                        "-"}
-
-                                                    {originalProvince
-                                                        ? ` · ${originalProvince}`
-                                                        : ""}
-                                                </p>
+                                                    <p className="mt-1 text-[10px] font-medium text-white/60">
+                                                        กรอกข้อมูลและพิจารณารถแต่ละคันแยกกัน
+                                                    </p>
+                                                </div>
                                             </div>
 
-                                            {originalTruckType && (
-                                                <span className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-black text-slate-600">
-                                                    {
-                                                        originalTruckType
-                                                    }
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        {(originalCompanyId ||
-                                            originalCompanyName) && (
-                                            <p className="mt-1.5 break-words text-[10px] font-semibold leading-relaxed text-slate-500">
-                                                {originalCompanyId
-                                                    ? `(${originalCompanyId}) `
-                                                    : ""}
-
-                                                {originalCompanyName ||
-                                                    "-"}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Connector */}
-                                {!isRejected && (
-                                    <div className="relative flex h-8 items-center justify-center">
-                                        <div className="absolute bottom-0 top-0 w-px bg-slate-200" />
-
-                                        <span className="relative flex h-6 w-6 items-center justify-center rounded-full border border-blue-200 bg-white text-blue-600 shadow-sm">
-                                            <svg
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                className="h-3.5 w-3.5"
-                                                aria-hidden="true"
-                                            >
-                                                <path
-                                                    d="m7 10 5 5 5-5"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                />
-                                            </svg>
-                                        </span>
-                                    </div>
-                                )}
-
-                                {/* Replacement form */}
-                                {!isRejected && (
-                                    <div
-                                        className={`overflow-hidden rounded-xl border ${
-                                            isApproved
-                                                ? "border-emerald-200 bg-emerald-50/30"
-                                                : "border-blue-200 bg-blue-50/30"
-                                        }`}
-                                    >
-                                        <div
-                                            className={`flex items-center justify-between gap-3 border-b px-3 py-2.5 ${
-                                                isApproved
-                                                    ? "border-emerald-100 bg-emerald-50"
-                                                    : "border-blue-100 bg-blue-50"
-                                            }`}
-                                        >
-                                            <div>
-                                                <p
-                                                    className={`text-[10px] font-black ${
-                                                        isApproved
-                                                            ? "text-emerald-900"
-                                                            : "text-blue-900"
-                                                    }`}
-                                                >
-                                                    ข้อมูลรถทดแทน
+                                            <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-center ring-1 ring-white/15">
+                                                <p className="text-[8px] font-bold uppercase tracking-wider text-white/50">
+                                                    Total
                                                 </p>
 
-                                                <p
-                                                    className={`mt-0.5 text-[8px] font-medium ${
-                                                        isApproved
-                                                            ? "text-emerald-600"
-                                                            : "text-blue-600"
-                                                    }`}
-                                                >
-                                                    กรอกข้อมูลรถที่ใช้ทดแทนคันเดิม
+                                                <p className="mt-0.5 text-base font-black">
+                                                    {replacementTruckRows.length}
+                                                    <span className="ml-1 text-[9px] font-bold text-white/60">
+                                                        คัน
+                                                    </span>
                                                 </p>
                                             </div>
-
-                                            {isApproved && (
-                                                <span className="rounded-md bg-emerald-600 px-2 py-1 text-[8px] font-black text-white">
-                                                    SAVED
-                                                </span>
-                                            )}
                                         </div>
+                                    </div>
 
-                                        <div className="space-y-3 p-3">
-                                            {/* License + Province */}
-                                            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-                                                <label className="block min-w-0">
-                                                    <span className="mb-1.5 block text-[9px] font-black text-slate-600">
-                                                        ทะเบียนรถ
-                                                        <span className="ml-1 text-rose-500">
-                                                            *
-                                                        </span>
-                                                    </span>
-
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            rowState.newLicense
-                                                        }
-                                                        disabled={
-                                                            isApproved ||
-                                                            !canMakeDecision ||
-                                                            isRowSaving
-                                                        }
-                                                        onChange={(
-                                                            event
-                                                        ) =>
-                                                            handleReplacementInputChange(
-                                                                rowKey,
-                                                                {
-                                                                    newLicense:
-                                                                        event
-                                                                            .target
-                                                                            .value,
-                                                                }
-                                                            )
-                                                        }
-                                                        placeholder="เช่น 2ฒม-1181"
-                                                        autoComplete="off"
-                                                        className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
-                                                    />
-                                                </label>
-
-                                                <label className="block min-w-0">
-                                                    <span className="mb-1.5 block text-[9px] font-black text-slate-600">
-                                                        จังหวัด
-                                                        <span className="ml-1 text-rose-500">
-                                                            *
-                                                        </span>
-                                                    </span>
-
-                                                    <div className="relative">
-                                                        <input
-                                                            type="text"
-                                                            list={`province-options-${rowKey}`}
-                                                            value={
-                                                                rowState.newProvince
-                                                            }
-                                                            disabled={
-                                                                isApproved ||
-                                                                !canMakeDecision ||
-                                                                isRowSaving
-                                                            }
-                                                            onChange={(
-                                                                event
-                                                            ) =>
-                                                                handleReplacementInputChange(
-                                                                    rowKey,
-                                                                    {
-                                                                        newProvince:
-                                                                            event
-                                                                                .target
-                                                                                .value,
-                                                                    }
-                                                                )
-                                                            }
-                                                            placeholder="เลือกจังหวัด"
-                                                            autoComplete="off"
-                                                            className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 pr-8 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                    {/* Summary */}
+                                    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {[
+                                                {
+                                                    label: "รอพิจารณา",
+                                                    value: singleVehicleSummary.pending,
+                                                    dotClass: "bg-amber-500",
+                                                    valueClass: "text-amber-700",
+                                                    bgClass: "bg-amber-50",
+                                                    borderClass: "border-amber-200",
+                                                },
+                                                {
+                                                    label: "อนุมัติ",
+                                                    value: singleVehicleSummary.approved,
+                                                    dotClass: "bg-emerald-500",
+                                                    valueClass: "text-emerald-700",
+                                                    bgClass: "bg-emerald-50",
+                                                    borderClass: "border-emerald-200",
+                                                },
+                                                {
+                                                    label: "ไม่อนุมัติ",
+                                                    value: singleVehicleSummary.rejected,
+                                                    dotClass: "bg-rose-500",
+                                                    valueClass: "text-rose-700",
+                                                    bgClass: "bg-rose-50",
+                                                    borderClass: "border-rose-200",
+                                                },
+                                            ].map((summary) => (
+                                                <div
+                                                    key={summary.label}
+                                                    className={`rounded-xl border px-2.5 py-2 ${summary.bgClass} ${summary.borderClass}`}
+                                                >
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span
+                                                            className={`h-1.5 w-1.5 rounded-full ${summary.dotClass}`}
                                                         />
 
-                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-400">
-                                                            ▼
-                                                        </span>
-
-                                                        <datalist
-                                                            id={`province-options-${rowKey}`}
-                                                        >
-                                                            {THAI_PROVINCES.map(
-                                                                (
-                                                                    province
-                                                                ) => (
-                                                                    <option
-                                                                        key={
-                                                                            province
-                                                                        }
-                                                                        value={
-                                                                            province
-                                                                        }
-                                                                    />
-                                                                )
-                                                            )}
-                                                        </datalist>
+                                                        <p className="truncate text-[8px] font-black text-slate-500">
+                                                            {summary.label}
+                                                        </p>
                                                     </div>
-                                                </label>
+
+                                                    <p
+                                                        className={`mt-1 text-right text-lg font-black ${summary.valueClass}`}
+                                                    >
+                                                        {summary.value}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Vehicle rows */}
+                                    {replacementTruckRows.length === 0 ? (
+                                        <div className="px-6 py-14 text-center">
+                                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                                                <svg
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    className="h-6 w-6"
+                                                    aria-hidden="true"
+                                                >
+                                                    <path
+                                                        d="M12 8v4m0 4h.01M10.3 4.9 3.7 16.3A2 2 0 0 0 5.4 19h13.2a2 2 0 0 0 1.7-2.7L13.7 4.9a2 2 0 0 0-3.4 0Z"
+                                                        stroke="currentColor"
+                                                        strokeWidth="1.8"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                    />
+                                                </svg>
                                             </div>
 
-                                            {/* Company */}
-                                            <label className="block">
-                                                <div className="mb-1.5 flex items-center justify-between gap-2">
-                                                    <span className="text-[9px] font-black text-slate-600">
-                                                        บริษัทผู้ให้บริการ
-                                                        <span className="ml-1 text-rose-500">
-                                                            *
-                                                        </span>
-                                                    </span>
+                                            <p className="mt-3 text-xs font-black text-slate-600">
+                                                ไม่พบรายละเอียดรถทดแทน
+                                            </p>
 
-                                                    {rowState.companyId && (
-                                                        <span className="text-[8px] font-bold text-slate-400">
-                                                            ID:{" "}
-                                                            {
-                                                                rowState.companyId
-                                                            }
-                                                        </span>
-                                                    )}
-                                                </div>
+                                            <p className="mt-1 text-[10px] font-medium text-slate-400">
+                                                กรุณาตรวจสอบข้อมูลรายละเอียดจากคำขอ
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4 bg-slate-100/70 p-3">
+                                            {replacementTruckRows.map((item, index) => {
+                                                const rowKey =
+                                                    getReplacementRowKey(
+                                                        item,
+                                                        index
+                                                    );
 
-                                                <select
-                                                    value={
-                                                        currentCompanyKey
-                                                    }
-                                                    disabled={
-                                                        isApproved ||
-                                                        !canMakeDecision ||
-                                                        isRowSaving ||
-                                                        loadingSuppliers
-                                                    }
-                                                    onChange={(
-                                                        event
-                                                    ) =>
-                                                        handleReplacementCompanyChange(
-                                                            rowKey,
-                                                            event
-                                                                .target
-                                                                .value
-                                                        )
-                                                    }
-                                                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
-                                                >
-                                                    <option value="">
-                                                        {loadingSuppliers
-                                                            ? "กำลังโหลดข้อมูลบริษัท..."
-                                                            : "-- เลือกบริษัทผู้ให้บริการ --"}
-                                                    </option>
+                                                const rowState:
+                                                    SingleVehicleState =
+                                                    singleVehicleStates[rowKey] ?? {
+                                                        decision: "pending",
 
-                                                    {companyOptionsForRow.map(
-                                                        (
-                                                            supplier
-                                                        ) => (
-                                                            <option
-                                                                key={
-                                                                    supplier.key
-                                                                }
-                                                                value={
-                                                                    supplier.key
-                                                                }
-                                                            >
+                                                        newLicense: "",
+                                                        newProvince: "",
+
+                                                        companyId: "",
+                                                        companyName: "",
+
+                                                        truckType:
+                                                            data.fleet_truck_type ||
+                                                            "",
+
+                                                        approvedSaved: false,
+                                                        error: "",
+                                                    };
+
+                                                const originalLicense = String(
+                                                    item.license || ""
+                                                ).trim();
+
+                                                const originalProvince = String(
+                                                    item.province || ""
+                                                ).trim();
+
+                                                const originalTruckType = String(
+                                                    item.truck_type || ""
+                                                ).trim();
+
+                                                const originalCompanyId = String(
+                                                    item.company_id || ""
+                                                ).trim();
+
+                                                const originalCompanyName = String(
+                                                    item.company_name || ""
+                                                ).trim();
+
+                                                const isRowSaving =
+                                                    savingSingleVehicleKey ===
+                                                    rowKey;
+
+                                                const currentCompanyKey =
+                                                    rowState.companyName
+                                                        ? `${rowState.companyId}|||${rowState.companyName}`
+                                                        : "";
+
+                                                const companyOptionsForRow = [
+                                                    ...(
+                                                        currentCompanyKey &&
+                                                            !replacementSupplierOptions.some(
+                                                                (supplier) =>
+                                                                    supplier.key ===
+                                                                    currentCompanyKey
+                                                            )
+                                                            ? [
                                                                 {
-                                                                    supplier.label
-                                                                }
-                                                            </option>
-                                                        )
-                                                    )}
-                                                </select>
-                                            </label>
+                                                                    key:
+                                                                        currentCompanyKey,
 
-                                            {/* Truck type */}
-                                            <label className="block">
-                                                <span className="mb-1.5 block text-[9px] font-black text-slate-600">
-                                                    ประเภทรถ
-                                                    <span className="ml-1 text-rose-500">
-                                                        *
-                                                    </span>
-                                                </span>
+                                                                    companyId:
+                                                                        rowState.companyId,
 
-                                                <input
-                                                    type="text"
-                                                    value={
-                                                        rowState.truckType
-                                                    }
-                                                    disabled={
-                                                        isApproved ||
-                                                        !canMakeDecision ||
-                                                        isRowSaving
-                                                    }
-                                                    onChange={(
-                                                        event
-                                                    ) =>
-                                                        handleReplacementInputChange(
-                                                            rowKey,
-                                                            {
-                                                                truckType:
-                                                                    event
-                                                                        .target
-                                                                        .value,
-                                                            }
-                                                        )
-                                                    }
-                                                    placeholder="เช่น C-4W H1.9"
-                                                    autoComplete="off"
-                                                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
-                                                />
-                                            </label>
+                                                                    companyName:
+                                                                        rowState.companyName,
 
-                                            {/* Saved summary */}
-                                            {isApproved && (
-                                                <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2.5">
-                                                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-black text-white">
-                                                        ✓
-                                                    </span>
+                                                                    label:
+                                                                        rowState.companyId
+                                                                            ? `(${rowState.companyId}) ${rowState.companyName}`
+                                                                            : rowState.companyName,
+                                                                },
+                                                            ]
+                                                            : []
+                                                    ),
 
-                                                    <div className="min-w-0">
-                                                        <p className="text-[10px] font-black text-emerald-800">
-                                                            บันทึกข้อมูลเรียบร้อยแล้ว
-                                                        </p>
+                                                    ...replacementSupplierOptions,
+                                                ];
 
-                                                        <p className="mt-0.5 break-words text-[9px] font-medium text-emerald-600">
-                                                            {rowState.newLicense ||
-                                                                "-"}
+                                                const isApproved =
+                                                    rowState.approvedSaved;
 
-                                                            {rowState.newProvince
-                                                                ? ` · ${rowState.newProvince}`
-                                                                : ""}
+                                                const isRejected =
+                                                    rowState.decision ===
+                                                    "rejected";
 
-                                                            {rowState.companyName
-                                                                ? ` · ${rowState.companyName}`
-                                                                : ""}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                                return (
+                                                    <article
+                                                        key={rowKey}
+                                                        className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${isApproved
+                                                            ? "border-emerald-200"
+                                                            : isRejected
+                                                                ? "border-rose-200"
+                                                                : "border-slate-200"
+                                                            }`}
+                                                    >
+                                                        {/* Row heading */}
+                                                        <div
+                                                            className={`flex items-center justify-between gap-3 border-b px-3 py-3 ${isApproved
+                                                                ? "border-emerald-100 bg-emerald-50/70"
+                                                                : isRejected
+                                                                    ? "border-rose-100 bg-rose-50/70"
+                                                                    : "border-slate-200 bg-white"
+                                                                }`}
+                                                        >
+                                                            <div className="flex min-w-0 items-center gap-2.5">
+                                                                <span
+                                                                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-black ${isApproved
+                                                                        ? "bg-emerald-600 text-white"
+                                                                        : isRejected
+                                                                            ? "bg-rose-600 text-white"
+                                                                            : "bg-slate-900 text-white"
+                                                                        }`}
+                                                                >
+                                                                    {index + 1}
+                                                                </span>
+
+                                                                <div className="min-w-0">
+                                                                    <p className="text-[9px] font-bold text-slate-400">
+                                                                        รถที่ขอทดแทน
+                                                                    </p>
+
+                                                                    <p className="truncate text-xs font-black text-slate-900">
+                                                                        {originalLicense ||
+                                                                            "ไม่พบทะเบียน"}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+
+                                                            {isApproved ? (
+                                                                <span className="shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[9px] font-black text-emerald-700">
+                                                                    ✓ อนุมัติแล้ว
+                                                                </span>
+                                                            ) : isRejected ? (
+                                                                <span className="shrink-0 rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[9px] font-black text-rose-700">
+                                                                    × ไม่อนุมัติ
+                                                                </span>
+                                                            ) : (
+                                                                <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-700">
+                                                                    รอพิจารณา
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="p-3">
+                                                            {/* Original vehicle */}
+                                                            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                                                <div className="absolute inset-y-0 left-0 w-1 bg-slate-300" />
+
+                                                                <div className="px-3 py-3 pl-4">
+                                                                    <div className="flex items-start justify-between gap-3">
+                                                                        <div className="min-w-0">
+                                                                            <p className="text-[8px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                                                                Original vehicle
+                                                                            </p>
+
+                                                                            <p className="mt-1 break-words text-sm font-black text-slate-900">
+                                                                                {originalLicense ||
+                                                                                    "-"}
+
+                                                                                {originalProvince
+                                                                                    ? ` · ${originalProvince}`
+                                                                                    : ""}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        {originalTruckType && (
+                                                                            <span className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-black text-slate-600">
+                                                                                {
+                                                                                    originalTruckType
+                                                                                }
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    {(originalCompanyId ||
+                                                                        originalCompanyName) && (
+                                                                            <p className="mt-1.5 break-words text-[10px] font-semibold leading-relaxed text-slate-500">
+                                                                                {originalCompanyId
+                                                                                    ? `(${originalCompanyId}) `
+                                                                                    : ""}
+
+                                                                                {originalCompanyName ||
+                                                                                    "-"}
+                                                                            </p>
+                                                                        )}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Connector */}
+                                                            {!isRejected && (
+                                                                <div className="relative flex h-8 items-center justify-center">
+                                                                    <div className="absolute bottom-0 top-0 w-px bg-slate-200" />
+
+                                                                    <span className="relative flex h-6 w-6 items-center justify-center rounded-full border border-blue-200 bg-white text-blue-600 shadow-sm">
+                                                                        <svg
+                                                                            viewBox="0 0 24 24"
+                                                                            fill="none"
+                                                                            className="h-3.5 w-3.5"
+                                                                            aria-hidden="true"
+                                                                        >
+                                                                            <path
+                                                                                d="m7 10 5 5 5-5"
+                                                                                stroke="currentColor"
+                                                                                strokeWidth="2"
+                                                                                strokeLinecap="round"
+                                                                                strokeLinejoin="round"
+                                                                            />
+                                                                        </svg>
+                                                                    </span>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Replacement form */}
+                                                            {!isRejected && (
+                                                                <div
+                                                                    className={`overflow-hidden rounded-xl border ${isApproved
+                                                                        ? "border-emerald-200 bg-emerald-50/30"
+                                                                        : "border-blue-200 bg-blue-50/30"
+                                                                        }`}
+                                                                >
+                                                                    <div
+                                                                        className={`flex items-center justify-between gap-3 border-b px-3 py-2.5 ${isApproved
+                                                                            ? "border-emerald-100 bg-emerald-50"
+                                                                            : "border-blue-100 bg-blue-50"
+                                                                            }`}
+                                                                    >
+                                                                        <div>
+                                                                            <p
+                                                                                className={`text-[10px] font-black ${isApproved
+                                                                                    ? "text-emerald-900"
+                                                                                    : "text-blue-900"
+                                                                                    }`}
+                                                                            >
+                                                                                ข้อมูลรถทดแทน
+                                                                            </p>
+
+                                                                            <p
+                                                                                className={`mt-0.5 text-[8px] font-medium ${isApproved
+                                                                                    ? "text-emerald-600"
+                                                                                    : "text-blue-600"
+                                                                                    }`}
+                                                                            >
+                                                                                กรอกข้อมูลรถที่ใช้ทดแทนคันเดิม
+                                                                            </p>
+                                                                        </div>
+
+                                                                        {isApproved && (
+                                                                            <span className="rounded-md bg-emerald-600 px-2 py-1 text-[8px] font-black text-white">
+                                                                                SAVED
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="space-y-3 p-3">
+                                                                        {/* License + Province */}
+                                                                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                                                                            <label className="block min-w-0">
+                                                                                <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                                                    ทะเบียนรถ
+                                                                                    <span className="ml-1 text-rose-500">
+                                                                                        *
+                                                                                    </span>
+                                                                                </span>
+
+                                                                                <input
+                                                                                    type="text"
+                                                                                    value={
+                                                                                        rowState.newLicense
+                                                                                    }
+                                                                                    disabled={
+                                                                                        isApproved ||
+                                                                                        !canMakeDecision ||
+                                                                                        isRowSaving
+                                                                                    }
+                                                                                    onChange={(
+                                                                                        event
+                                                                                    ) =>
+                                                                                        handleReplacementInputChange(
+                                                                                            rowKey,
+                                                                                            {
+                                                                                                newLicense:
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                            }
+                                                                                        )
+                                                                                    }
+                                                                                    placeholder="เช่น 2ฒม-1181"
+                                                                                    autoComplete="off"
+                                                                                    className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                                                />
+                                                                            </label>
+
+                                                                            <label className="block min-w-0">
+                                                                                <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                                                    จังหวัด
+                                                                                    <span className="ml-1 text-rose-500">
+                                                                                        *
+                                                                                    </span>
+                                                                                </span>
+
+                                                                                <div className="relative">
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        list={`province-options-${rowKey}`}
+                                                                                        value={
+                                                                                            rowState.newProvince
+                                                                                        }
+                                                                                        disabled={
+                                                                                            isApproved ||
+                                                                                            !canMakeDecision ||
+                                                                                            isRowSaving
+                                                                                        }
+                                                                                        onChange={(
+                                                                                            event
+                                                                                        ) =>
+                                                                                            handleReplacementInputChange(
+                                                                                                rowKey,
+                                                                                                {
+                                                                                                    newProvince:
+                                                                                                        event
+                                                                                                            .target
+                                                                                                            .value,
+                                                                                                }
+                                                                                            )
+                                                                                        }
+                                                                                        placeholder="เลือกจังหวัด"
+                                                                                        autoComplete="off"
+                                                                                        className="h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 pr-8 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                                                    />
+
+                                                                                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[8px] text-slate-400">
+                                                                                        ▼
+                                                                                    </span>
+
+                                                                                    <datalist
+                                                                                        id={`province-options-${rowKey}`}
+                                                                                    >
+                                                                                        {THAI_PROVINCES.map(
+                                                                                            (
+                                                                                                province
+                                                                                            ) => (
+                                                                                                <option
+                                                                                                    key={
+                                                                                                        province
+                                                                                                    }
+                                                                                                    value={
+                                                                                                        province
+                                                                                                    }
+                                                                                                />
+                                                                                            )
+                                                                                        )}
+                                                                                    </datalist>
+                                                                                </div>
+                                                                            </label>
+                                                                        </div>
+
+                                                                        {/* Company */}
+                                                                        <label className="block">
+                                                                            <div className="mb-1.5 flex items-center justify-between gap-2">
+                                                                                <span className="text-[9px] font-black text-slate-600">
+                                                                                    บริษัทผู้ให้บริการ
+                                                                                    <span className="ml-1 text-rose-500">
+                                                                                        *
+                                                                                    </span>
+                                                                                </span>
+
+                                                                                {rowState.companyId && (
+                                                                                    <span className="text-[8px] font-bold text-slate-400">
+                                                                                        ID:{" "}
+                                                                                        {
+                                                                                            rowState.companyId
+                                                                                        }
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <select
+                                                                                value={
+                                                                                    currentCompanyKey
+                                                                                }
+                                                                                disabled={
+                                                                                    isApproved ||
+                                                                                    !canMakeDecision ||
+                                                                                    isRowSaving ||
+                                                                                    loadingSuppliers
+                                                                                }
+                                                                                onChange={(
+                                                                                    event
+                                                                                ) =>
+                                                                                    handleReplacementCompanyChange(
+                                                                                        rowKey,
+                                                                                        event
+                                                                                            .target
+                                                                                            .value
+                                                                                    )
+                                                                                }
+                                                                                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                                            >
+                                                                                <option value="">
+                                                                                    {loadingSuppliers
+                                                                                        ? "กำลังโหลดข้อมูลบริษัท..."
+                                                                                        : "-- เลือกบริษัทผู้ให้บริการ --"}
+                                                                                </option>
+
+                                                                                {companyOptionsForRow.map(
+                                                                                    (
+                                                                                        supplier
+                                                                                    ) => (
+                                                                                        <option
+                                                                                            key={
+                                                                                                supplier.key
+                                                                                            }
+                                                                                            value={
+                                                                                                supplier.key
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                supplier.label
+                                                                                            }
+                                                                                        </option>
+                                                                                    )
+                                                                                )}
+                                                                            </select>
+                                                                        </label>
+
+                                                                        {/* Truck type */}
+                                                                        <label className="block">
+                                                                            <span className="mb-1.5 block text-[9px] font-black text-slate-600">
+                                                                                ประเภทรถ
+                                                                                <span className="ml-1 text-rose-500">
+                                                                                    *
+                                                                                </span>
+                                                                            </span>
+
+                                                                            <select
+                                                                                value={rowState.truckType}
+                                                                                disabled={
+                                                                                    isApproved ||
+                                                                                    !canMakeDecision ||
+                                                                                    isRowSaving ||
+                                                                                    loadingTrucks
+                                                                                }
+                                                                                onChange={(event) =>
+                                                                                    handleReplacementInputChange(rowKey, {
+                                                                                        truckType: event.target.value,
+                                                                                    })
+                                                                                }
+                                                                                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-800"
+                                                                            >
+                                                                                <option value="">
+                                                                                    {loadingTrucks
+                                                                                        ? "กำลังโหลดประเภทรถ..."
+                                                                                        : "-- เลือกประเภทรถ --"}
+                                                                                </option>
+
+                                                                                {truckTypeOptions.map((truckType) => (
+                                                                                    <option key={truckType} value={truckType}>
+                                                                                        {formatTruckTypeLabel(truckType)}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </label>
+
+                                                                        {/* Saved summary */}
+                                                                        {isApproved && (
+                                                                            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2.5">
+                                                                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-black text-white">
+                                                                                    ✓
+                                                                                </span>
+
+                                                                                <div className="min-w-0">
+                                                                                    <p className="text-[10px] font-black text-emerald-800">
+                                                                                        บันทึกข้อมูลเรียบร้อยแล้ว
+                                                                                    </p>
+
+                                                                                    <p className="mt-0.5 break-words text-[9px] font-medium text-emerald-600">
+                                                                                        {rowState.newLicense ||
+                                                                                            "-"}
+
+                                                                                        {rowState.newProvince
+                                                                                            ? ` · ${rowState.newProvince}`
+                                                                                            : ""}
+
+                                                                                        {rowState.companyName
+                                                                                            ? ` · ${rowState.companyName}`
+                                                                                            : ""}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Error */}
+                                                            {rowState.error && (
+                                                                <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+                                                                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[10px] font-black text-white">
+                                                                        !
+                                                                    </span>
+
+                                                                    <p className="pt-0.5 text-[10px] font-bold leading-relaxed text-rose-700">
+                                                                        {rowState.error}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Actions */}
+                                                            {!isApproved &&
+                                                                !isRejected ? (
+                                                                <div className="mt-3 grid grid-cols-[minmax(0,1fr)_108px] gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={
+                                                                            !canMakeDecision ||
+                                                                            isRowSaving ||
+                                                                            !rowState.newLicense.trim() ||
+                                                                            !rowState.newProvince.trim() ||
+                                                                            !rowState.companyId.trim() ||
+                                                                            !rowState.companyName.trim() ||
+                                                                            !rowState.truckType.trim()
+                                                                        }
+                                                                        onClick={() =>
+                                                                            void approveSingleReplacementVehicle(
+                                                                                item,
+                                                                                index
+                                                                            )
+                                                                        }
+                                                                        className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                                                                    >
+                                                                        {isRowSaving && (
+                                                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                                                                        )}
+
+                                                                        {isRowSaving
+                                                                            ? "กำลังบันทึก..."
+                                                                            : "อนุมัติรถคันนี้"}
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={!canMakeDecision || isRowSaving}
+                                                                        onClick={() =>
+                                                                            void rejectSingleReplacementVehicle(
+                                                                                item,
+                                                                                index
+                                                                            )
+                                                                        }
+                                                                        className="inline-flex h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 text-[10px] font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                    >
+                                                                        ไม่อนุมัติ
+                                                                    </button>
+                                                                </div>
+                                                            ) : isRejected ? (
+                                                                <div className="mt-3 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3">
+                                                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">
+                                                                        ×
+                                                                    </span>
+
+                                                                    <div className="min-w-0">
+                                                                        <p className="text-xs font-black text-rose-800">
+                                                                            ไม่อนุมัติรถคันนี้
+                                                                        </p>
+
+                                                                        <p className="mt-1 break-words text-[10px] font-medium leading-relaxed text-rose-600">
+                                                                            บันทึกผลของรถทะเบียน{" "}
+                                                                            <span className="font-black">
+                                                                                {originalLicense ||
+                                                                                    "-"}
+                                                                            </span>{" "}
+                                                                            เข้าสู่ระบบเรียบร้อยแล้ว
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+                                                    </article>
+                                                );
+                                            })}
                                         </div>
-                                    </div>
-                                )}
-
-                                {/* Error */}
-                                {rowState.error && (
-                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
-                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[10px] font-black text-white">
-                                            !
-                                        </span>
-
-                                        <p className="pt-0.5 text-[10px] font-bold leading-relaxed text-rose-700">
-                                            {rowState.error}
-                                        </p>
-                                    </div>
-                                )}
-
-                                {/* Actions */}
-                                {!isApproved &&
-                                !isRejected ? (
-                                    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_108px] gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={
-                                                !canMakeDecision ||
-                                                isRowSaving ||
-                                                !rowState.newLicense.trim() ||
-                                                !rowState.newProvince.trim() ||
-                                                !rowState.companyId.trim() ||
-                                                !rowState.companyName.trim() ||
-                                                !rowState.truckType.trim()
-                                            }
-                                            onClick={() =>
-                                                void approveSingleReplacementVehicle(
-                                                    item,
-                                                    index
-                                                )
-                                            }
-                                            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-                                        >
-                                            {isRowSaving && (
-                                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                                            )}
-
-                                            {isRowSaving
-                                                ? "กำลังบันทึก..."
-                                                : "อนุมัติรถคันนี้"}
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            disabled={
-                                                !canMakeDecision ||
-                                                isRowSaving
-                                            }
-                                            onClick={() =>
-                                                void rejectSingleReplacementVehicle(
-                                                    item,
-                                                    index
-                                                )
-                                            }
-                                            className="inline-flex h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 text-[10px] font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            ไม่อนุมัติ
-                                        </button>
-                                    </div>
-                                ) : isRejected ? (
-                                    <div className="mt-3 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3">
-                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">
-                                            ×
-                                        </span>
-
-                                        <div className="min-w-0">
-                                            <p className="text-xs font-black text-rose-800">
-                                                ไม่อนุมัติรถคันนี้
-                                            </p>
-
-                                            <p className="mt-1 break-words text-[10px] font-medium leading-relaxed text-rose-600">
-                                                บันทึกผลของรถทะเบียน{" "}
-                                                <span className="font-black">
-                                                    {originalLicense ||
-                                                        "-"}
-                                                </span>{" "}
-                                                เข้าสู่ระบบเรียบร้อยแล้ว
-                                            </p>
-                                        </div>
-                                    </div>
-                                ) : null}
-                            </div>
-                        </article>
-                    );
-                })}
-            </div>
-        )}
-    </section>
-)}
+                                    )}
+                                </section>
+                            )}
 
                             {/* Message */}
                             {message && (

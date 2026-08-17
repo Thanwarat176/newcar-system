@@ -1176,6 +1176,35 @@ export default function FlowAssessmentModal({
   const handleSaveFlowDates = async (flow: DisplayFlowRow) => {
     const flowId = String(flow.id);
 
+    const documentFinalStatus = data.flow_data.reduce<
+      "cancelled" | "expired" | null
+    >((status, item) => {
+      if (status || String(item.vehicle_no) !== String(flow.vehicle_no)) {
+        return status;
+      }
+
+      const processName = normalizeProcessName(
+        data.steps.find((step) => String(step.id) === String(item.process_id))
+          ?.process
+      );
+      const hasFinalDate = Boolean(item.str_date || item.end_date);
+
+      if (!hasFinalDate) return null;
+      if (processName === CANCEL_DOCUMENT_PROCESS) return "cancelled";
+      if (processName === EXPIRED_DOCUMENT_PROCESS) return "expired";
+
+      return null;
+    }, null);
+
+    if (documentFinalStatus) {
+      setError(
+        documentFinalStatus === "cancelled"
+          ? "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารถูกยกเลิก"
+          : "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารหมดอายุ"
+      );
+      return;
+    }
+
     // ถ้ามีวันที่ในฐานข้อมูลครบแล้ว ไม่อนุญาตให้บันทึกซ้ำ
     const isAlreadySaved = Boolean(flow.str_date && flow.end_date);
 
@@ -1352,6 +1381,8 @@ export default function FlowAssessmentModal({
         result.message ||
         `บันทึก “${actionLabel}” สำหรับรถคันที่ ${targetFlow.vehicle_no} เรียบร้อยแล้ว`
       );
+
+      setOpenDatePicker(null);
 
       await fetchFlowData();
     } catch (actionError) {
@@ -1742,7 +1773,7 @@ export default function FlowAssessmentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-5">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5">
       <button
         type="button"
         aria-label="ปิดหน้าต่าง"
@@ -1750,12 +1781,14 @@ export default function FlowAssessmentModal({
         onClick={onClose}
       />
 
-      <section className="relative flex max-h-[94vh] w-full max-w-[1380px] flex-col overflow-hidden rounded-[28px] border border-white/70 bg-slate-50 shadow-[0_30px_100px_rgba(15,23,42,0.35)]">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+      <section className="relative flex max-h-[96vh] w-full max-w-[1440px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl sm:max-h-[94vh]">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-blue-500">
-              <ClipboardList size={14} />
-              Fleet Flow Assessment
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white">
+                <ClipboardList size={14} />
+              </span>
+              Fleet Process Tracking
             </div>
 
             <h2 className="mt-1 truncate text-lg font-black text-slate-900 sm:text-xl">
@@ -1775,7 +1808,7 @@ export default function FlowAssessmentModal({
                   type="button"
                   onClick={handleAssessmentClick}
                   disabled={initializing}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <CheckCircle2 size={15} />
                   ประเมิน
@@ -1876,7 +1909,7 @@ export default function FlowAssessmentModal({
                 />
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-12">
+              <div className="">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-8">
                   <h3 className="text-sm font-black text-slate-800">
                     ข้อมูลคำขอ
@@ -2567,6 +2600,12 @@ export default function FlowAssessmentModal({
                               const hasDocumentFinalStatus =
                                 isDocumentCancelled || isDocumentExpired;
 
+                              const documentLockedMessage = isDocumentCancelled
+                                ? "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารถูกยกเลิก"
+                                : isDocumentExpired
+                                  ? "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารหมดอายุ"
+                                  : "";
+
                               const shouldShowExpiredAction =
                                 isFinanceApprovalProcess &&
                                 !hasCompleted &&
@@ -2589,8 +2628,10 @@ export default function FlowAssessmentModal({
                                   className="flex shrink-0 self-stretch items-stretch"
                                 >
                                   <article
-                                    className={`relative flex h-full w-[255px] flex-col rounded-2xl border p-4 shadow-sm transition ${invalidDateRange
-                                      ? "border-rose-300 bg-rose-50/60"
+                                    className={`relative flex h-full w-[270px] flex-col rounded-2xl border p-4 shadow-sm transition ${hasDocumentFinalStatus
+                                      ? "border-slate-300 bg-slate-100 text-slate-500"
+                                      : invalidDateRange
+                                        ? "border-rose-300 bg-rose-50/60"
                                       : hasCompleted
                                         ? "border-emerald-200 bg-emerald-50/40"
                                         : hasStarted
@@ -2600,7 +2641,9 @@ export default function FlowAssessmentModal({
                                   >
                                     <div className="flex items-start justify-between gap-3">
                                       <span
-                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${hasCompleted
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${hasDocumentFinalStatus
+                                          ? "bg-slate-300 text-slate-600"
+                                          : hasCompleted
                                           ? "bg-emerald-600 text-white"
                                           : hasStarted
                                             ? "bg-blue-600 text-white"
@@ -2611,15 +2654,19 @@ export default function FlowAssessmentModal({
                                       </span>
 
                                       <span
-                                        className={`rounded-full px-2 py-1 text-[9px] font-black ${hasCompleted
+                                        className={`rounded-full px-2 py-1 text-[9px] font-black ${hasDocumentFinalStatus
+                                          ? "bg-slate-200 text-slate-500"
+                                          : hasCompleted
                                           ? "bg-emerald-100 text-emerald-700"
                                           : hasStarted
                                             ? "bg-blue-100 text-blue-700"
                                             : "bg-slate-100 text-slate-400"
                                           }`}
                                       >
-                                        {isAlreadySaved
-                                          ? "บันทึกครบแล้ว"
+                                        {hasDocumentFinalStatus
+                                          ? "ไม่สามารถแก้ไขได้"
+                                          : isAlreadySaved
+                                            ? "บันทึกครบแล้ว"
                                           : isStartSaved
                                             ? "บันทึกวันเริ่มแล้ว"
                                             : hasCompleted
@@ -2651,9 +2698,9 @@ export default function FlowAssessmentModal({
 
                                         <button
                                           type="button"
-                                          disabled={isAlreadySaved || isStartSaved}
+                                          disabled={hasDocumentFinalStatus || isAlreadySaved || isStartSaved}
                                           onClick={(event) => {
-                                            if (!isAlreadySaved && !isStartSaved) {
+                                            if (!hasDocumentFinalStatus && !isAlreadySaved && !isStartSaved) {
                                               setOpenDatePicker({
                                                 flowId,
                                                 field: "str_date",
@@ -2664,11 +2711,14 @@ export default function FlowAssessmentModal({
                                               });
                                             }
                                           }}
-                                          className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-[11px] font-bold text-slate-700 outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700"
+                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-bold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
+                                            ? "border-slate-300 bg-slate-200 text-slate-400"
+                                            : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-blue-100 disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700"
+                                            }`}
                                         >
                                           <CalendarDays
                                             size={14}
-                                            className="shrink-0 text-blue-500"
+                                            className={`shrink-0 ${hasDocumentFinalStatus ? "text-slate-400" : "text-blue-500"}`}
                                           />
 
                                           <span className="truncate">
@@ -2687,9 +2737,9 @@ export default function FlowAssessmentModal({
 
                                         <button
                                           type="button"
-                                          disabled={isAlreadySaved || !draft.str_date}
+                                          disabled={hasDocumentFinalStatus || isAlreadySaved || !draft.str_date}
                                           onClick={(event) => {
-                                            if (!isAlreadySaved && draft.str_date) {
+                                            if (!hasDocumentFinalStatus && !isAlreadySaved && draft.str_date) {
                                               setOpenDatePicker({
                                                 flowId,
                                                 field: "end_date",
@@ -2700,16 +2750,20 @@ export default function FlowAssessmentModal({
                                               });
                                             }
                                           }}
-                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border bg-white px-3 text-left text-[11px] font-bold outline-none transition hover:bg-blue-50 focus:ring-4 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 ${invalidDateRange
-                                            ? "border-rose-400 text-rose-700 focus:border-rose-500 focus:ring-rose-100"
-                                            : "border-slate-200 text-slate-700 hover:border-blue-300 focus:border-blue-500 focus:ring-blue-100"
+                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-bold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
+                                            ? "border-slate-300 bg-slate-200 text-slate-400"
+                                            : invalidDateRange
+                                              ? "border-rose-400 bg-white text-rose-700 focus:border-rose-500 focus:ring-rose-100"
+                                              : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400"
                                             }`}
                                         >
                                           <CalendarDays
                                             size={14}
-                                            className={`shrink-0 ${invalidDateRange
-                                              ? "text-rose-500"
-                                              : "text-blue-500"
+                                            className={`shrink-0 ${hasDocumentFinalStatus
+                                              ? "text-slate-400"
+                                              : invalidDateRange
+                                                ? "text-rose-500"
+                                                : "text-blue-500"
                                               }`}
                                           />
 
@@ -2727,6 +2781,21 @@ export default function FlowAssessmentModal({
                                         )}
                                       </div>
                                     </div>
+
+                                    {hasDocumentFinalStatus && (
+                                      <div className="mt-3 rounded-xl border border-slate-300 bg-slate-200/80 px-3 py-2.5">
+                                        <div className="flex items-start gap-2 text-slate-600">
+                                          {isDocumentCancelled ? (
+                                            <Ban size={14} className="mt-0.5 shrink-0" />
+                                          ) : (
+                                            <FileWarning size={14} className="mt-0.5 shrink-0" />
+                                          )}
+                                          <p className="text-[10px] font-black leading-4">
+                                            {documentLockedMessage}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
 
                                     <div
                                       className={`mt-4 rounded-xl px-3 py-2.5 ${invalidDateRange
@@ -2837,14 +2906,17 @@ export default function FlowAssessmentModal({
                                       type="button"
                                       onClick={() => handleSaveFlowDates(flow)}
                                       disabled={
+                                        hasDocumentFinalStatus ||
                                         isAlreadySaved ||
                                         savingFlowId !== null ||
                                         !draft.str_date ||
                                         invalidDateRange
                                       }
-                                      className={`mt-auto inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition ${isAlreadySaved
-                                        ? "cursor-not-allowed bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200"
-                                        : "bg-blue-700 text-white shadow-md shadow-blue-700/20 hover:-translate-y-0.5 hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                                      className={`mt-auto inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition ${hasDocumentFinalStatus
+                                        ? "cursor-not-allowed bg-slate-300 text-slate-500"
+                                        : isAlreadySaved
+                                          ? "cursor-not-allowed bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200"
+                                          : "bg-blue-700 text-white shadow-md shadow-blue-700/20 hover:-translate-y-0.5 hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
                                         }`}
                                     >
                                       {savingFlowId === flowId ? (
@@ -2852,6 +2924,8 @@ export default function FlowAssessmentModal({
                                           size={14}
                                           className="animate-spin"
                                         />
+                                      ) : hasDocumentFinalStatus ? (
+                                        <Ban size={14} />
                                       ) : isAlreadySaved ? (
                                         <CheckCircle2 size={14} />
                                       ) : (
@@ -2859,8 +2933,10 @@ export default function FlowAssessmentModal({
                                       )}
                                       {savingFlowId === flowId
                                         ? "กำลังบันทึก..."
-                                        : isAlreadySaved
-                                          ? "บันทึกครบแล้ว"
+                                        : hasDocumentFinalStatus
+                                          ? "ไม่สามารถแก้ไขได้"
+                                          : isAlreadySaved
+                                            ? "บันทึกครบแล้ว"
                                           : isStartSaved
                                             ? "บันทึกวันสิ้นสุด"
                                             : draft.end_date
