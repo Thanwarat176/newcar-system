@@ -7,6 +7,9 @@ import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
   CalendarDays,
   Download,
   Eraser,
@@ -143,6 +146,7 @@ interface RequestItem {
   fleet_type: string;
   fleet_truck_type: string;
   license_replace: string[] | string;
+  status_details?: string | null;
 
   qty: number | string;
   approved_qty?: number | string | null;
@@ -208,7 +212,10 @@ type ProcessStageFilter =
   | "completed"
   | "no_data";
 
-export default function HomePage() {
+type SortKey = "running_doc" | "request_date" | "usage_date";
+type SortDirection = "asc" | "desc";
+
+export default function AddFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [processVehicleRows, setProcessVehicleRows] = useState<RequestItem[]>(
     [],
@@ -228,13 +235,11 @@ export default function HomePage() {
   const [warehouseInfoErrors, setWarehouseInfoErrors] = useState<
     Record<string, string>
   >({});
-  const [editingStatus, setEditingStatus] = useState<Record<string, string>>(
-    {},
-  );
-  const [updatingRows, setUpdatingRows] = useState<Record<string, boolean>>({});
-  const [updateMessage, setUpdateMessage] = useState<
-    Record<string, { type: "success" | "error"; text: string }>
-  >({});
+
+  const [sortConfig, setSortConfig] = useState<{
+    key: SortKey;
+    direction: SortDirection;
+  } | null>(null);
 
   const [openCreateModal, setOpenCreateModal] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
@@ -763,35 +768,43 @@ export default function HomePage() {
     }
   };
 
-  const handleToggleRow = async (
+  const handleToggleRow = (
     item: RequestItem,
     rowKey: string,
     isOpen: boolean,
   ) => {
-    const normalizedStatus = normalizeStatus(item.status);
-
-    const isTcasStatus =
-      normalizedStatus === "process" || normalizedStatus === "completed";
-
-    const hasVehicle =
-      item.vehicle_no !== null && item.vehicle_no !== undefined;
-
-    // ยังไม่มี vehicle_no แปลว่ายังไม่ได้โหลด Flow ของ Request นี้
-    if (isTcasStatus && !hasVehicle) {
-      await loadFlowByRequestId(item, rowKey);
-      return;
-    }
-
-    const nextOpen = !isOpen;
-
     setOpenRows((current) => ({
       ...current,
-      [rowKey]: nextOpen,
+      [rowKey]: !isOpen,
     }));
+  };
 
-    if (nextOpen && isTcasStatus && hasVehicle) {
-      await loadVehicleWarehouseInfo(item, rowKey);
+  const handleSort = (key: SortKey) => {
+    setSortConfig((current) => {
+      if (current?.key === key) {
+        return {
+          key,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
+      }
+
+      return {
+        key,
+        direction: "asc",
+      };
+    });
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortConfig?.key !== key) {
+      return <ArrowUpDown size={13} className="opacity-50" />;
     }
+
+    return sortConfig.direction === "asc" ? (
+      <ChevronUp size={14} />
+    ) : (
+      <ChevronDown size={14} />
+    );
   };
 
   const fetchRequests = async () => {
@@ -918,6 +931,11 @@ export default function HomePage() {
               flowSummaryItem?.license_replace ||
               "",
 
+            status_details:
+              requestItem?.status_details ??
+              flowSummaryItem?.status_details ??
+              null,
+
             qty:
               flowSummaryItem?.qty ??
               requestItem?.qty ??
@@ -972,25 +990,41 @@ export default function HomePage() {
       );
 
       const classifiedList: RequestItem[] = mergedList.map((item) => {
+        const statusDetails = String(item.status_details || "").trim();
+
+        const levelFromStatusDetails = Number(
+          statusDetails.match(/^(\d+)\s*\./)?.[1],
+        );
+
         const latestLevel = Number(item.latest_process_level);
+
+        const currentLevel = Number.isFinite(latestLevel) && latestLevel > 0
+          ? latestLevel
+          : Number.isFinite(levelFromStatusDetails)
+            ? levelFromStatusDetails
+            : 0;
+
+        const currentProcess =
+          String(item.latest_process_name || "").trim() ||
+          statusDetails.replace(/^\d+\s*[.:]\s*/, "").trim() ||
+          "ยังไม่เริ่มดำเนินการ";
 
         let nextStatus = item.status;
 
-        if (latestLevel >= 1 && latestLevel <= 7) {
+        if (currentLevel >= 1 && currentLevel <= 7) {
           nextStatus = "process";
-        } else if (latestLevel === 8) {
+        } else if (currentLevel === 8) {
           nextStatus = "completed";
-        } else if (latestLevel === 9 || latestLevel === 10) {
+        } else if (currentLevel === 9 || currentLevel === 10) {
           nextStatus = "rejected";
         }
 
         return {
           ...item,
           status: nextStatus,
-          current_step: Number.isFinite(latestLevel) ? latestLevel : 0,
+          current_step: currentLevel,
           total_steps: 8,
-          current_process:
-            item.latest_process_name || "ยังไม่เริ่มดำเนินการ",
+          current_process: currentProcess,
         };
       });
 
@@ -1055,63 +1089,6 @@ export default function HomePage() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showRequestDatePicker]);
-
-  const handleStatusUpdate = async (
-    rowKey: string,
-    id: string | number | null,
-    newStatus: string,
-  ) => {
-    if (id === null || id === undefined || id === "") return;
-
-    setUpdatingRows((prev) => ({ ...prev, [rowKey]: true }));
-    setUpdateMessage((prev) => ({
-      ...prev,
-      [rowKey]: { type: "success", text: "" },
-    }));
-
-    try {
-      const res = await fetch(
-        "http://192.168.158.210/api_new_truck/api/request_update.php",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, status: newStatus }),
-        },
-      );
-
-      if (!res.ok) throw new Error("อัปเดตไม่สำเร็จ");
-
-      setRequests((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, status: newStatus } : item,
-        ),
-      );
-
-      setUpdateMessage((prev) => ({
-        ...prev,
-        [rowKey]: { type: "success", text: "อัปเดตสำเร็จ" },
-      }));
-
-      setTimeout(() => {
-        setUpdateMessage((prev) => ({
-          ...prev,
-          [rowKey]: { type: "success", text: "" },
-        }));
-      }, 2500);
-    } catch (err) {
-      console.error(err);
-      setUpdateMessage((prev) => ({
-        ...prev,
-        [rowKey]: {
-          type: "error",
-          text: "อัปเดตไม่สำเร็จ กรุณาลองใหม่",
-        },
-      }));
-    } finally {
-      setUpdatingRows((prev) => ({ ...prev, [rowKey]: false }));
-      setEditingStatus((prev) => ({ ...prev, [rowKey]: "" }));
-    }
-  };
 
   const normalizeDateKey = (value?: string) => {
     if (!value) return "ไม่ระบุวันที่";
@@ -1238,89 +1215,33 @@ export default function HomePage() {
   };
 
   const normalizeStatus = (status?: string) => {
-    const value = String(status || "")
-      .trim()
-      .toLowerCase();
-
-    // รอ GM อนุมัติ
-    if (value === "gm_pending" || value === "รอ gm อนุมัติ") {
+    const value = String(status || "").trim().toLowerCase();
+  
+    if (value === "gm_pending" || value === "gm กำลังอนุมัติ") {
       return "gm_pending";
     }
-
-    // รอ FBP / ส่วนกลางพิจารณา
+  
     if (
-      value === "center_pending" ||
       value === "fbp_pending" ||
-      value === "pending" ||
-      value === "กำลังประเมินกองรถ (fbp)" ||
-      value === "รออนุมัติ"
+      value === "กำลังประเมินกองรถ (fbp)"
     ) {
-      return "center_pending";
+      return "fbp_pending";
     }
-
-    // กำลังดำเนินการ TCAS
+  
     if (
-      value === "process" ||
-      value === "progress" ||
-      value === "confirm_request" ||
-      value === "confirm request" ||
-      value === "in_progress" ||
-      value === "ดำเนินการตามกระบวนการ (tcas)" ||
-      value === "0" ||
-      value === "1" ||
-      value === "2" ||
-      value === "3" ||
-      value === "4" ||
-      value === "5" ||
-      value === "6" ||
-      value === "7"
-    ) {
-      return "process";
-    }
-
-    if (value === "8") {
-      return "completed";
-    }
-
-    if (value === "9" || value === "10") {
-      return "rejected";
-    }
-
-    // ไม่อนุมัติ / ยกเลิก
-    if (
-      value === "rejected" ||
-      value === "fbp_rejected" ||
-      // GM ไม่อนุมัติ
-      value === "reject_gm" ||
       value === "reject_by_gm" ||
-      value === "rejected_by_gm" ||
-      value === "gm_rejected" ||
-      value === "9. ยกเลิกหนังสือ" ||
-      // ส่วนกลาง / FBP ไม่อนุมัติ
-      value === "reject_by_fbp" ||
-      value === "reject_center" ||
-      value === "reject_by_center" ||
-      value === "rejected_by_center" ||
-      value === "center_rejected" ||
-      // ขั้นตอน TCAS ไม่อนุมัติ
-      value === "ไม่อนุมัติ" ||
-      value === "ปฏิเสธ" ||
-      value === "ยกเลิก"
+      value === "gm ไม่อนุมัติ"
     ) {
-      return "rejected";
+      return "reject_by_gm";
     }
-
-    // เสร็จสิ้น
+  
     if (
-      value === "completed" ||
-      value === "approved" ||
-      value === "อนุมัติ" ||
-      value === "สำเร็จ" ||
-      value === "เสร็จสิ้น"
+      value === "progress" ||
+      value === "รอดำเนินการตามกระบวนการ (tcas)"
     ) {
-      return "completed";
+      return "progress";
     }
-
+  
     return value;
   };
 
@@ -1866,28 +1787,91 @@ export default function HomePage() {
     searchText,
   ]);
 
+  const sortedRequests = useMemo(() => {
+    if (!sortConfig) return filteredRequests;
+
+    return [...filteredRequests].sort((a, b) => {
+      let comparison = 0;
+
+      if (sortConfig.key === "running_doc") {
+        comparison = String(a.running_doc || "").localeCompare(
+          String(b.running_doc || ""),
+          "th",
+          {
+            numeric: true,
+            sensitivity: "base",
+          },
+        );
+      }
+
+      if (sortConfig.key === "request_date") {
+        const requestDateA = getRequestDateKey(a);
+        const requestDateB = getRequestDateKey(b);
+
+        const dateA =
+          requestDateA === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateA).getTime();
+
+        const dateB =
+          requestDateB === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateB).getTime();
+
+        comparison = dateA - dateB;
+      }
+
+      if (sortConfig.key === "usage_date") {
+        const dateA = a.usage_date
+          ? new Date(normalizeDateKey(a.usage_date)).getTime()
+          : 0;
+
+        const dateB = b.usage_date
+          ? new Date(normalizeDateKey(b.usage_date)).getTime()
+          : 0;
+
+        comparison = dateA - dateB;
+      }
+
+      return sortConfig.direction === "asc" ? comparison : -comparison;
+    });
+  }, [filteredRequests, sortConfig]);
+
   const groupedFilteredByRequestDate = useMemo(() => {
-    return filteredRequests.reduce<Record<string, RequestItem[]>>(
+    return sortedRequests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = getRequestDateKey(item);
 
-        if (!groups[dateKey]) groups[dateKey] = [];
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+
         groups[dateKey].push(item);
 
         return groups;
       },
       {},
     );
-  }, [filteredRequests]);
+  }, [sortedRequests]);
 
   const sortedFilteredDates = useMemo(() => {
     return Object.keys(groupedFilteredByRequestDate).sort((a, b) => {
       if (a === "ไม่ระบุวันที่") return 1;
       if (b === "ไม่ระบุวันที่") return -1;
 
-      return new Date(a).getTime() - new Date(b).getTime();
+      const comparison =
+        new Date(a).getTime() - new Date(b).getTime();
+
+      if (
+        sortConfig?.key === "request_date" &&
+        sortConfig.direction === "desc"
+      ) {
+        return -comparison;
+      }
+
+      return comparison;
     });
-  }, [groupedFilteredByRequestDate]);
+  }, [groupedFilteredByRequestDate, sortConfig]);
 
   const getRequestVehicleQty = (item: RequestItem) => {
     const status = normalizeStatus(item.status);
@@ -2110,7 +2094,7 @@ export default function HomePage() {
               <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
                 <Truck size={18} className="shrink-0" />
               </span>
-              <span className="truncate">รายการคำขอรถ</span>
+              <span className="truncate">รายการคำขอเพิ่มรถ</span>
             </h1>
 
             <div className="mt-2 flex flex-wrap gap-2">
@@ -2790,23 +2774,35 @@ export default function HomePage() {
                         "สถานะ",
                         "รายละเอียด",
                       ]
-                    ).map((col, i) => (
-                      <th
-                        key={col}
-                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0
-                          ? "sticky left-0 z-30 w-[52px] text-center"
-                          : ""
-                          } ${i === (statusFilter === "process" ? 5 : 6)
-                            ? "text-center"
+                    ).map((col, i) => {
+                      const isDocumentColumn = col === "เลขที่เอกสาร";
+                      const isUsageDateColumn = col === "วันที่ใช้งาน";
+                      const isSortable = isDocumentColumn || isUsageDateColumn;
+
+                      const sortKey: SortKey | null = isDocumentColumn
+                        ? "running_doc"
+                        : isUsageDateColumn
+                          ? "usage_date"
+                          : null;
+
+                      return (
+                        <th
+                          key={col}
+                          onClick={() => {
+                            if (sortKey) handleSort(sortKey);
+                          }}
+                          className={`whitespace-nowrap px-3 py-3 text-left ${isSortable
+                            ? "cursor-pointer select-none transition hover:bg-blue-700"
                             : ""
-                          } ${i === (statusFilter === "process" ? 9 : 10)
-                            ? "text-right"
-                            : ""
-                          }`}
-                      >
-                        {col}
-                      </th>
-                    ))}
+                            }`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            {col}
+                            {sortKey && renderSortIcon(sortKey)}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
 
@@ -2843,11 +2839,21 @@ export default function HomePage() {
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
-                              <CalendarDays
-                                size={13}
-                                className="text-blue-400"
-                              />
-                              วันที่ขอ: {formatThaiDate(date)}
+                              <button
+                                type="button"
+                                onClick={() => handleSort("request_date")}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-blue-100 hover:text-blue-800"
+                                title="กดเพื่อเรียงวันที่ขอ"
+                              >
+                                <CalendarDays
+                                  size={13}
+                                  className="text-blue-400"
+                                />
+
+                                <span>วันที่ขอ: {formatThaiDate(date)}</span>
+
+                                {renderSortIcon("request_date")}
+                              </button>
                               {isTodayRequest(date) && (
                                 <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
                                   New
@@ -3142,109 +3148,104 @@ export default function HomePage() {
                                   </td>
 
                                   <td className="whitespace-nowrap px-3 py-3">
-  {isProcessStatus || isCompletedStatus || isRejectedStatus ? (
-    <div
-      className={`min-w-[230px] rounded-xl border px-3 py-2.5 ${
-        isRejectedStatus
-          ? "border-red-200 bg-red-50"
-          : isCompletedStatus
-            ? "border-emerald-100 bg-emerald-50"
-            : "border-blue-100 bg-blue-50"
-      }`}
-    >
-      <div className="flex items-start gap-2">
-        <span
-          className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
-            isRejectedStatus
-              ? "bg-red-500"
-              : isCompletedStatus
-                ? "bg-emerald-500"
-                : "bg-blue-500"
-          }`}
-        />
+                                    {isProcessStatus || isCompletedStatus || isRejectedStatus ? (
+                                      <div
+                                        className={`min-w-[230px] rounded-xl border px-3 py-2.5 ${isRejectedStatus
+                                          ? "border-red-200 bg-red-50"
+                                          : isCompletedStatus
+                                            ? "border-emerald-100 bg-emerald-50"
+                                            : "border-blue-100 bg-blue-50"
+                                          }`}
+                                      >
+                                        <div className="flex items-start gap-2">
+                                          <span
+                                            className={`mt-1 h-2 w-2 shrink-0 rounded-full ${isRejectedStatus
+                                              ? "bg-red-500"
+                                              : isCompletedStatus
+                                                ? "bg-emerald-500"
+                                                : "bg-blue-500"
+                                              }`}
+                                          />
 
-        <div className="min-w-0">
-          {!isRejectedStatus && (
-            <p
-              className={`text-[10px] font-black ${
-                isCompletedStatus
-                  ? "text-emerald-700"
-                  : "text-blue-700"
-              }`}
-            >
-              ขั้นตอน{" "}
-              {item.vehicle_no !== undefined &&
-              item.vehicle_no !== undefined
-                ? item.current_step ?? 0
-                : item.latest_process_level ?? 0}
-              /8
-            </p>
-          )}
+                                          <div className="min-w-0">
+                                            {!isRejectedStatus && (
+                                              <p
+                                                className={`text-[10px] font-black ${isCompletedStatus
+                                                  ? "text-emerald-700"
+                                                  : "text-blue-700"
+                                                  }`}
+                                              >
+                                                ขั้นตอน{" "}
+                                                {item.vehicle_no !== undefined &&
+                                                  item.vehicle_no !== undefined
+                                                  ? item.current_step ?? 0
+                                                  : item.latest_process_level ?? 0}
+                                                /8
+                                              </p>
+                                            )}
 
-          <p
-            className={`break-words text-[10px] font-black leading-4 ${
-              isRejectedStatus
-                ? "text-red-700"
-                : "mt-0.5 text-slate-700"
-            }`}
-          >
-            {item.vehicle_no !== undefined &&
-            item.vehicle_no !== null
-              ? item.current_process ||
-                (isRejectedStatus
-                  ? "ไม่ผ่านการประเมิน"
-                  : "ยังไม่พบข้อมูลขั้นตอน")
-              : item.latest_process_name ||
-                (isRejectedStatus
-                  ? "ไม่ผ่านการประเมิน"
-                  : "ยังไม่พบข้อมูลขั้นตอน")}
-          </p>
-        </div>
-      </div>
+                                            <p
+                                              className={`break-words text-[10px] font-black leading-4 ${isRejectedStatus
+                                                ? "text-red-700"
+                                                : "mt-0.5 text-slate-700"
+                                                }`}
+                                            >
+                                              {item.vehicle_no !== undefined &&
+                                                item.vehicle_no !== null
+                                                ? item.current_process ||
+                                                (isRejectedStatus
+                                                  ? "ไม่ผ่านการประเมิน"
+                                                  : "ยังไม่พบข้อมูลขั้นตอน")
+                                                : item.latest_process_name ||
+                                                (isRejectedStatus
+                                                  ? "ไม่ผ่านการประเมิน"
+                                                  : "ยังไม่พบข้อมูลขั้นตอน")}
+                                            </p>
+                                          </div>
+                                        </div>
 
-      {item.vehicle_no !== undefined &&
-        item.vehicle_no !== null && (
-          <p
-            className={`mt-1.5 break-words border-t pt-1.5 text-[9px] font-semibold text-slate-400 ${
-              isRejectedStatus
-                ? "border-red-200"
-                : isCompletedStatus
-                  ? "border-emerald-100"
-                  : "border-blue-100"
-            }`}
-          >
-            รถคันที่ {item.vehicle_no} · ทะเบียน:{" "}
-            {item.vehicle_license || "-"}
-          </p>
-        )}
-    </div>
-  ) : (
-    <div className="flex min-w-[135px] items-center gap-2.5">
-      <span
-        className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusVisual.dotClass}`}
-      />
+                                        {item.vehicle_no !== undefined &&
+                                          item.vehicle_no !== null && (
+                                            <p
+                                              className={`mt-1.5 break-words border-t pt-1.5 text-[9px] font-semibold text-slate-400 ${isRejectedStatus
+                                                ? "border-red-200"
+                                                : isCompletedStatus
+                                                  ? "border-emerald-100"
+                                                  : "border-blue-100"
+                                                }`}
+                                            >
+                                              รถคันที่ {item.vehicle_no} · ทะเบียน:{" "}
+                                              {item.vehicle_license || "-"}
+                                            </p>
+                                          )}
+                                      </div>
+                                    ) : (
+                                      <div className="flex min-w-[135px] items-center gap-2.5">
+                                        <span
+                                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusVisual.dotClass}`}
+                                        />
 
-      <div className="min-w-0">
-        <p
-          className={`whitespace-nowrap text-[11px] font-black ${statusVisual.textClass}`}
-        >
-          {statusText}
-        </p>
+                                        <div className="min-w-0">
+                                          <p
+                                            className={`whitespace-nowrap text-[11px] font-black ${statusVisual.textClass}`}
+                                          >
+                                            {statusText}
+                                          </p>
 
-        <p className="mt-0.5 whitespace-nowrap text-[9px] font-semibold text-slate-400">
-          {statusVisual.hint}
-        </p>
-      </div>
-    </div>
-  )}
-</td>
+                                          <p className="mt-0.5 whitespace-nowrap text-[9px] font-semibold text-slate-400">
+                                            {statusVisual.hint}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
 
                                   <td className="whitespace-nowrap px-3 py-3 text-right">
                                     <button
                                       type="button"
                                       disabled={isFlowLoading}
                                       onClick={() =>
-                                        void handleToggleRow(item, rowKey, Boolean(isOpen))
+                                        handleToggleRow(item, rowKey, Boolean(isOpen))
                                       }
                                       className={`inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${isOpen
                                         ? "bg-blue-700 text-white shadow-md shadow-blue-700/20 hover:bg-blue-800"

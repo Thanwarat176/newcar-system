@@ -1111,28 +1111,6 @@ export default function TrackFleetPage() {
     });
   }, [groupedByRequestDate]);
 
-  const getLicenseText = (licenseReplace: string[] | string) => {
-    if (Array.isArray(licenseReplace)) {
-      return licenseReplace.length > 0 ? licenseReplace.join(", ") : "-";
-    }
-
-    if (typeof licenseReplace === "string") {
-      try {
-        const parsed = JSON.parse(licenseReplace);
-
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.join(", ");
-        }
-
-        return licenseReplace || "-";
-      } catch {
-        return licenseReplace || "-";
-      }
-    }
-
-    return "-";
-  };
-
   const selectedDcLabel = useMemo(() => {
     if (selectedDcFromSidebar === "CENTER") {
       return "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด";
@@ -2021,4 +1999,26 @@ export default function TrackFleetPage() {
 
     </div>
   );
+}
+
+function getLicenseText(licenseReplace: string[] | string | null | undefined) {
+  if (Array.isArray(licenseReplace)) {
+    return licenseReplace.length > 0 ? licenseReplace.join(", ") : "-";
+  }
+
+  if (typeof licenseReplace === "string") {
+    try {
+      const parsed = JSON.parse(licenseReplace);
+
+      if (Array.isArray(parsed)) {
+        return parsed.length > 0 ? parsed.join(", ") : "-";
+      }
+    } catch {
+      // ใช้ข้อความเดิม
+    }
+
+    return licenseReplace.trim() || "-";
+  }
+
+  return "-";
 }

@@ -54,6 +54,18 @@ interface ExportRequestItem {
     qty?: number | string;
     approved_qty?: number | string | null;
 
+    approved_truck_type?: string;
+    approved_company_short_name?: string;
+    approved_company_id?: string | number | null;
+    approved_company_name?: string;
+
+    truck_type_replace?: string;
+    company_name_replace?: string;
+
+    fbp_remark?: string;
+    fbp_status?: string;
+    fbp_approved_date?: string;
+
     usage_date?: string;
 
     workload?: number | string;
@@ -1531,18 +1543,37 @@ export default function ExportRequestModal({
 
                 "ผู้แจ้งขอ": item.request_by || "",
 
-                "สถานะอนุมัติจาก GM":
-                    getGmApprovalInfo(item).statusText,
+                "ประเภทรถที่อนุมัติ":
+                    item.approved_truck_type || "",
 
-                "วันที่ GM อนุมัติ":
-                    getGmApprovalInfo(item).changedAt
-                        ? formatThaiDate(
-                            getGmApprovalInfo(item).changedAt
-                        )
+                "จำนวนรถที่อนุมัติ":
+                    item.approved_qty ?? "",
+
+                "ชื่อบริษัทขนส่ง (ย่อ)2":
+                    item.approved_company_short_name || "",
+
+                "VENDOR CODE":
+                    item.approved_company_id ?? "",
+
+                "ชื่อบริษัทขนส่ง":
+                    item.approved_company_name || "",
+
+                "ประเภทรถที่ถูกทดแทน":
+                    item.truck_type_replace || "",
+
+                "บริษัทขนส่งที่ถูกทดแทน":
+                    item.company_name_replace || "",
+
+                "หมายเหตุการประเมินกองรถ":
+                    item.fbp_remark || "",
+
+                "สถานะการประเมินกองรถ":
+                    item.fbp_status || "",
+
+                "วันที่ประเมินกองรถ":
+                    item.fbp_approved_date
+                        ? formatThaiDate(item.fbp_approved_date)
                         : "",
-
-                "GM ที่อนุมัติ":
-                    getGmApprovalInfo(item).changedBy || "",
             };
         });
 
@@ -1565,8 +1596,15 @@ export default function ExportRequestModal({
             { wch: 18 },
             { wch: 25 },
             { wch: 22 },
+            { wch: 20 },
+            { wch: 26 },
             { wch: 18 },
+            { wch: 34 },
+            { wch: 24 },
+            { wch: 34 },
+            { wch: 36 },
             { wch: 28 },
+            { wch: 22 },
         ];
 
         const sheetRange = worksheet["!ref"];
@@ -2030,7 +2068,7 @@ export default function ExportRequestModal({
                                     touchAction: "pan-x pan-y",
                                 }}
                             >
-                                <table className="w-full min-w-[1850px] border-collapse text-left">
+                                <table className="w-full min-w-[3400px] border-collapse text-left">
                                     <thead className="sticky top-0 z-10 bg-blue-800 text-[10px] font-black text-white">
                                         <tr>
                                             <th className="px-3 py-3 text-center">
@@ -2038,7 +2076,7 @@ export default function ExportRequestModal({
                                             </th>
 
                                             <th className="w-[82px] whitespace-nowrap px-2 py-3">
-                                                วันที่ขอ
+                                                วันที่สร้างคำขอ
                                             </th>
 
                                             <th className="px-3 py-3">
@@ -2086,7 +2124,7 @@ export default function ExportRequestModal({
                                             </th>
 
                                             <th className="w-[82px] whitespace-nowrap px-2 py-3">
-                                                วันที่ใช้
+                                                วันที่ใช้งาน
                                             </th>
 
                                             <th className="px-3 py-3">
@@ -2094,15 +2132,43 @@ export default function ExportRequestModal({
                                             </th>
 
                                             <th className="px-3 py-3">
-                                                สถานะอนุมัติจาก GM
+                                                ประเภทรถที่อนุมัติ
                                             </th>
 
-                                            <th className="w-[100px] whitespace-nowrap px-2 py-3">
-                                                วันที่ GM
+                                            <th className="px-3 py-3 text-center">
+                                                จำนวนรถที่อนุมัติ
                                             </th>
 
-                                            <th className="min-w-[190px] whitespace-nowrap px-3 py-3">
-                                                GM ที่อนุมัติ
+                                            <th className="px-3 py-3">
+                                                ชื่อบริษัทขนส่ง (ย่อ)2
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                VENDOR CODE
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                ชื่อบริษัทขนส่ง
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                ประเภทรถที่ถูกทดแทน
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                บริษัทขนส่งที่ถูกทดแทน
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                หมายเหตุการประเมินกองรถ
+                                            </th>
+
+                                            <th className="px-3 py-3">
+                                                สถานะการประเมินกองรถ
+                                            </th>
+
+                                            <th className="whitespace-nowrap px-3 py-3">
+                                                วันที่ประเมินกองรถ
                                             </th>
                                         </tr>
                                     </thead>
@@ -2111,7 +2177,7 @@ export default function ExportRequestModal({
                                         {exportRows.length === 0 ? (
                                             <tr>
                                                 <td
-                                                    colSpan={18}
+                                                    colSpan={25}
                                                     className="py-20 text-center"
                                                 >
                                                     <FileSpreadsheet
@@ -2216,24 +2282,45 @@ export default function ExportRequestModal({
                                                         </td>
 
                                                         <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {loadingGmHistory &&
-                                                                !getGmApprovalInfo(item).statusText
-                                                                ? "กำลังโหลด..."
-                                                                : getGmApprovalInfo(item).statusText ||
-                                                                "-"}
+                                                            {item.approved_truck_type || "-"}
                                                         </td>
 
-                                                        <td className="whitespace-nowrap px-2 py-2.5 text-[10px] font-bold text-slate-600">
-                                                            {getGmApprovalInfo(item).changedAt
-                                                                ? formatThaiDate(
-                                                                    getGmApprovalInfo(item).changedAt
-                                                                )
+                                                        <td className="px-3 py-2.5 text-center font-black text-slate-700">
+                                                            {item.approved_qty ?? "-"}
+                                                        </td>
+
+                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.approved_company_short_name || "-"}
+                                                        </td>
+
+                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.approved_company_id ?? "-"}
+                                                        </td>
+
+                                                        <td className="max-w-[300px] px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.approved_company_name || "-"}
+                                                        </td>
+
+                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.truck_type_replace || "-"}
+                                                        </td>
+
+                                                        <td className="max-w-[300px] px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.company_name_replace || "-"}
+                                                        </td>
+
+                                                        <td className="max-w-[320px] px-3 py-2.5 font-medium text-slate-600">
+                                                            {item.fbp_remark || "-"}
+                                                        </td>
+
+                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
+                                                            {item.fbp_status || "-"}
+                                                        </td>
+
+                                                        <td className="whitespace-nowrap px-3 py-2.5 text-[10px] font-bold text-slate-600">
+                                                            {item.fbp_approved_date
+                                                                ? formatThaiDate(item.fbp_approved_date)
                                                                 : "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[230px] px-3 py-2.5 font-bold text-slate-700">
-                                                            {getGmApprovalInfo(item).changedBy ||
-                                                                "-"}
                                                         </td>
                                                     </tr>
                                                 )

@@ -6,6 +6,9 @@ import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
   CalendarDays,
   Eraser,
   Eye,
@@ -16,8 +19,10 @@ import {
   Truck,
   Warehouse,
   X,
+  Download,
 } from "lucide-react";
 import FleetModalDetail from "./components/FleetModalDetail";
+import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
 
 interface SelectedDC {
   DC_CODE?: string;
@@ -26,6 +31,12 @@ interface SelectedDC {
   dc_code?: string;
   dc_name?: string;
   dc_type?: string;
+}
+
+interface RequestDetailItem {
+  id?: string | number;
+  request_id?: string | number;
+  status?: string | null;
 }
 
 interface RequestItem {
@@ -38,13 +49,17 @@ interface RequestItem {
   fleet_type: string;
   fleet_truck_type: string;
   license_replace: string[] | string;
+
   qty: number;
+  approved_qty?: number | string | null;
+
   usage_date: string;
   workload: number;
   truckturn: number;
   status: string;
   request_by: string;
   remark: string;
+  details?: RequestDetailItem[];
 }
 
 interface UserInfo {
@@ -55,11 +70,14 @@ interface UserInfo {
 }
 
 type StatusFilter = "all" | "fbp_pending" | "reject_by_fbp" | "approved";
+type SortKey = "request_date" | "running_doc" | "usage_date";
+type SortDirection = "asc" | "desc";
 
-export default function HomePage() {
+export default function WaitingFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
+  const [openExportModal, setOpenExportModal] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -82,6 +100,14 @@ export default function HomePage() {
       key: "selection",
     },
   ]);
+
+  const [sortConfig, setSortConfig] = useState<{
+    key: SortKey;
+    direction: SortDirection;
+  }>({
+    key: "request_date",
+    direction: "desc",
+  });
 
   const [hasRequestDateRange, setHasRequestDateRange] = useState(false);
   const [showRequestDatePicker, setShowRequestDatePicker] = useState(false);
@@ -241,6 +267,34 @@ export default function HomePage() {
 
   const isCenterUser =
     userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
+
+  const handleSort = (key: SortKey) => {
+    setSortConfig((current) => {
+      if (current.key === key) {
+        return {
+          key,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
+      }
+
+      return {
+        key,
+        direction: "asc",
+      };
+    });
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortConfig.key !== key) {
+      return <ArrowUpDown size={13} className="opacity-50" />;
+    }
+
+    return sortConfig.direction === "asc" ? (
+      <ChevronUp size={14} />
+    ) : (
+      <ChevronDown size={14} />
+    );
+  };
 
   const sidebarFilteredRequests = useMemo(() => {
     // CENTER เห็นข้อมูลทั้งหมด
@@ -402,15 +456,75 @@ export default function HomePage() {
     return value;
   };
 
-  const isAllowedCardStatus = (status?: string) => {
-    const value = normalizeStatus(status);
+  const isReplacementRequest = (item: RequestItem) =>
+    String(item.fleet_type || "").trim() === "รถทดแทน";
+
+  const getDetailStatus = (detail: RequestDetailItem) =>
+    String(detail.status || "").trim().toLowerCase();
+
+  const getQtySummary = (item: RequestItem) => {
+    const details =
+      isReplacementRequest(item) && Array.isArray(item.details)
+        ? item.details
+        : [];
+
+    if (details.length > 0) {
+      return {
+        requestedQty: details.length,
+        approvedQty: details.filter(
+          (detail) => getDetailStatus(detail) === "progress"
+        ).length,
+        notApprovedQty: details.filter(
+          (detail) => getDetailStatus(detail) === "reject_by_fbp"
+        ).length,
+        pendingQty: details.filter(
+          (detail) => getDetailStatus(detail) === "fbp_pending"
+        ).length,
+      };
+    }
+
+    const requestedQty = Math.max(Number(item.qty || 0), 0);
+    const approvedQty = Math.max(Number(item.approved_qty || 0), 0);
+
+    return {
+      requestedQty,
+      approvedQty,
+      notApprovedQty: Math.max(requestedQty - approvedQty, 0),
+      pendingQty:
+        normalizeStatus(item.status) === "fbp_pending" ? requestedQty : 0,
+    };
+  };
+
+  const isFbpPendingItem = (item: RequestItem) => {
+    if (
+      isReplacementRequest(item) &&
+      Array.isArray(item.details) &&
+      item.details.length > 0
+    ) {
+      return item.details.some(
+        (detail) => getDetailStatus(detail) === "fbp_pending"
+      );
+    }
+
+    return normalizeStatus(item.status) === "fbp_pending";
+  };
+
+  const isFbpRejectedItem = (item: RequestItem) => {
+    const normalizedStatus = normalizeStatus(item.status);
+    const { notApprovedQty } = getQtySummary(item);
 
     return (
-      value === "fbp_pending" ||
-      value === "reject_by_fbp" ||
-      value === "approved"
+      normalizedStatus === "reject_by_fbp" ||
+      (
+        isReplacementRequest(item) &&
+        normalizedStatus === "approved" &&
+        notApprovedQty > 0
+      )
     );
   };
+
+  const isApprovedItem = (item: RequestItem) =>
+    normalizeStatus(item.status) === "approved";
 
   const formatStatusText = (status?: string) => {
     const value = normalizeStatus(status);
@@ -487,25 +601,29 @@ export default function HomePage() {
 
   const dashboardSummary = useMemo(() => {
     const fbp_pending = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "fbp_pending"
+      (item) => isFbpPendingItem(item)
     ).length;
 
     const rejectedByCenter = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "reject_by_fbp"
+      (item) => isFbpRejectedItem(item)
     ).length;
 
     const approved = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "approved"
+      (item) => isApprovedItem(item)
     ).length;
 
     return {
-      total: fbp_pending + rejectedByCenter + approved,
+      total: sidebarFilteredRequests.filter(
+        (item) =>
+          isFbpPendingItem(item) ||
+          isFbpRejectedItem(item) ||
+          isApprovedItem(item)
+      ).length,
       fbp_pending,
       rejectedByCenter,
       approved,
     };
   }, [sidebarFilteredRequests]);
-
 
   const dcTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>();
@@ -542,26 +660,27 @@ export default function HomePage() {
 
     // ทั้งหมด = fbp_pending + reject_by_fbp เท่านั้น
     if (statusFilter === "all") {
-      list = list.filter((item) => isAllowedCardStatus(item.status));
+      list = list.filter(
+        (item) =>
+          isFbpPendingItem(item) ||
+          isFbpRejectedItem(item) ||
+          isApprovedItem(item)
+      );
     }
 
     // รอทีม FBP ประเมินข้อมูล = fbp_pending
     if (statusFilter === "fbp_pending") {
-      list = list.filter((item) => normalizeStatus(item.status) === "fbp_pending");
+      list = list.filter((item) => isFbpPendingItem(item));
     }
 
     // ทีม FBP ไม่อนุมัติ = reject_by_fbp
     if (statusFilter === "reject_by_fbp") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === "reject_by_fbp"
-      );
+      list = list.filter((item) => isFbpRejectedItem(item));
     }
 
     // อนุมัติแล้ว = โชว์ 0 รายการ
     if (statusFilter === "approved") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === "approved"
-      );
+      list = list.filter((item) => isApprovedItem(item));
     }
 
     if (dcTypeFilter !== "all") {
@@ -582,21 +701,33 @@ export default function HomePage() {
 
     if (keyword) {
       list = list.filter((item) => {
-        const licenseText = getLicenseText(item.license_replace);
+        const licenseText = getLicenseText(item?.license_replace);
 
-        return [
-          item.running_doc,
-          item.dc_type,
-          item.dc_code,
-          item.fleet_type,
-          item.fleet_truck_type,
-          item.request_by,
-          item.remark,
+        const searchableText = [
+          item?.running_doc,
+          item?.dc_type,
+          item?.dc_code,
+          item?.fleet_type,
+          item?.fleet_truck_type,
+          item?.request_by,
+          item?.remark,
           licenseText,
         ]
+          .map((value) => {
+            if (Array.isArray(value)) {
+              return value.join(" ");
+            }
+
+            if (typeof value === "object" && value !== null) {
+              return JSON.stringify(value);
+            }
+
+            return String(value ?? "");
+          })
           .join(" ")
-          .toLowerCase()
-          .includes(keyword);
+          .toLowerCase();
+
+        return searchableText.includes(keyword);
       });
     }
 
@@ -649,50 +780,94 @@ export default function HomePage() {
     selectedDcFromSidebar,
   ]);
 
-  const groupedByRequestDate = useMemo(() => {
-    return filteredRequests.reduce<Record<string, RequestItem[]>>(
-      (groups, item) => {
-        const dateKey = normalizeDateKey(item.request_date || item.date);
+  const sortedRequests = useMemo(() => {
+    return [...filteredRequests].sort((a, b) => {
+      let comparison = 0;
 
-        if (!groups[dateKey]) groups[dateKey] = [];
+      if (sortConfig.key === "running_doc") {
+        comparison = String(a.running_doc || "").localeCompare(
+          String(b.running_doc || ""),
+          "th",
+          {
+            numeric: true,
+            sensitivity: "base",
+          },
+        );
+      }
+
+      if (sortConfig.key === "request_date") {
+        const requestDateA = getRequestDateKey(a);
+        const requestDateB = getRequestDateKey(b);
+
+        const dateA =
+          requestDateA === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateA).getTime();
+
+        const dateB =
+          requestDateB === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateB).getTime();
+
+        comparison = dateA - dateB;
+      }
+
+      if (sortConfig.key === "usage_date") {
+        const dateA =
+          normalizeDateKey(a.usage_date) === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(normalizeDateKey(a.usage_date)).getTime();
+
+        const dateB =
+          normalizeDateKey(b.usage_date) === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(normalizeDateKey(b.usage_date)).getTime();
+
+        comparison = dateA - dateB;
+      }
+
+      return sortConfig.direction === "asc"
+        ? comparison
+        : -comparison;
+    });
+  }, [filteredRequests, sortConfig]);
+
+  const groupedByRequestDate = useMemo(() => {
+    return sortedRequests.reduce<Record<string, RequestItem[]>>(
+      (groups, item) => {
+        const dateKey = getRequestDateKey(item);
+
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+
         groups[dateKey].push(item);
 
         return groups;
       },
-      {}
+      {},
     );
-  }, [filteredRequests]);
+  }, [sortedRequests]);
 
   const sortedDates = useMemo(() => {
-    return Object.keys(groupedByRequestDate).sort((a, b) => {
+    const dates = Object.keys(groupedByRequestDate);
+
+    if (sortConfig.key !== "request_date") {
+      return dates;
+    }
+
+    return dates.sort((a, b) => {
       if (a === "ไม่ระบุวันที่") return 1;
       if (b === "ไม่ระบุวันที่") return -1;
 
-      return new Date(b).getTime() - new Date(a).getTime();
+      const comparison =
+        new Date(a).getTime() - new Date(b).getTime();
+
+      return sortConfig.direction === "asc"
+        ? comparison
+        : -comparison;
     });
-  }, [groupedByRequestDate]);
-
-  const getLicenseText = (licenseReplace: string[] | string) => {
-    if (Array.isArray(licenseReplace)) {
-      return licenseReplace.length > 0 ? licenseReplace.join(", ") : "-";
-    }
-
-    if (typeof licenseReplace === "string") {
-      try {
-        const parsed = JSON.parse(licenseReplace);
-
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.join(", ");
-        }
-
-        return licenseReplace || "-";
-      } catch {
-        return licenseReplace || "-";
-      }
-    }
-
-    return "-";
-  };
+  }, [groupedByRequestDate, sortConfig]);
 
   const selectedDcLabel = useMemo(() => {
     if (selectedDcFromSidebar === "CENTER") {
@@ -802,15 +977,26 @@ export default function HomePage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={fetchRequests}
-            disabled={loading}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <span className={loading ? "animate-spin" : ""}>↻</span>
-            {loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenExportModal(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-900 via-accent-900 to-green-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+            >
+              <Download size={16} />
+              ดึงรายงาน
+            </button>
+
+            <button
+              type="button"
+              onClick={fetchRequests}
+              disabled={loading}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className={loading ? "animate-spin" : ""}>↻</span>
+              {loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
+            </button>
+          </div>
         </div>
 
         {/* ── ERROR ── */}
@@ -1280,18 +1466,38 @@ export default function HomePage() {
                       "ผู้ขอ",
                       "สถานะ",
                       "รายละเอียด",
-                    ].map((col, index) => (
-                      <th
-                        key={col}
-                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${index === 0
-                          ? "sticky left-0 z-30 w-[52px] text-center"
-                          : ""
-                          } ${index === 6 ? "text-center" : ""} ${index === 10 ? "text-right" : ""
-                          }`}
-                      >
-                        {col}
-                      </th>
-                    ))}
+                    ].map((col, index) => {
+                      const sortKey: SortKey | null =
+                        col === "เลขที่เอกสาร"
+                          ? "running_doc"
+                          : col === "วันที่ใช้งาน"
+                            ? "usage_date"
+                            : null;
+
+                      return (
+                        <th
+                          key={col}
+                          onClick={() => {
+                            if (sortKey) {
+                              handleSort(sortKey);
+                            }
+                          }}
+                          className={`whitespace-nowrap bg-transparent px-3 py-3 ${index === 0
+                            ? "sticky left-0 z-30 w-[52px] text-center"
+                            : ""
+                            } ${index === 6 ? "text-center" : ""} ${index === 10 ? "text-right" : ""
+                            } ${sortKey
+                              ? "cursor-pointer select-none transition hover:bg-blue-700"
+                              : ""
+                            }`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            {col}
+                            {sortKey && renderSortIcon(sortKey)}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
 
@@ -1335,12 +1541,12 @@ export default function HomePage() {
                         </tr>
 
                         {groupedByRequestDate[date].map((item, index) => {
-                          const status = item.status || "fbp_pending";
+                          const isPending = isFbpPendingItem(item);
+                          const status = isPending
+                            ? "fbp_pending"
+                            : item.status || "fbp_pending";
                           const statusText = formatStatusText(status);
                           const statusVisual = getStatusVisual(status);
-
-                          const isPending =
-                            normalizeStatus(item.status) === "fbp_pending";
                           const licenseList = getLicenseList(item.license_replace);
                           const visibleLicenses = licenseList.slice(0, 2);
                           const hiddenLicenseCount = Math.max(
@@ -1417,10 +1623,45 @@ export default function HomePage() {
                                 )}
                               </td>
 
-                              <td className="px-3 py-3 text-center">
-                                <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
-                                  {formatNumber(item.qty)}
-                                </span>
+                              <td className="px-3 py-3">
+                                {statusFilter === "reject_by_fbp" ||
+                                (statusFilter === "approved" &&
+                                  getQtySummary(item).notApprovedQty > 0) ? (
+                                  <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                    <div className="px-2 py-2 text-center">
+                                      <p className="text-[9px] font-bold text-slate-400">
+                                        จำนวนขอ
+                                      </p>
+                                      <p className="mt-0.5 text-xs font-black text-slate-700">
+                                        {formatNumber(getQtySummary(item).requestedQty)}
+                                      </p>
+                                    </div>
+
+                                    <div className="border-l border-slate-100 bg-emerald-50 px-2 py-2 text-center">
+                                      <p className="text-[9px] font-bold text-emerald-500">
+                                        อนุมัติ
+                                      </p>
+                                      <p className="mt-0.5 text-xs font-black text-emerald-700">
+                                        {formatNumber(getQtySummary(item).approvedQty)}
+                                      </p>
+                                    </div>
+
+                                    <div className="border-l border-slate-100 bg-rose-50 px-2 py-2 text-center">
+                                      <p className="text-[9px] font-bold text-rose-500">
+                                        ไม่อนุมัติ
+                                      </p>
+                                      <p className="mt-0.5 text-xs font-black text-rose-700">
+                                        {formatNumber(getQtySummary(item).notApprovedQty)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-center">
+                                    <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
+                                      {formatNumber(item.qty)}
+                                    </span>
+                                  </div>
+                                )}
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-600">
@@ -1484,6 +1725,13 @@ export default function HomePage() {
           </div>
         </div>
 
+        <ExportWaitingFleetModal
+          open={openExportModal}
+          onClose={() => setOpenExportModal(false)}
+          requests={sidebarFilteredRequests}
+          dcLabel={selectedDcLabel}
+        />
+
         {openDetailModal && selectedRequest && (
           <FleetModalDetail
             open={openDetailModal}
@@ -1496,4 +1744,26 @@ export default function HomePage() {
       </main>
     </div>
   );
+}
+
+function getLicenseText(
+  licenseReplace?: string[] | string | null
+): string {
+  if (Array.isArray(licenseReplace)) {
+    return licenseReplace.join(", ");
+  }
+
+  if (typeof licenseReplace === "string") {
+    try {
+      const parsed = JSON.parse(licenseReplace);
+
+      return Array.isArray(parsed)
+        ? parsed.join(", ")
+        : licenseReplace;
+    } catch {
+      return licenseReplace;
+    }
+  }
+
+  return "";
 }

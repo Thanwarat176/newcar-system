@@ -11,6 +11,7 @@ import CheckDC from "../../component/CheckDC";
 interface RequestDetailItem {
     id?: string | number;
     request_id?: string | number;
+    status?: string | null;
 
     license?: string;
     province?: string;
@@ -312,6 +313,7 @@ export default function FleetModalDetail({
     onSuccess,
 }: GMModalDetailProps) {
     const [remark, setRemark] = useState("");
+    const [rejectReason, setRejectReason] = useState("");
     const [saving, setSaving] = useState(false);
     const [decisionCompleted, setDecisionCompleted] = useState(false);
     const [message, setMessage] = useState<{
@@ -614,6 +616,7 @@ export default function FleetModalDetail({
         const initialQty = Number(data.qty || 0);
 
         setRemark("");
+        setRejectReason("");
         setMessage(null);
         setConfirmDecision(null);
         setDecisionCompleted(false);
@@ -2062,14 +2065,6 @@ export default function FleetModalDetail({
             return;
         }
 
-        if (totalApprovedQty > requestedQty) {
-            setMessage({
-                type: "error",
-                text: `จำนวนรถรวมต้องไม่เกิน ${requestedQty} คัน`,
-            });
-            return;
-        }
-
         try {
             setSaving(true);
             setMessage(null);
@@ -2087,8 +2082,15 @@ export default function FleetModalDetail({
 
                 approved_qty: totalApprovedQty,
                 not_approved_qty: draftNotApprovedQty,
+
+                // หมายเหตุของส่วนที่อนุมัติ
+                remark: remark.trim(),
+
+                // เหตุผลของส่วนที่ไม่อนุมัติ
                 reject_reason:
-                    draftNotApprovedQty > 0 ? remark.trim() : "",
+                    draftNotApprovedQty > 0
+                        ? rejectReason.trim()
+                        : "",
 
                 suppliers: approvedSuppliers.map((item) => ({
                     company_id: item.companyId,
@@ -2145,6 +2147,14 @@ export default function FleetModalDetail({
             }
 
             if (draftNotApprovedQty > 0 && !remark.trim()) {
+                setMessage({
+                    type: "error",
+                    text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`,
+                });
+                return;
+            }
+
+            if (draftNotApprovedQty > 0 && !rejectReason.trim()) {
                 setMessage({
                     type: "error",
                     text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`,
@@ -2529,29 +2539,30 @@ export default function FleetModalDetail({
                         return;
                     }
 
-                    /*
-                     * ข้อมูล Replace จาก API คือรถที่เลือกไว้
-                     * แต่ยังไม่ถือว่า FBP อนุมัติแล้ว
-                     */
+                    const savedStatus = String(item.status || "")
+                        .trim()
+                        .toLowerCase();
+
+                    const alreadyApproved =
+                        savedStatus === "progress";
+
+                    const alreadyRejected =
+                        savedStatus === "reject_by_fbp";
+
                     nextStates[rowKey] = {
-                        decision: "pending",
+                        decision: alreadyApproved
+                            ? "approved"
+                            : alreadyRejected
+                                ? "rejected"
+                                : "pending",
 
-                        newLicense:
-                            savedLicense,
+                        newLicense: savedLicense,
+                        newProvince: savedProvince,
+                        companyId: savedCompanyId,
+                        companyName: savedCompanyName,
+                        truckType: savedTruckType,
 
-                        newProvince:
-                            savedProvince,
-
-                        companyId:
-                            savedCompanyId,
-
-                        companyName:
-                            savedCompanyName,
-
-                        truckType:
-                            savedTruckType,
-
-                        approvedSaved: false,
+                        approvedSaved: alreadyApproved,
                         error: "",
                     };
                 }
@@ -2791,6 +2802,23 @@ export default function FleetModalDetail({
         setMessage(null);
     };
 
+    const getDetailStatus = (
+        item: RequestDetailItem
+    ) => {
+        return String(item.status || "")
+            .trim()
+            .toLowerCase();
+    };
+    
+    const isDetailFinalized = (
+        item: RequestDetailItem
+    ) => {
+        return [
+            "progress",
+            "reject_by_fbp",
+        ].includes(getDetailStatus(item));
+    };
+
     const approveSingleReplacementVehicle = async (
         item: RequestDetailItem,
         index: number
@@ -2798,9 +2826,23 @@ export default function FleetModalDetail({
         const rowKey = getReplacementRowKey(item, index);
         const rowState = singleVehicleStates[rowKey];
 
+        if (isDetailFinalized(item)) {
+            updateSingleVehicleState(rowKey, {
+                error: "รถคันนี้บันทึกผลแล้ว ไม่สามารถดำเนินการซ้ำได้",
+            });
+            return;
+        }
+
         if (!canMakeDecision) {
             updateSingleVehicleState(rowKey, {
-                error: "รายการนี้ดำเนินการแล้ว ไม่สามารถบันทึกซ้ำได้",
+                error: "รายการนี้ไม่สามารถดำเนินการได้",
+            });
+            return;
+        }
+
+        if (!data.id) {
+            updateSingleVehicleState(rowKey, {
+                error: "ไม่พบ Request ID",
             });
             return;
         }
@@ -2811,21 +2853,28 @@ export default function FleetModalDetail({
             });
             return;
         }
-        
+
+        if (!rowState.newLicense.trim()) {
+            updateSingleVehicleState(rowKey, {
+                error: "กรุณากรอกทะเบียนรถ",
+            });
+            return;
+        }
+
         if (!rowState.newProvince.trim()) {
             updateSingleVehicleState(rowKey, {
                 error: "กรุณาเลือกจังหวัด",
             });
             return;
         }
-        
+
         if (!rowState.companyName.trim()) {
             updateSingleVehicleState(rowKey, {
                 error: "กรุณาเลือกบริษัทผู้ให้บริการ",
             });
             return;
         }
-        
+
         if (!rowState.truckType.trim()) {
             updateSingleVehicleState(rowKey, {
                 error: "กรุณาเลือกประเภทรถ",
@@ -2833,47 +2882,27 @@ export default function FleetModalDetail({
             return;
         }
 
-        const selectedNewVehicle: ReplacementVehicleOption | null =
-            replacementVehicleOptions.find(
-                (vehicle) =>
-                    normalizeText(vehicle.license) ===
-                    normalizeText(rowState.newLicense) &&
-                    normalizeText(vehicle.province) ===
-                    normalizeText(rowState.newProvince)
-            ) ??
-            (rowState.newLicense
-                ? {
-                    license: rowState.newLicense,
-                    province: rowState.newProvince,
-                    companyId: rowState.companyId,
-                    companyName: rowState.companyName,
-                    truckType: rowState.truckType,
-                }
-                : null);
+        const originalLicense = String(
+            item.license || ""
+        ).trim();
 
-        if (!selectedNewVehicle) {
-            updateSingleVehicleState(rowKey, {
-                error: "ไม่พบข้อมูลรถที่เลือก กรุณาเลือกจากรายการ",
-            });
-            return;
-        }
-
-        const originalLicense = String(item.license || "").trim();
-        const originalProvince = String(item.province || "").trim();
+        const originalProvince = String(
+            item.province || ""
+        ).trim();
 
         if (!originalLicense) {
             updateSingleVehicleState(rowKey, {
-                error: "ไม่พบทะเบียนรถเดิมของรายการนี้",
+                error: "ไม่พบทะเบียนรถเดิม",
             });
             return;
         }
 
         if (
             normalizeText(originalLicense) ===
-            normalizeText(selectedNewVehicle.license)
+            normalizeText(rowState.newLicense)
         ) {
             updateSingleVehicleState(rowKey, {
-                error: "รถที่จะนำมาทดแทนต้องไม่ใช่ทะเบียนเดียวกับรถเดิม",
+                error: "ทะเบียนรถใหม่ต้องไม่ซ้ำกับรถเดิม",
             });
             return;
         }
@@ -2884,13 +2913,15 @@ export default function FleetModalDetail({
             return (
                 otherRowKey !== rowKey &&
                 normalizeText(otherState.newLicense) ===
-                normalizeText(selectedNewVehicle.license)
+                normalizeText(rowState.newLicense) &&
+                normalizeText(otherState.newProvince) ===
+                normalizeText(rowState.newProvince)
             );
         });
 
         if (selectedByOtherRow) {
             updateSingleVehicleState(rowKey, {
-                error: "ทะเบียนนี้ถูกเลือกเป็นรถทดแทนให้รถคันอื่นแล้ว",
+                error: "ทะเบียนนี้ถูกเลือกให้รถคันอื่นแล้ว",
             });
             return;
         }
@@ -2906,25 +2937,37 @@ export default function FleetModalDetail({
 
         const payload = {
             action: "single_vehicle",
+
             request_id: Number(data.id),
+            detail_id: Number(item.id),
+
             orig_license: originalLicense,
             orig_province: originalProvince,
-        
+
             new_license: rowState.newLicense.trim(),
             new_province: rowState.newProvince.trim(),
+
             company_id: rowState.companyId.trim(),
             company_name: rowState.companyName.trim(),
+
             truck_type: rowState.truckType.trim(),
-        
+
+            status: "progress",
             approved_by: approvedBy,
         };
 
         try {
             setSavingSingleVehicleKey(rowKey);
             setMessage(null);
-            updateSingleVehicleState(rowKey, { error: "" });
 
-            console.log("SINGLE VEHICLE PAYLOAD:", payload);
+            updateSingleVehicleState(rowKey, {
+                error: "",
+            });
+
+            console.log(
+                "SINGLE VEHICLE PAYLOAD:",
+                payload
+            );
 
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/request_save.php",
@@ -2939,6 +2982,7 @@ export default function FleetModalDetail({
             );
 
             const responseText = await response.text();
+
             let result: any = null;
 
             if (responseText.trim()) {
@@ -2957,94 +3001,123 @@ export default function FleetModalDetail({
                 result?.status === "error"
             ) {
                 throw new Error(
-                    result?.message || "บันทึกรถทดแทนไม่สำเร็จ"
+                    result?.message ||
+                    "บันทึกรถทดแทนไม่สำเร็จ"
                 );
             }
 
-            /*
- * ขั้นที่ 1 บันทึกผลอนุมัติรถคันนี้สำเร็จแล้ว
- */
+            // ล็อกคันที่บันทึกแล้วทันที
             updateSingleVehicleState(rowKey, {
                 decision: "approved",
 
-                newLicense:
-                    selectedNewVehicle.license,
+                newLicense: rowState.newLicense.trim(),
+                newProvince: rowState.newProvince.trim(),
 
-                newProvince:
-                    selectedNewVehicle.province,
+                companyId: rowState.companyId.trim(),
+                companyName: rowState.companyName.trim(),
 
-                companyId:
-                    selectedNewVehicle.companyId,
-
-                companyName:
-                    selectedNewVehicle.companyName,
-
-                truckType:
-                    selectedNewVehicle.truckType,
+                truckType: rowState.truckType.trim(),
 
                 approvedSaved: true,
                 error: "",
             });
 
             /*
-             * ขั้นที่ 2 เปลี่ยนสถานะคำขอเป็น progress
+             * ตรวจว่ารถทุกคันอนุมัติครบหรือยัง
              */
-            try {
+            const allDetailsDecided =
+                replacementTruckRows.every(
+                    (detail, detailIndex) => {
+                        const detailRowKey =
+                            getReplacementRowKey(
+                                detail,
+                                detailIndex
+                            );
+
+                        // คันที่เพิ่งบันทึก
+                        if (detailRowKey === rowKey) {
+                            return true;
+                        }
+
+                        const detailState =
+                            singleVehicleStates[
+                            detailRowKey
+                            ];
+
+                        const savedStatus = String(
+                            detail.status || ""
+                        )
+                            .trim()
+                            .toLowerCase();
+
+                        return (
+                            ["progress", "reject_by_fbp"].includes(savedStatus) ||
+                            detailState?.approvedSaved === true ||
+                            detailState?.decision === "rejected"
+                        );
+                    }
+                );
+
+            /*
+             * เปลี่ยน status หลักเมื่อครบทุกคันเท่านั้น
+             */
+            if (allDetailsDecided) {
                 await updateReplacementRequestStatus(
                     approvedBy
                 );
-            } catch (statusError: unknown) {
-                console.error(
-                    "UPDATE REQUEST STATUS ERROR:",
-                    statusError
-                );
-
-                const statusErrorMessage =
-                    statusError instanceof Error
-                        ? statusError.message
-                        : "อัปเดตสถานะคำขอไม่สำเร็จ";
-
-                /*
-                 * ไม่ย้อนผลอนุมัติรถกลับ
-                 * เพราะ request_save.php บันทึกสำเร็จแล้ว
-                 */
-                updateSingleVehicleState(rowKey, {
-                    decision: "approved",
-                    approvedSaved: true,
-
-                    error:
-                        `อนุมัติรถสำเร็จแล้ว แต่${statusErrorMessage}`,
-                });
 
                 setMessage({
-                    type: "error",
-
-                    text:
-                        `อนุมัติรถ ${originalLicense} สำเร็จแล้ว ` +
-                        `แต่ไม่สามารถเปลี่ยนสถานะคำขอเป็นกำลังดำเนินการได้`,
+                    type: "success",
+                    text: "อนุมัติรถครบทุกคัน และเปลี่ยนสถานะเป็นกำลังดำเนินการแล้ว",
                 });
+            } else {
+                const approvedCount =
+                    replacementTruckRows.filter(
+                        (detail, detailIndex) => {
+                            const detailRowKey =
+                                getReplacementRowKey(
+                                    detail,
+                                    detailIndex
+                                );
 
-                await Promise.resolve(
-                    onSuccess()
-                );
+                            if (
+                                detailRowKey === rowKey
+                            ) {
+                                return true;
+                            }
 
-                return;
+                            const detailState =
+                                singleVehicleStates[
+                                detailRowKey
+                                ];
+
+                            return (
+                                String(
+                                    detail.status || ""
+                                )
+                                    .trim()
+                                    .toLowerCase() ===
+                                "progress" ||
+                                detailState?.approvedSaved ===
+                                true
+                            );
+                        }
+                    ).length;
+
+                setMessage({
+                    type: "success",
+                    text:
+                        `บันทึกรถ ${originalLicense} สำเร็จ ` +
+                        `(${approvedCount}/${replacementTruckRows.length} คัน)`,
+                });
             }
 
-            setMessage({
-                type: "success",
-
-                text:
-                    `อนุมัติรถ ${originalLicense} ` +
-                    `เปลี่ยนเป็น ${selectedNewVehicle.license} ` +
-                    `และอัปเดตสถานะเป็นกำลังดำเนินการเรียบร้อยแล้ว`,
-            });
-
-            await Promise.resolve(
-                onSuccess()
-            );
+            await Promise.resolve(onSuccess());
         } catch (error: unknown) {
-            console.error("APPROVE SINGLE VEHICLE ERROR:", error);
+            console.error(
+                "APPROVE SINGLE VEHICLE ERROR:",
+                error
+            );
 
             updateSingleVehicleState(rowKey, {
                 decision: "pending",
@@ -3052,7 +3125,7 @@ export default function FleetModalDetail({
                 error:
                     error instanceof Error
                         ? error.message
-                        : "เกิดข้อผิดพลาดในการบันทึกรถทดแทน",
+                        : "เกิดข้อผิดพลาดในการบันทึกรถ",
             });
         } finally {
             setSavingSingleVehicleKey(null);
@@ -3067,6 +3140,13 @@ export default function FleetModalDetail({
             item,
             index
         );
+
+        if (isDetailFinalized(item)) {
+            updateSingleVehicleState(rowKey, {
+                error: "รถคันนี้บันทึกผลแล้ว ไม่สามารถดำเนินการซ้ำได้",
+            });
+            return;
+        }
 
         if (!canMakeDecision) {
             updateSingleVehicleState(rowKey, {
@@ -3123,6 +3203,7 @@ export default function FleetModalDetail({
             action: "single_vehicle",
 
             request_id: Number(data.id),
+            detail_id: Number(item.id),
 
             orig_license: originalLicense,
             orig_province: originalProvince,
@@ -3135,6 +3216,7 @@ export default function FleetModalDetail({
             company_name: "",
 
             truck_type: originalTruckType,
+            status: "reject_by_fbp",
 
             approved_by: approvedBy,
         };
@@ -3202,6 +3284,31 @@ export default function FleetModalDetail({
                 approvedSaved: false,
                 error: "",
             });
+
+            const allDetailsDecided =
+                replacementTruckRows.every(
+                    (detail, detailIndex) => {
+                        const detailRowKey =
+                            getReplacementRowKey(detail, detailIndex);
+
+                        if (detailRowKey === rowKey) return true;
+
+                        const detailState =
+                            singleVehicleStates[detailRowKey];
+
+                        return (
+                            ["progress", "reject_by_fbp"].includes(
+                                getDetailStatus(detail)
+                            ) ||
+                            detailState?.approvedSaved === true ||
+                            detailState?.decision === "rejected"
+                        );
+                    }
+                );
+
+            if (allDetailsDecided) {
+                await updateReplacementRequestStatus(approvedBy);
+            }
 
             setMessage({
                 type: "success",
@@ -3700,11 +3807,16 @@ export default function FleetModalDetail({
                                                 ];
 
                                                 const isApproved =
-                                                    rowState.approvedSaved;
+                                                    rowState.approvedSaved ||
+                                                    getDetailStatus(item) === "progress";
 
                                                 const isRejected =
                                                     rowState.decision ===
-                                                    "rejected";
+                                                    "rejected" ||
+                                                    getDetailStatus(item) === "reject_by_fbp";
+
+                                                const isFinalized =
+                                                    isApproved || isRejected;
 
                                                 return (
                                                     <article
@@ -3891,7 +4003,7 @@ export default function FleetModalDetail({
                                                                                         rowState.newLicense
                                                                                     }
                                                                                     disabled={
-                                                                                        isApproved ||
+                                                                                        isFinalized ||
                                                                                         !canMakeDecision ||
                                                                                         isRowSaving
                                                                                     }
@@ -3930,7 +4042,7 @@ export default function FleetModalDetail({
                                                                                             rowState.newProvince
                                                                                         }
                                                                                         disabled={
-                                                                                            isApproved ||
+                                                                                            isFinalized ||
                                                                                             !canMakeDecision ||
                                                                                             isRowSaving
                                                                                         }
@@ -4003,7 +4115,7 @@ export default function FleetModalDetail({
                                                                                     currentCompanyKey
                                                                                 }
                                                                                 disabled={
-                                                                                    isApproved ||
+                                                                                    isFinalized ||
                                                                                     !canMakeDecision ||
                                                                                     isRowSaving ||
                                                                                     loadingSuppliers
@@ -4059,7 +4171,7 @@ export default function FleetModalDetail({
                                                                             <select
                                                                                 value={rowState.truckType}
                                                                                 disabled={
-                                                                                    isApproved ||
+                                                                                    isFinalized ||
                                                                                     !canMakeDecision ||
                                                                                     isRowSaving ||
                                                                                     loadingTrucks
@@ -4129,41 +4241,41 @@ export default function FleetModalDetail({
                                                                 </div>
                                                             )}
 
+                                                            {isFinalized && (
+                                                                <p className="mt-2 text-[10px] font-bold text-emerald-600">
+                                                                    รถคันนี้ดำเนินการแล้ว
+                                                                </p>
+                                                            )}
+
                                                             {/* Actions */}
                                                             {!isApproved &&
                                                                 !isRejected ? (
                                                                 <div className="mt-3 grid grid-cols-[minmax(0,1fr)_108px] gap-2">
                                                                     <button
                                                                         type="button"
-                                                                        disabled={
-                                                                            !canMakeDecision ||
-                                                                            isRowSaving ||
-                                                                            !rowState.newLicense.trim() ||
-                                                                            !rowState.newProvince.trim() ||
-                                                                            !rowState.companyId.trim() ||
-                                                                            !rowState.companyName.trim() ||
-                                                                            !rowState.truckType.trim()
-                                                                        }
                                                                         onClick={() =>
                                                                             void approveSingleReplacementVehicle(
                                                                                 item,
                                                                                 index
                                                                             )
                                                                         }
-                                                                        className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                                                                        disabled={
+                                                                            !canMakeDecision ||
+                                                                            isRowSaving ||
+                                                                            isFinalized
+                                                                        }
+                                                                        className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                                                                     >
-                                                                        {isRowSaving && (
-                                                                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                                                                        )}
-
-                                                                        {isRowSaving
-                                                                            ? "กำลังบันทึก..."
-                                                                            : "อนุมัติรถคันนี้"}
+                                                                        {isApproved
+                                                                            ? "บันทึกแล้ว"
+                                                                            : isRowSaving
+                                                                                ? "กำลังบันทึก..."
+                                                                                : "อนุมัติรถคันนี้"}
                                                                     </button>
 
                                                                     <button
                                                                         type="button"
-                                                                        disabled={!canMakeDecision || isRowSaving}
+                                                                        disabled={!canMakeDecision || isRowSaving || isFinalized}
                                                                         onClick={() =>
                                                                             void rejectSingleReplacementVehicle(
                                                                                 item,
@@ -4782,37 +4894,26 @@ export default function FleetModalDetail({
 
                                                                         <input
                                                                             type="number"
-                                                                            min={
-                                                                                1
-                                                                            }
-                                                                            max={
-                                                                                requestedQty
-                                                                            }
-                                                                            value={
-                                                                                row.qty
-                                                                            }
-                                                                            disabled={
-                                                                                saving
-                                                                            }
-                                                                            onChange={(
-                                                                                event
-                                                                            ) => {
-                                                                                const value =
-                                                                                    Number(
-                                                                                        event
-                                                                                            .target
-                                                                                            .value
-                                                                                    );
+                                                                            min={1}
+                                                                            step={1}
+                                                                            value={Number(row.qty) > 0 ? Number(row.qty) : ""}
+                                                                            disabled={saving}
+                                                                            onFocus={(event) => event.currentTarget.select()}
+                                                                            onChange={(event) => {
+                                                                                const rawValue = event.target.value;
 
                                                                                 updateApprovedSupplier(
                                                                                     row.rowId,
                                                                                     "qty",
-                                                                                    Number.isFinite(
-                                                                                        value
-                                                                                    )
-                                                                                        ? value
-                                                                                        : 0
+                                                                                    rawValue === ""
+                                                                                        ? 0
+                                                                                        : Math.max(1, parseInt(rawValue, 10))
                                                                                 );
+                                                                            }}
+                                                                            onBlur={() => {
+                                                                                if (Number(row.qty) <= 0) {
+                                                                                    updateApprovedSupplier(row.rowId, "qty", 1);
+                                                                                }
                                                                             }}
                                                                             className="h-10 w-full rounded-xl border border-slate-300 bg-white px-2 text-center text-sm font-black text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                                                                         />
@@ -4858,32 +4959,52 @@ export default function FleetModalDetail({
                                                 </div>
                                             )}
 
-                                        <label className="block">
-                                            <span className="mb-1.5 block text-xs font-bold text-slate-600">
-                                                หมายเหตุ / เหตุผล
-                                            </span>
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            {/* หมายเหตุส่วนที่อนุมัติ */}
+                                            <label className="block">
+                                                <span className="mb-1.5 block text-xs font-bold text-blue-700">
+                                                    หมายเหตุสำหรับอนุมัติ
+                                                </span>
 
-                                            <textarea
-                                                rows={3}
-                                                value={remark}
-                                                disabled={saving}
-                                                onChange={(
-                                                    event
-                                                ) => {
-                                                    setRemark(
-                                                        event.target
-                                                            .value
-                                                    );
-                                                    setMessage(null);
-                                                }}
-                                                placeholder="เพิ่มหมายเหตุ หรือระบุเหตุผลกรณีไม่อนุมัติ"
-                                                className="w-full resize-none rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
-                                            />
+                                                <textarea
+                                                    rows={3}
+                                                    value={remark}
+                                                    disabled={saving}
+                                                    onChange={(event) => {
+                                                        setRemark(event.target.value);
+                                                        setMessage(null);
+                                                    }}
+                                                    placeholder="ระบุหมายเหตุของรถที่อนุมัติ"
+                                                    className="w-full resize-none rounded-xl border border-blue-200 bg-blue-50/50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+                                                />
+                                            </label>
 
-                                            <span className="mt-1.5 block text-[10px] font-medium text-slate-400">
-                                                ต้องระบุเหตุผลเมื่อเลือกไม่อนุมัติ
-                                            </span>
-                                        </label>
+                                            {/* เหตุผลส่วนที่ไม่อนุมัติ */}
+                                            {draftNotApprovedQty > 0 && (
+                                                <label className="block">
+                                                    <span className="mb-1.5 block text-xs font-bold text-rose-700">
+                                                        เหตุผลไม่อนุมัติ
+                                                        <span className="ml-1 text-rose-500">*</span>
+                                                    </span>
+
+                                                    <textarea
+                                                        rows={3}
+                                                        value={rejectReason}
+                                                        disabled={saving}
+                                                        onChange={(event) => {
+                                                            setRejectReason(event.target.value);
+                                                            setMessage(null);
+                                                        }}
+                                                        placeholder={`ระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`}
+                                                        className="w-full resize-none rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-100 disabled:bg-slate-100"
+                                                    />
+
+                                                    <span className="mt-1.5 block text-[10px] font-medium text-rose-500">
+                                                        จำเป็นต้องระบุ เนื่องจากมีรถไม่อนุมัติ {draftNotApprovedQty} คัน
+                                                    </span>
+                                                </label>
+                                            )}
+                                        </div>
 
                                         {!confirmDecision ? (
                                             <div className="space-y-2.5">
@@ -5125,10 +5246,6 @@ export default function FleetModalDetail({
 
                                                     <button
                                                         type="button"
-                                                        disabled={
-                                                            saving ||
-                                                            !remark.trim()
-                                                        }
                                                         onClick={() =>
                                                             void rejectRequest()
                                                         }

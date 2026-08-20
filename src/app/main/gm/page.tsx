@@ -6,6 +6,9 @@ import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
   CalendarDays,
   Eraser,
   Eye,
@@ -57,7 +60,10 @@ type StatusFilter = "all" | "reject_by_gm" | "gm_pending" | "fbp_pending";
 
 type ActionStatus = "fbp_pending" | "reject_by_gm";
 
-export default function HomePage() {
+type SortKey = "request_date" | "running_doc" | "usage_date";
+type SortDirection = "asc" | "desc";
+
+export default function GmStatusPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
 
@@ -68,13 +74,19 @@ export default function HomePage() {
   const [error, setError] = useState("");
 
   const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
-  const [editingStatus, setEditingStatus] = useState<Record<string, string>>({});
   const [updatingRows, setUpdatingRows] = useState<Record<string, boolean>>({});
   const [updateMessage, setUpdateMessage] = useState<
     Record<string, { type: "success" | "error"; text: string }>
   >({});
 
-  const [openCreateModal, setOpenCreateModal] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{
+    key: SortKey;
+    direction: SortDirection;
+  }>({
+    key: "request_date",
+    direction: "asc",
+  });
+
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -575,6 +587,27 @@ export default function HomePage() {
     return [];
   };
 
+  const handleSort = (key: SortKey) => {
+    setSortConfig((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc"
+          ? "desc"
+          : "asc",
+    }));
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortConfig.key !== key) {
+      return <ArrowUpDown size={13} className="opacity-50" />;
+    }
+
+    return sortConfig.direction === "asc" ? (
+      <ChevronUp size={14} />
+    ) : (
+      <ChevronDown size={14} />
+    );
+  };
 
   const warehouseFilteredRequests = useMemo(() => {
     const userWarehouse = String(
@@ -704,28 +737,89 @@ export default function HomePage() {
     searchText,
   ]);
 
+  const sortedRequests = useMemo(() => {
+    return [...filteredRequests].sort((a, b) => {
+      let comparison = 0;
+
+      if (sortConfig.key === "running_doc") {
+        comparison = String(a.running_doc || "").localeCompare(
+          String(b.running_doc || ""),
+          "th",
+          {
+            numeric: true,
+            sensitivity: "base",
+          },
+        );
+      }
+
+      if (sortConfig.key === "request_date") {
+        const requestDateA = getRequestDateKey(a);
+        const requestDateB = getRequestDateKey(b);
+
+        const dateA =
+          requestDateA === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateA).getTime();
+
+        const dateB =
+          requestDateB === "ไม่ระบุวันที่"
+            ? 0
+            : new Date(requestDateB).getTime();
+
+        comparison = dateA - dateB;
+      }
+
+      if (sortConfig.key === "usage_date") {
+        const dateA = a.usage_date
+          ? new Date(normalizeDateKey(a.usage_date)).getTime()
+          : 0;
+
+        const dateB = b.usage_date
+          ? new Date(normalizeDateKey(b.usage_date)).getTime()
+          : 0;
+
+        comparison = dateA - dateB;
+      }
+
+      return sortConfig.direction === "asc" ? comparison : -comparison;
+    });
+  }, [filteredRequests, sortConfig]);
+
   const groupedFilteredByRequestDate = useMemo(() => {
-    return filteredRequests.reduce<Record<string, RequestItem[]>>(
+    return sortedRequests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = getRequestDateKey(item);
 
-        if (!groups[dateKey]) groups[dateKey] = [];
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+
         groups[dateKey].push(item);
 
         return groups;
       },
-      {}
+      {},
     );
-  }, [filteredRequests]);
+  }, [sortedRequests]);
 
   const sortedFilteredDates = useMemo(() => {
-    return Object.keys(groupedFilteredByRequestDate).sort((a, b) => {
+    const dates = Object.keys(groupedFilteredByRequestDate);
+
+    if (sortConfig.key !== "request_date") {
+      return dates;
+    }
+
+    return dates.sort((a, b) => {
       if (a === "ไม่ระบุวันที่") return 1;
       if (b === "ไม่ระบุวันที่") return -1;
 
-      return new Date(a).getTime() - new Date(b).getTime();
+      const comparison = new Date(a).getTime() - new Date(b).getTime();
+
+      return sortConfig.direction === "asc"
+        ? comparison
+        : -comparison;
     });
-  }, [groupedFilteredByRequestDate]);
+  }, [groupedFilteredByRequestDate, sortConfig]);
 
   const statusCounts = useMemo(() => {
     return {
@@ -1152,8 +1246,8 @@ export default function HomePage() {
                   type="button"
                   onClick={handleToggleRequestDatePicker}
                   className={`h-10 w-full truncate rounded-xl border pl-9 pr-9 text-left text-xs font-semibold shadow-sm outline-none transition focus:ring-4 ${hasRequestDateRange
-                      ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-blue-100/70"
-                      : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-blue-100/70"
+                    ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-blue-100/70"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-blue-100/70"
                     }`}
                 >
                   {formatThaiDateRange()}
@@ -1307,28 +1401,53 @@ export default function HomePage() {
               <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
-                    {[
-                      "ลำดับ",
-                      "เลขที่เอกสาร",
-                      "DC Type",
-                      "DC",
-                      "ประเภทรถ",
-                      "ทะเบียนทดแทน",
-                      "จำนวน",
-                      "วันที่ใช้งาน",
-                      "ผู้ขอ",
-                      "สถานะ",
-                      "รายละเอียด",
-                    ].map((col, i) => (
-                      <th
-                        key={col}
-                        className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0 ? "sticky left-0 z-30 w-[52px] text-center" : ""
-                          } ${i === 6 ? "text-center" : ""} ${i === 10 ? "text-right" : ""
-                          }`}
-                      >
-                        {col}
-                      </th>
-                    ))}
+                  {[
+  "ลำดับ",
+  "เลขที่เอกสาร",
+  "DC Type",
+  "DC",
+  "ประเภทรถ",
+  "ทะเบียนทดแทน",
+  "จำนวน",
+  "วันที่ใช้งาน",
+  "ผู้ขอ",
+  "สถานะ",
+  "รายละเอียด",
+].map((col, i) => {
+  const sortKey: SortKey | null =
+    col === "เลขที่เอกสาร"
+      ? "running_doc"
+      : col === "วันที่ใช้งาน"
+        ? "usage_date"
+        : null;
+
+  return (
+    <th
+      key={col}
+      onClick={() => {
+        if (sortKey) {
+          handleSort(sortKey);
+        }
+      }}
+      className={`whitespace-nowrap bg-transparent px-3 py-3 ${
+        i === 0
+          ? "sticky left-0 z-30 w-[52px] text-center"
+          : ""
+      } ${i === 6 ? "text-center" : ""} ${
+        i === 10 ? "text-right" : ""
+      } ${
+        sortKey
+          ? "cursor-pointer select-none transition hover:bg-blue-700"
+          : ""
+      }`}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        {col}
+        {sortKey && renderSortIcon(sortKey)}
+      </span>
+    </th>
+  );
+})}
                   </tr>
                 </thead>
 
@@ -1359,19 +1478,29 @@ export default function HomePage() {
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
-                              <CalendarDays size={13} className="text-blue-400" />
-                              วันที่ขอ: {formatThaiDate(date)}
+  <button
+    type="button"
+    onClick={() => handleSort("request_date")}
+    className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-blue-100 hover:text-blue-800"
+    title="กดเพื่อเรียงวันที่ขอ"
+  >
+    <CalendarDays
+      size={13}
+      className="text-blue-400"
+    />
 
-                              {isTodayRequest(date) && (
-                                <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
-                                  New
-                                </span>
-                              )}
+    <span>วันที่ขอ: {formatThaiDate(date)}</span>
 
-                              <span className="font-semibold text-slate-400">
-                                · {groupedFilteredByRequestDate[date].length} รายการ
-                              </span>
-                            </div>
+    {renderSortIcon("request_date")}
+  </button>
+
+  {isTodayRequest(date) && (
+    <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
+      New
+    </span>
+  )}
+
+</div>
                           </td>
                         </tr>
 
@@ -1386,7 +1515,6 @@ export default function HomePage() {
                               ? String(item.id)
                               : item.running_doc || `${date}-${index}`;
 
-                          const isOpen = openRows[rowKey];
                           const licenseList = getLicenseList(item.license_replace);
                           const visibleLicenses = licenseList.slice(0, 2);
                           const hiddenLicenseCount = Math.max(
@@ -1520,8 +1648,8 @@ export default function HomePage() {
                                   {updateMessage[rowKey]?.text && (
                                     <p
                                       className={`mt-1.5 text-[10px] font-bold ${updateMessage[rowKey].type === "success"
-                                          ? "text-emerald-600"
-                                          : "text-rose-600"
+                                        ? "text-emerald-600"
+                                        : "text-rose-600"
                                         }`}
                                     >
                                       {updateMessage[rowKey].text}

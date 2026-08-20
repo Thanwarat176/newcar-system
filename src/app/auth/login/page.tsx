@@ -570,7 +570,7 @@ export default function LoginPage() {
                     <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50/80 to-white p-3 shadow-[0_10px_30px_rgba(37,99,235,0.08)]">
                       <div className="space-y-3">
                         <SearchableSelectBox
-                          label="Warehouse / Team"
+                          label="คลัง / ทีม"
                           value={registerData.team}
                           onChange={(value) =>
                             setRegisterData({

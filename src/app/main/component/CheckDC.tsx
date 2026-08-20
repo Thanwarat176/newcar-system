@@ -85,6 +85,33 @@ interface FleetCheckStats {
   fleet_backhaul: number;
 }
 
+type DashboardPair = { actual: number; planned: number };
+type DashboardMatrix = Record<string, Record<string, DashboardPair>>;
+type DashboardStatus = { id: number; name: string; code: number };
+type DashboardWeekly = {
+  date: string;
+  day_name: string;
+  p_work: number;
+  p_down: number;
+  a_work: number;
+  a_down: number;
+  total_plan: number;
+  gap_pct: number;
+  is_today: boolean;
+};
+type FleetDashboardData = {
+  success: boolean;
+  message?: string;
+  date: string;
+  warehouse: string;
+  fleet_types: Array<{ fleet_type: string; count: number }>;
+  weekly_performance: DashboardWeekly[];
+  statuses: DashboardStatus[];
+  vendors: Record<string, string>;
+  matrix_type: DashboardMatrix;
+  matrix_vendor: DashboardMatrix;
+};
+
 interface CheckDCProps {
   data?: RequestItem;
   allRequests?: RequestItem[];
@@ -102,6 +129,9 @@ const WORKLOAD_API =
 
 const FLEET_CHECK_API =
   "https://lite.cpall.co.th/Logistic/daily-fleet-management-v2/api/get_fleet_check_all.php";
+
+const FLEET_DASHBOARD_API =
+  "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_dashboard_by_dc.php";
 
 const EMPTY_FLEET_STATS: FleetCheckStats = {
   total: 0,
@@ -400,6 +430,140 @@ function getStatusClass(status?: string): string {
   }
 
   return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function dashboardThaiDate(value: string): string {
+  return new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+function DashboardStat({ title, value, active = false }: { title: string; value: number; active?: boolean }) {
+  return <div className={`flex h-[88px] flex-col justify-between rounded-xl bg-white p-3 shadow-sm ${active ? "border-2 border-blue-500" : "border border-slate-200"}`}>
+    <p className={`text-lg font-black ${active ? "text-blue-600" : "text-slate-400"}`}>{title}</p>
+    <p className={`text-right text-xl font-black ${active ? "text-blue-600" : "text-slate-900"}`}>{formatNumber(value)}</p>
+  </div>;
+}
+
+function DashboardMatrix({ mode, matrix, statuses, date, warehouse, labels }: { mode: "fleet" | "vendor"; matrix: DashboardMatrix; statuses: DashboardStatus[]; date: string; warehouse: string; labels?: Record<string, string> }) {
+  const allStatuses = statuses.filter((status) => Object.values(matrix).some((row) => {
+    const item = row[String(status.id)];
+    return item && (item.actual || item.planned);
+  }));
+  const shownStatuses = mode === "vendor" ? allStatuses.filter((status) => status.id !== 2 && !/วิ่ง.*ปกติ/i.test(status.name)) : allStatuses;
+  const rows = Object.entries(matrix);
+  const valueOf = (row: Record<string, DashboardPair>, status: DashboardStatus) => Number(row[String(status.id)]?.actual || 0);
+  const totalOf = (row: Record<string, DashboardPair>) => allStatuses.reduce((sum, status) => sum + valueOf(row, status), 0);
+  const absentOf = (row: Record<string, DashboardPair>) => shownStatuses.reduce((sum, status) => sum + valueOf(row, status), 0);
+  const tone = (name: string) => {
+    if (/ปกติ/.test(name)) return "bg-blue-50 text-blue-700";
+    if (/หยุด/.test(name)) return "bg-emerald-50 text-emerald-700";
+    if (/เสีย|ซ่อม/.test(name)) return "bg-rose-50 text-rose-600";
+    if (/พขร/.test(name)) return "bg-amber-50 text-amber-700";
+    return "bg-violet-50 text-violet-700";
+  };
+  const title = mode === "fleet" ? "ตารางสรุปกองรถประจำวัน (Daily Fleet Summary Table)" : "ตารางสรุปสถานะรถที่ไม่ได้มาวิ่งงาน แยกรายบริษัทขนส่ง (Vendor Summary Table)";
+  const subtitle = mode === "fleet" ? `กองรถประจำวันที่ ${dashboardThaiDate(date)} ${warehouse}` : `สถานะรถไม่ได้มาวิ่งงาน แยกรายซัพพลายเออร์ ประจำวันที่ ${dashboardThaiDate(date)} ${warehouse}`;
+
+  return <section>
+    <h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▦</span>{title}</h3>
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-4 py-3 text-center text-xs font-black text-blue-600">{subtitle}</div>
+      <div className="overflow-x-auto"><table className="min-w-full text-xs">
+        <thead className="bg-slate-50 text-slate-400"><tr>
+          <th className="min-w-48 border-r border-slate-100 px-4 py-3 text-left font-black">{mode === "fleet" ? "ประเภทรถ" : "บริษัทขนส่ง (VENDOR)"}</th>
+          {mode === "vendor" && (
+            <th className="min-w-28 border-r border-blue-100 bg-blue-100 px-3 py-3 text-center font-black text-blue-800">
+              รถทั้งหมด
+            </th>
+          )}
+          {shownStatuses.map((status) => <th key={status.id} className={`min-w-28 border-r border-slate-100 px-3 py-3 text-center font-black ${tone(status.name)}`}>{status.name}</th>)}
+          {mode === "vendor" && <th className="min-w-32 bg-red-50 px-3 py-3 text-center font-black text-red-600">ไม่ได้มาวิ่งงาน</th>}
+        </tr></thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map(([key, row]) => <tr key={key}>
+            <td className="border-r border-slate-100 px-4 py-3 font-black text-slate-900">{key}{labels?.[key] ? ` - ${labels[key]}` : ""}</td>
+            {mode === "vendor" && (
+              <td className="border-r border-blue-100 bg-blue-50 px-3 py-3 text-center text-sm font-black text-blue-900">
+                {formatNumber(totalOf(row))}
+              </td>
+            )}
+            {shownStatuses.map((status) => { const value = valueOf(row, status); return <td key={status.id} className={`border-r border-slate-100 px-3 py-3 text-center font-black underline decoration-dotted ${tone(status.name)}`}>{value ? formatNumber(value) : "–"}</td>; })}
+            {mode === "vendor" && <td className="bg-red-50 px-3 py-3 text-center font-black text-red-600 underline decoration-dotted">{formatNumber(absentOf(row))}</td>}
+          </tr>)}
+        </tbody>
+        <tfoot><tr className="bg-slate-100 font-black">
+          <td className="border-r border-slate-200 px-4 py-3 text-black">{mode === "fleet" ? "รวมทั้งหมด" : "รวมทั้งหมดทุกซัพพลายเออร์"}</td>
+          {mode === "vendor" && (
+            <td className="border-r border-blue-200 bg-blue-200 px-3 py-3 text-center text-sm font-black text-blue-950">
+              {formatNumber(
+                rows.reduce((sum, [, row]) => sum + totalOf(row), 0)
+              )}
+            </td>
+          )}
+          {shownStatuses.map((status) => <td key={status.id} className={`border-r border-slate-200 px-3 py-3 text-center underline decoration-dotted ${tone(status.name)}`}>{formatNumber(rows.reduce((sum, [, row]) => sum + valueOf(row, status), 0))}</td>)}
+          {mode === "vendor" && <td className="bg-red-50 px-3 py-3 text-center text-red-600 underline decoration-dotted">{formatNumber(rows.reduce((sum, [, row]) => sum + absentOf(row), 0))}</td>}
+        </tr></tfoot>
+      </table></div>
+    </div>
+  </section>;
+}
+
+function FleetDashboard({ warehouse }: { warehouse: string }) {
+  const [selectedDate, setSelectedDate] = useState(getTodayKey);
+  const [dashboard, setDashboard] = useState<FleetDashboardData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadDashboard = useCallback(async () => {
+    if (!warehouse || !selectedDate) return;
+    try {
+      setLoading(true); setError("");
+      const params = new URLSearchParams({ action: "summary", warehouse, date: selectedDate });
+      const response = await fetch(`${FLEET_DASHBOARD_API}?${params.toString().replace(/\+/g, "%20")}`, { headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`โหลด Dashboard ไม่สำเร็จ HTTP ${response.status}`);
+      const result = JSON.parse(text) as FleetDashboardData;
+      if (!result.success) throw new Error(result.message || "ไม่สามารถโหลด Dashboard ได้");
+      setDashboard(result);
+    } catch (loadError) {
+      setDashboard(null);
+      setError(loadError instanceof Error ? loadError.message : "เกิดข้อผิดพลาดในการโหลด Dashboard");
+    } finally { setLoading(false); }
+  }, [selectedDate, warehouse]);
+
+  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+
+  const fleetCount = (name: string) => dashboard?.fleet_types.find((item) => normalizeText(item.fleet_type) === normalizeText(name))?.count || 0;
+  const all = fleetCount("รถทั้งหมด") || Object.values(dashboard?.matrix_type || {}).reduce((total, row) => total + Object.values(row).reduce((sum, item) => sum + Number(item.actual || 0), 0), 0);
+
+  return <div className="space-y-5 rounded-xl border border-blue-100 bg-slate-50/70 p-3.5">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div><h3 className="text-sm font-black text-slate-900">Dashboard สรุปข้อมูลกองรถ</h3><p className="mt-1 text-[10px] text-slate-500">คลัง <b className="text-blue-700">{warehouse}</b></p></div>
+      <div className="flex gap-2">
+        <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 outline-none" />
+        <button type="button" disabled={loading} onClick={() => void loadDashboard()} className="h-9 rounded-lg bg-blue-600 px-3 text-[10px] font-black text-white disabled:opacity-50">{loading ? "กำลังโหลด..." : "รีเฟรช"}</button>
+      </div>
+    </div>
+    {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">{error}</div>}
+    {dashboard && <>
+      <section><h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▣</span>ประเภทรถยนต์</h3>
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4 texy-gray-800">
+          <DashboardStat title="รถทั้งหมด" value={all} active /><DashboardStat title="รถในกอง" value={fleetCount("รถในกอง")} /><DashboardStat title="รถเสริม" value={fleetCount("รถเสริม")} /><DashboardStat title="รถโอนมาช่วย" value={fleetCount("รถโอนมาช่วย")} /><DashboardStat title="CROSS DOCK" value={fleetCount("CROSS DOCK")} /><DashboardStat title="โอนไปช่วยคลังอื่น" value={fleetCount("รถโอนไปช่วยคลังอื่น")} /><DashboardStat title="BACKHAUL" value={fleetCount("BACKHAUL")} />
+        </div>
+      </section>
+      <section><h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▦</span>สรุปแผนและการวิ่งงานล่วงหน้า 7 วัน</h3>
+        <div className="overflow-x-auto pb-1"><div className="grid min-w-[1050px] grid-cols-7 gap-3">
+          {dashboard.weekly_performance.map((item) => <article key={item.date} className={`h-[188px] rounded-xl bg-white p-3 shadow-sm ${item.is_today ? "border-2 border-blue-400" : "border border-slate-200"}`}>
+            <div className="flex h-[42px] justify-between border-b border-slate-100"><div><p className={`text-xs font-black ${item.is_today ? "text-blue-600" : "text-slate-900"}`}>{item.day_name}</p><p className="mt-1 text-[10px] font-bold text-slate-400">{item.date.slice(8, 10)}/{item.date.slice(5, 7)}</p></div>{item.is_today && <span className="h-fit rounded-full bg-violet-600 px-2 py-1 text-[10px] font-black text-white">วันนี้</span>}</div>
+            <div className="mt-2.5"><p className="text-[9px] font-black uppercase text-slate-400">ตามแผน (Plan)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-blue-700">● วิ่ง: {formatNumber(item.p_work)}</span><span className="text-orange-700">● หยุด: {formatNumber(item.p_down)}</span></div></div>
+            <div className="mt-3"><p className="text-[9px] font-black uppercase text-slate-400">วิ่งจริง (Actual)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-emerald-700">● วิ่ง: {formatNumber(item.a_work)}</span><span className="text-violet-700">● หยุด: {formatNumber(item.a_down)}</span></div></div>
+            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2"><span className="text-[9px] font-black text-slate-400">ความต่าง (%)</span><span className={`rounded-md px-2 py-1 text-[10px] font-black ${item.gap_pct === 0 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"}`}>{item.gap_pct}%</span></div>
+          </article>)}
+        </div></div>
+      </section>
+      <DashboardMatrix mode="fleet" matrix={dashboard.matrix_type} statuses={dashboard.statuses} date={dashboard.date} warehouse={dashboard.warehouse || warehouse} />
+      <DashboardMatrix mode="vendor" matrix={dashboard.matrix_vendor} statuses={dashboard.statuses} date={dashboard.date} warehouse={dashboard.warehouse || warehouse} labels={dashboard.vendors} />
+    </>}
+  </div>;
 }
 
 export default function CheckDC({
@@ -926,8 +1090,8 @@ export default function CheckDC({
     count: number | null;
   }> = [
       { key: "summary", label: "ข้อมูลคำขอ", count: null },
-      { key: "fleet", label: "สถานะกองรถ", count: fleetStats.total },
-      { key: "workload", label: "Workload", count: monthlyWorkloadRows.length },
+      { key: "fleet", label: "สถานะกองรถ", count: null },
+      { key: "workload", label: "Workload", count: null },
     ];
 
   const workloadChartData = useMemo(() => {
@@ -953,9 +1117,9 @@ export default function CheckDC({
     460,
     workloadChartData.length * 38
   );
-  
+
   const workloadChartHeight = 190;
-  
+
   const workloadChartPadding = {
     top: 16,
     right: 14,
@@ -1036,7 +1200,7 @@ export default function CheckDC({
       .replace(/_/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-  
+
     return text || "-";
   };
 
@@ -1044,7 +1208,7 @@ export default function CheckDC({
     const text = String(value ?? "")
       .trim()
       .toLowerCase();
-  
+
     return ![
       "",
       "-",
@@ -1052,31 +1216,31 @@ export default function CheckDC({
       "undefined",
     ].includes(text);
   };
-  
+
   return (
     <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-lg shadow-slate-200/60">
       {/* Header */}
       <div className="relative overflow-hidden border-b border-slate-700 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-800 px-5 py-4 text-white">
         <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-white/[0.04]" />
         <div className="pointer-events-none absolute bottom-[-90px] left-[35%] h-44 w-44 rounded-full bg-blue-400/[0.05]" />
-  
+
         <div className="relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-[11px] font-black tracking-wide ring-1 ring-white/15">
                 DC
               </div>
-  
+
               <div>
                 <h2 className="text-base font-black tracking-tight sm:text-lg">
                   ตรวจสอบข้อมูล DC
                 </h2>
-  
+
                 <p className="mt-0.5 text-[11px] font-medium text-slate-300">
                   ข้อมูลคำขอ สถานะกองรถ และ Workload
                 </p>
               </div>
-  
+
               <span
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm ${getStatusClass(
                   resolvedData.status
@@ -1085,28 +1249,28 @@ export default function CheckDC({
                 {cleanText(getStatusText(resolvedData.status))}
               </span>
             </div>
-  
+
             <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold">
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">
                 {cleanText(resolvedData.running_doc)}
               </span>
-  
+
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">
                 DC {cleanText(resolvedData.dc_code)}
               </span>
-  
+
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">
                 {cleanText(resolvedData.fleet_truck_type)}
               </span>
             </div>
           </div>
-  
+
           {!data && localRequests.length > 0 && (
             <label className="block min-w-[260px] rounded-xl bg-white/[0.06] p-3 ring-1 ring-white/10">
               <span className="mb-1.5 block text-[10px] font-bold text-slate-300">
                 เลือกรายการคำขอ
               </span>
-  
+
               <select
                 value={selectedRequestId}
                 onChange={(event) =>
@@ -1131,47 +1295,45 @@ export default function CheckDC({
             </label>
           )}
         </div>
-  
+
         {requestError && (
           <p className="relative mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
             {cleanText(requestError)}
           </p>
         )}
       </div>
-  
+
       {/* Tabs */}
       <div className="overflow-x-auto border-b border-slate-200 bg-white px-3 pt-2">
         <div className="flex min-w-max gap-1">
           {tabs.map((tab) => {
             const active = activeTab === tab.key;
-  
+
             return (
               <button
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`relative flex h-10 items-center gap-2 rounded-t-xl border-x border-t px-4 text-xs font-black transition ${
-                  active
-                    ? "border-slate-200 bg-slate-50 text-blue-800 shadow-sm"
-                    : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-800"
-                }`}
+                className={`relative flex h-10 items-center gap-2 rounded-t-xl border-x border-t px-4 text-xs font-black transition ${active
+                  ? "border-slate-200 bg-slate-50 text-blue-800 shadow-sm"
+                  : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-800"
+                  }`}
               >
                 {cleanText(tab.label)}
-  
+
                 {tab.count !== null && (
                   <span
-                    className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[9px] ${
-                      active
-                        ? "bg-blue-700 text-white"
-                        : "bg-slate-200 text-slate-600"
-                    }`}
+                    className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[9px] ${active
+                      ? "bg-blue-700 text-white"
+                      : "bg-slate-200 text-slate-600"
+                      }`}
                   >
                     {tab.key === "fleet" && loadingFleet
                       ? "..."
                       : tab.count}
                   </span>
                 )}
-  
+
                 {active && (
                   <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-blue-700" />
                 )}
@@ -1180,535 +1342,449 @@ export default function CheckDC({
           })}
         </div>
       </div>
-  
+
       <div className="p-3 sm:p-4">
         {/* ข้อมูลคำขอ */}
         {activeTab === "summary" && (
-  <div className="space-y-4">
-    {/* 1. ข้อมูลเอกสาร */}
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-          <span className="h-5 w-1 rounded-full bg-blue-700" />
-          ข้อมูลเอกสาร
-        </h3>
+          <div className="space-y-4">
+            {/* 1. ข้อมูลเอกสาร */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <span className="h-5 w-1 rounded-full bg-blue-700" />
+                  ข้อมูลเอกสาร
+                </h3>
 
-        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-          รายละเอียดเบื้องต้นของคำขอ
-        </p>
-      </div>
-
-      <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: "เลขที่เอกสาร",
-            value: cleanText(resolvedData.running_doc),
-            sub: "Document number",
-            code: "DOC",
-          },
-          {
-            label: "วันที่ขอ",
-            value: formatThaiDate(
-              resolvedData.request_date ||
-              resolvedData.date
-            ),
-            sub: "Request date",
-            code: "REQ",
-          },
-          {
-            label: "วันที่ใช้งาน",
-            value: formatThaiDate(
-              resolvedData.usage_date
-            ),
-            sub: "Usage date",
-            code: "USE",
-          },
-          {
-            label: "ผู้ขอ",
-            value: cleanText(
-              resolvedData.request_by
-            ),
-            sub: "Requested by",
-            code: "BY",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            className="min-h-[92px] bg-white p-3.5"
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-2 text-[9px] font-black text-blue-800">
-                {item.code}
-              </div>
-
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold text-slate-500">
-                  {item.label}
-                </p>
-
-                <p className="mt-1 break-words text-sm font-black text-slate-900">
-                  {item.value}
-                </p>
-
-                <p className="mt-0.5 text-[9px] font-medium text-slate-400">
-                  {item.sub}
+                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                  รายละเอียดเบื้องต้นของคำขอ
                 </p>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
 
-    {/* 2. ข้อมูลคำขอรถ */}
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-          <span className="h-5 w-1 rounded-full bg-indigo-600" />
-          ข้อมูลคำขอรถ
-        </h3>
-
-        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-          คลัง ประเภทคำขอ ประเภทรถ และจำนวน
-        </p>
-      </div>
-
-      <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: "DC",
-            value: cleanText(
-              resolvedData.dc_code
-            ),
-            sub: cleanText(
-              resolvedData.dc_type
-            ),
-            code: "DC",
-          },
-          {
-            label: "ประเภทคำขอ",
-            value: cleanText(
-              resolvedData.fleet_type
-            ),
-            sub: "Fleet type",
-            code: "FT",
-          },
-          {
-            label: "ประเภทรถ",
-            value: cleanText(
-              resolvedData.fleet_truck_type
-            ),
-            sub: "Truck type",
-            code: "TR",
-          },
-          {
-            label: "จำนวนที่ขอ",
-            value: `${formatNumber(
-              resolvedData.qty
-            )} คัน`,
-            sub: "Requested quantity",
-            code: "QTY",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            className="min-h-[92px] bg-white p-3.5"
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 px-2 text-[9px] font-black text-indigo-800">
-                {item.code}
-              </div>
-
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold text-slate-500">
-                  {item.label}
-                </p>
-
-                <p className="mt-1 break-words text-sm font-black text-slate-900">
-                  {item.value}
-                </p>
-
-                <p className="mt-0.5 break-words text-[9px] font-medium text-slate-400">
-                  {item.sub}
-                </p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-
-    {/* 3. ข้อมูลประกอบการประเมิน */}
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-          <span className="h-5 w-1 rounded-full bg-emerald-600" />
-          ข้อมูลประกอบการประเมิน
-        </h3>
-
-        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-          ปริมาณงาน รอบรถ และสถานะปัจจุบัน
-        </p>
-      </div>
-
-      <div className="grid gap-3 p-3 sm:grid-cols-3">
-        <div className="relative overflow-hidden rounded-xl border border-blue-200 bg-blue-50/50 p-3.5">
-          <span className="absolute inset-y-0 left-0 w-1 bg-blue-700" />
-
-          <div className="pl-1">
-            <p className="text-[10px] font-bold text-blue-600">
-              Workload
-            </p>
-
-            <p className="mt-1 text-xl font-black text-blue-900">
-              {formatNumber(
-                resolvedData.workload
-              )}
-            </p>
-
-            <p className="mt-0.5 text-[9px] font-medium text-blue-500">
-              ปริมาณงานของคำขอ
-            </p>
-          </div>
-        </div>
-
-        <div className="relative overflow-hidden rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
-          <span className="absolute inset-y-0 left-0 w-1 bg-indigo-600" />
-
-          <div className="pl-1">
-            <p className="text-[10px] font-bold text-indigo-600">
-              Truck Turn
-            </p>
-
-            <p className="mt-1 text-xl font-black text-indigo-900">
-              {formatNumber(
-                resolvedData.truckturn
-              )}
-            </p>
-
-            <p className="mt-0.5 text-[9px] font-medium text-indigo-500">
-              รอบการหมุนเวียนรถ
-            </p>
-          </div>
-        </div>
-
-        <div
-          className={`relative overflow-hidden rounded-xl border p-3.5 ${getStatusClass(
-            resolvedData.status
-          )}`}
-        >
-          <p className="text-[10px] font-bold opacity-70">
-            สถานะปัจจุบัน
-          </p>
-
-          <p className="mt-1 break-words text-sm font-black">
-            {cleanText(
-              getStatusText(
-                resolvedData.status
-              )
-            )}
-          </p>
-
-          <p className="mt-1 break-all text-[9px] font-medium opacity-60">
-            {cleanText(
-              resolvedData.status
-            )}
-          </p>
-        </div>
-      </div>
-    </section>
-
-    {/* 4. หมายเหตุและผลการพิจารณา */}
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-          <span className="h-5 w-1 rounded-full bg-amber-500" />
-          หมายเหตุและผลการพิจารณา
-        </h3>
-
-        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-          ข้อความจากผู้ขอและรายละเอียดการดำเนินงาน
-        </p>
-      </div>
-
-      <div
-        className={`grid gap-3 p-3 ${
-          hasDisplayValue(
-            resolvedData.reject_reason
-          )
-            ? "lg:grid-cols-3"
-            : "lg:grid-cols-2"
-        }`}
-      >
-        {/* Remark */}
-        <div className="overflow-hidden rounded-xl border border-amber-200 bg-white">
-          <div className="border-b border-amber-100 bg-amber-50 px-3.5 py-2.5">
-            <p className="text-[10px] font-black uppercase tracking-wide text-amber-700">
-              Remark
-            </p>
-
-            <h4 className="mt-0.5 text-xs font-black text-amber-950">
-              หมายเหตุคำขอ
-            </h4>
-          </div>
-
-          <div className="min-h-[88px] px-3.5 py-3">
-            <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">
-              {cleanText(
-                resolvedData.remark
-              )}
-            </p>
-          </div>
-        </div>
-
-        {/* Status Details */}
-        <div className="overflow-hidden rounded-xl border border-blue-200 bg-white">
-          <div className="border-b border-blue-100 bg-blue-50 px-3.5 py-2.5">
-            <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">
-              Status Details
-            </p>
-
-            <h4 className="mt-0.5 text-xs font-black text-blue-950">
-              รายละเอียดสถานะ
-            </h4>
-          </div>
-
-          <div className="min-h-[88px] px-3.5 py-3">
-            <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">
-              {cleanText(
-                resolvedData.status_details
-              )}
-            </p>
-          </div>
-        </div>
-
-        {/* Reject Reason แสดงเมื่อมีเหตุผลเท่านั้น */}
-        {hasDisplayValue(
-          resolvedData.reject_reason
-        ) && (
-          <div className="overflow-hidden rounded-xl border border-rose-200 bg-white">
-            <div className="border-b border-rose-100 bg-rose-50 px-3.5 py-2.5">
-              <p className="text-[10px] font-black uppercase tracking-wide text-rose-700">
-                Reject Reason
-              </p>
-
-              <h4 className="mt-0.5 text-xs font-black text-rose-950">
-                เหตุผลที่ไม่อนุมัติ
-              </h4>
-            </div>
-
-            <div className="min-h-[88px] px-3.5 py-3">
-              <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-rose-700">
-                {cleanText(
-                  resolvedData.reject_reason
-                )}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-
-    {/* 5. รายละเอียดรถทดแทน */}
-    {replacementTruckRows.length > 0 && (
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-              <span className="h-5 w-1 rounded-full bg-blue-700" />
-              รายละเอียดรถทดแทน
-            </h3>
-
-            <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-              ทะเบียน จังหวัด ประเภทรถ และผู้ประกอบการขนส่ง
-            </p>
-          </div>
-
-          <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">
-            {replacementTruckRows.length} คัน
-          </span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-left text-xs">
-            <thead className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
-              <tr>
-                <th className="px-3 py-2.5 text-center font-black">
-                  ลำดับ
-                </th>
-                <th className="px-3 py-2.5 font-black">
-                  ทะเบียนรถ
-                </th>
-                <th className="px-3 py-2.5 font-black">
-                  จังหวัด
-                </th>
-                <th className="px-3 py-2.5 font-black">
-                  ประเภทรถ
-                </th>
-                <th className="px-3 py-2.5 font-black">
-                  ผู้ประกอบการขนส่ง
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100">
-              {replacementTruckRows.map(
-                (item, index) => (
-                  <tr
-                    key={String(
-                      item.id ??
-                      `${item.license}-${index}`
-                    )}
-                    className="transition hover:bg-blue-50/50"
+              <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    label: "เลขที่เอกสาร",
+                    value: cleanText(resolvedData.running_doc),
+                    sub: "Document number",
+                    code: "DOC",
+                  },
+                  {
+                    label: "วันที่ขอ",
+                    value: formatThaiDate(
+                      resolvedData.request_date ||
+                      resolvedData.date
+                    ),
+                    sub: "Request date",
+                    code: "REQ",
+                  },
+                  {
+                    label: "วันที่ใช้งาน",
+                    value: formatThaiDate(
+                      resolvedData.usage_date
+                    ),
+                    sub: "Usage date",
+                    code: "USE",
+                  },
+                  {
+                    label: "ผู้ขอ",
+                    value: cleanText(
+                      resolvedData.request_by
+                    ),
+                    sub: "Requested by",
+                    code: "BY",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="min-h-[92px] bg-white p-3.5"
                   >
-                    <td className="px-3 py-2.5 text-center">
-                      {index + 1}
-                    </td>
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-2 text-[9px] font-black text-blue-800">
+                        {item.code}
+                      </div>
 
-                    <td className="px-3 py-2.5 font-black text-blue-800">
-                      {cleanText(
-                        item.license
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-500">
+                          {item.label}
+                        </p>
+
+                        <p className="mt-1 break-words text-sm font-black text-slate-900">
+                          {item.value}
+                        </p>
+
+                        <p className="mt-0.5 text-[9px] font-medium text-slate-400">
+                          {item.sub}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 2. ข้อมูลคำขอรถ */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <span className="h-5 w-1 rounded-full bg-indigo-600" />
+                  ข้อมูลคำขอรถ
+                </h3>
+
+                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                  คลัง ประเภทคำขอ ประเภทรถ และจำนวน
+                </p>
+              </div>
+
+              <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    label: "DC",
+                    value: cleanText(
+                      resolvedData.dc_code
+                    ),
+                    sub: cleanText(
+                      resolvedData.dc_type
+                    ),
+                    code: "DC",
+                  },
+                  {
+                    label: "ประเภทคำขอ",
+                    value: cleanText(
+                      resolvedData.fleet_type
+                    ),
+                    sub: "Fleet type",
+                    code: "FT",
+                  },
+                  {
+                    label: "ประเภทรถ",
+                    value: cleanText(
+                      resolvedData.fleet_truck_type
+                    ),
+                    sub: "Truck type",
+                    code: "TR",
+                  },
+                  {
+                    label: "จำนวนที่ขอ",
+                    value: `${formatNumber(
+                      resolvedData.qty
+                    )} คัน`,
+                    sub: "Requested quantity",
+                    code: "QTY",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="min-h-[92px] bg-white p-3.5"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 px-2 text-[9px] font-black text-indigo-800">
+                        {item.code}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-500">
+                          {item.label}
+                        </p>
+
+                        <p className="mt-1 break-words text-sm font-black text-slate-900">
+                          {item.value}
+                        </p>
+
+                        <p className="mt-0.5 break-words text-[9px] font-medium text-slate-400">
+                          {item.sub}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 3. ข้อมูลประกอบการประเมิน */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <span className="h-5 w-1 rounded-full bg-emerald-600" />
+                  ข้อมูลประกอบการประเมิน
+                </h3>
+
+                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                  ปริมาณงาน รอบรถ และสถานะปัจจุบัน
+                </p>
+              </div>
+
+              <div className="grid gap-3 p-3 sm:grid-cols-3">
+                <div className="relative overflow-hidden rounded-xl border border-blue-200 bg-blue-50/50 p-3.5">
+                  <span className="absolute inset-y-0 left-0 w-1 bg-blue-700" />
+
+                  <div className="pl-1">
+                    <p className="text-[10px] font-bold text-blue-600">
+                      Workload
+                    </p>
+
+                    <p className="mt-1 text-xl font-black text-blue-900">
+                      {formatNumber(
+                        resolvedData.workload
                       )}
-                    </td>
+                    </p>
 
-                    <td className="px-3 py-2.5 font-bold text-slate-700">
-                      {cleanText(
-                        item.province
+                    <p className="mt-0.5 text-[9px] font-medium text-blue-500">
+                      ปริมาณงานของคำขอ
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative overflow-hidden rounded-xl border border-indigo-200 bg-indigo-50/50 p-3.5">
+                  <span className="absolute inset-y-0 left-0 w-1 bg-indigo-600" />
+
+                  <div className="pl-1">
+                    <p className="text-[10px] font-bold text-indigo-600">
+                      Truck Turn
+                    </p>
+
+                    <p className="mt-1 text-xl font-black text-indigo-900">
+                      {formatNumber(
+                        resolvedData.truckturn
                       )}
-                    </td>
+                    </p>
 
-                    <td className="px-3 py-2.5 font-bold text-slate-700">
+                    <p className="mt-0.5 text-[9px] font-medium text-indigo-500">
+                      รอบการหมุนเวียนรถ
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className={`relative overflow-hidden rounded-xl border p-3.5 ${getStatusClass(
+                    resolvedData.status
+                  )}`}
+                >
+                  <p className="text-[10px] font-bold opacity-70">
+                    สถานะปัจจุบัน
+                  </p>
+
+                  <p className="mt-1 break-words text-sm font-black">
+                    {cleanText(
+                      getStatusText(
+                        resolvedData.status
+                      )
+                    )}
+                  </p>
+
+                  <p className="mt-1 break-all text-[9px] font-medium opacity-60">
+                    {cleanText(
+                      resolvedData.status
+                    )}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* 4. หมายเหตุและผลการพิจารณา */}
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <span className="h-5 w-1 rounded-full bg-amber-500" />
+                  หมายเหตุและผลการพิจารณา
+                </h3>
+
+                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                  ข้อความจากผู้ขอและรายละเอียดการดำเนินงาน
+                </p>
+              </div>
+
+              <div
+                className={`grid gap-3 p-3 ${hasDisplayValue(
+                  resolvedData.reject_reason
+                )
+                  ? "lg:grid-cols-3"
+                  : "lg:grid-cols-2"
+                  }`}
+              >
+                {/* Remark */}
+                <div className="overflow-hidden rounded-xl border border-amber-200 bg-white">
+                  <div className="border-b border-amber-100 bg-amber-50 px-3.5 py-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-amber-700">
+                      Remark
+                    </p>
+
+                    <h4 className="mt-0.5 text-xs font-black text-amber-950">
+                      หมายเหตุคำขอ
+                    </h4>
+                  </div>
+
+                  <div className="min-h-[88px] px-3.5 py-3">
+                    <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">
                       {cleanText(
-                        item.truck_type
+                        resolvedData.remark
                       )}
-                    </td>
+                    </p>
+                  </div>
+                </div>
 
-                    <td className="px-3 py-2.5">
-                      <p className="font-black text-slate-800">
-                        {cleanText(
-                          item.company_name
-                        )}
-                      </p>
+                {/* Status Details */}
+                <div className="overflow-hidden rounded-xl border border-blue-200 bg-white">
+                  <div className="border-b border-blue-100 bg-blue-50 px-3.5 py-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">
+                      Status Details
+                    </p>
 
-                      {item.company_id && (
-                        <p className="mt-0.5 text-[9px] text-slate-400">
-                          ID:{" "}
+                    <h4 className="mt-0.5 text-xs font-black text-blue-950">
+                      รายละเอียดสถานะ
+                    </h4>
+                  </div>
+
+                  <div className="min-h-[88px] px-3.5 py-3">
+                    <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">
+                      {cleanText(
+                        resolvedData.status_details
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Reject Reason แสดงเมื่อมีเหตุผลเท่านั้น */}
+                {hasDisplayValue(
+                  resolvedData.reject_reason
+                ) && (
+                    <div className="overflow-hidden rounded-xl border border-rose-200 bg-white">
+                      <div className="border-b border-rose-100 bg-rose-50 px-3.5 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-rose-700">
+                          Reject Reason
+                        </p>
+
+                        <h4 className="mt-0.5 text-xs font-black text-rose-950">
+                          เหตุผลที่ไม่อนุมัติ
+                        </h4>
+                      </div>
+
+                      <div className="min-h-[88px] px-3.5 py-3">
+                        <p className="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-rose-700">
                           {cleanText(
-                            item.company_id
+                            resolvedData.reject_reason
                           )}
                         </p>
+                      </div>
+                    </div>
+                  )}
+              </div>
+            </section>
+
+            {/* 5. รายละเอียดรถทดแทน */}
+            {replacementTruckRows.length > 0 && (
+              <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+                      <span className="h-5 w-1 rounded-full bg-blue-700" />
+                      รายละเอียดรถทดแทน
+                    </h3>
+
+                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                      ทะเบียน จังหวัด ประเภทรถ และผู้ประกอบการขนส่ง
+                    </p>
+                  </div>
+
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">
+                    {replacementTruckRows.length} คัน
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left text-xs">
+                    <thead className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2.5 text-center font-black">
+                          ลำดับ
+                        </th>
+                        <th className="px-3 py-2.5 font-black">
+                          ทะเบียนรถ
+                        </th>
+                        <th className="px-3 py-2.5 font-black">
+                          จังหวัด
+                        </th>
+                        <th className="px-3 py-2.5 font-black">
+                          ประเภทรถ
+                        </th>
+                        <th className="px-3 py-2.5 font-black">
+                          ผู้ประกอบการขนส่ง
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100">
+                      {replacementTruckRows.map(
+                        (item, index) => (
+                          <tr
+                            key={String(
+                              item.id ??
+                              `${item.license}-${index}`
+                            )}
+                            className="transition hover:bg-blue-50/50"
+                          >
+                            <td className="px-3 py-2.5 text-center">
+                              {index + 1}
+                            </td>
+
+                            <td className="px-3 py-2.5 font-black text-blue-800">
+                              {cleanText(
+                                item.license
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2.5 font-bold text-slate-700">
+                              {cleanText(
+                                item.province
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2.5 font-bold text-slate-700">
+                              {cleanText(
+                                item.truck_type
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2.5">
+                              <p className="font-black text-slate-800">
+                                {cleanText(
+                                  item.company_name
+                                )}
+                              </p>
+
+                              {item.company_id && (
+                                <p className="mt-0.5 text-[9px] text-slate-400">
+                                  ID:{" "}
+                                  {cleanText(
+                                    item.company_id
+                                  )}
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )
                       )}
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    )}
-  </div>
-)}
-  
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
         {/* สถานะกองรถ */}
         {activeTab === "fleet" && (
           <div className="space-y-4">
             <section className="space-y-3">
               <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-                <div>
                   <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
                     <span className="h-5 w-1 rounded-full bg-blue-700" />
                     สถานะกองรถ
                   </h3>
-  
-                  <p className="mt-0.5 text-[10px] text-slate-500">
-                    ภาพรวมรถของคลัง{" "}
-                    <span className="font-black text-blue-800">
-                      {cleanText(resolvedData.dc_code)}
-                    </span>
-                  </p>
-                </div>
-  
-                <button
-                  type="button"
-                  disabled={loadingFleet || !resolvedData.dc_code}
-                  onClick={() =>
-                    void fetchFleetStats(resolvedData.dc_code)
-                  }
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-[10px] font-black text-slate-600 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loadingFleet
-                    ? "กำลังรีเฟรช..."
-                    : "รีเฟรชข้อมูล"}
-                </button>
-              </div>
-  
-              {fleetError && (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
-                  {cleanText(fleetError)}
-                </div>
-              )}
-  
-              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-                {[
-                  {
-                    label: "รถทั้งหมด",
-                    value: fleetStats.total,
-                    bar: "bg-blue-700",
-                  },
-                  {
-                    label: "รถในกอง",
-                    value: fleetStats.fleet_in,
-                    bar: "bg-slate-600",
-                  },
-                  {
-                    label: "รถเสริม",
-                    value: fleetStats.fleet_supplement,
-                    bar: "bg-blue-500",
-                  },
-                  {
-                    label: "รถโอนมาช่วย",
-                    value: fleetStats.fleet_transferred_in,
-                    bar: "bg-indigo-500",
-                  },
-                  {
-                    label: "CROSS DOCK",
-                    value: fleetStats.fleet_crossdock,
-                    bar: "bg-slate-500",
-                  },
-                  {
-                    label: "รถโอนไปคลังอื่น",
-                    value: fleetStats.fleet_transferred_out,
-                    bar: "bg-blue-400",
-                  },
-                  {
-                    label: "BACKHAUL",
-                    value: fleetStats.fleet_backhaul,
-                    bar: "bg-indigo-600",
-                  },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
-                  >
-                    <span
-                      className={`absolute inset-x-0 top-0 h-0.5 ${item.bar}`}
-                    />
-  
-                    <p className="text-[10px] font-bold text-slate-500">
-                      {item.label}
-                    </p>
-  
-                    <p className="mt-1 text-xl font-black text-slate-900">
-                      {loadingFleet
-                        ? "..."
-                        : formatNumber(item.value)}
-                    </p>
-                  </div>
-                ))}
               </div>
             </section>
-  
+
+            <FleetDashboard warehouse={resolvedData.dc_code} />
+
             <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
               <div className="flex flex-col justify-between gap-3 border-b border-amber-200 bg-gradient-to-r from-amber-50 to-slate-50 px-3.5 py-3 sm:flex-row sm:items-end">
                 <div>
@@ -1716,47 +1792,47 @@ export default function CheckDC({
                     <span className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-300 bg-white text-[11px] font-black text-amber-700">
                       !
                     </span>
-  
+
                     <h3 className="text-sm font-black text-amber-950">
                       ข้อมูลปัญหากองรถประกอบการพิจารณา
                     </h3>
-  
+
                     <span className="rounded-full border border-rose-200 bg-white px-2 py-0.5 text-[9px] font-black text-rose-700">
                       {filteredIssueRows.length} คัน
                     </span>
                   </div>
-  
+
                   <p className="mt-1.5 text-[10px] font-medium leading-relaxed text-amber-800">
                     ประวัติการแจ้งปัญหาของประเภทรถ{" "}
                     <span className="font-black">
                       {cleanText(
                         selectedIssueTruckType ||
-                          resolvedData.fleet_truck_type
+                        resolvedData.fleet_truck_type
                       )}
-  
+
                       {["4W", "4WJ"].includes(
                         normalizeText(
                           selectedIssueTruckType ||
-                            resolvedData.fleet_truck_type
+                          resolvedData.fleet_truck_type
                         )
                       )
                         ? " (รถ 4 ล้อ)"
                         : ["6W", "6WJ"].includes(
-                              normalizeText(
-                                selectedIssueTruckType ||
-                                  resolvedData.fleet_truck_type
-                              )
-                            )
+                          normalizeText(
+                            selectedIssueTruckType ||
+                            resolvedData.fleet_truck_type
+                          )
+                        )
                           ? " (รถ 6 ล้อ)"
                           : normalizeText(
-                                selectedIssueTruckType ||
-                                  resolvedData.fleet_truck_type
-                              ) === "10W"
+                            selectedIssueTruckType ||
+                            resolvedData.fleet_truck_type
+                          ) === "10W"
                             ? " (รถ 10 ล้อ)"
                             : normalizeText(
-                                  selectedIssueTruckType ||
-                                    resolvedData.fleet_truck_type
-                                ) === "22W"
+                              selectedIssueTruckType ||
+                              resolvedData.fleet_truck_type
+                            ) === "22W"
                               ? " (รถพ่วง)"
                               : ""}
                     </span>{" "}
@@ -1767,12 +1843,12 @@ export default function CheckDC({
                     จากระบบ DFM
                   </p>
                 </div>
-  
+
                 <label className="block min-w-[190px]">
                   <span className="mb-1 block text-[10px] font-bold text-amber-800">
                     ประเภทรถ
                   </span>
-  
+
                   <select
                     value={selectedIssueTruckType}
                     onChange={(event) =>
@@ -1783,7 +1859,7 @@ export default function CheckDC({
                     {issueTruckTypeOptions.length === 0 && (
                       <option value="">ไม่มีข้อมูลประเภทรถ</option>
                     )}
-  
+
                     {issueTruckTypeOptions.map((truckType) => (
                       <option key={truckType} value={truckType}>
                         {cleanText(truckType)}
@@ -1792,7 +1868,7 @@ export default function CheckDC({
                   </select>
                 </label>
               </div>
-  
+
               <div className="p-3">
                 <div className="overflow-x-auto rounded-lg border border-slate-200">
                   <table className="w-full min-w-[620px] text-left text-xs">
@@ -1812,7 +1888,7 @@ export default function CheckDC({
                         </th>
                       </tr>
                     </thead>
-  
+
                     <tbody className="divide-y divide-slate-100">
                       {filteredIssueRows.length === 0 ? (
                         <tr>
@@ -1835,22 +1911,22 @@ export default function CheckDC({
                                 {cleanText(item.license_plate)}
                               </span>
                             </td>
-  
+
                             <td className="px-3 py-2.5 font-bold text-rose-700">
                               {cleanText(item.issue_type)}
                             </td>
-  
+
                             <td className="px-3 py-2.5 font-bold text-slate-700">
                               {formatThaiDate(item.period_start)}
                             </td>
-  
+
                             <td className="px-3 py-2.5 font-bold text-slate-700">
                               {item.duration_days !== undefined &&
-                              item.duration_days !== null &&
-                              item.duration_days !== ""
+                                item.duration_days !== null &&
+                                item.duration_days !== ""
                                 ? `${formatNumber(
-                                    item.duration_days
-                                  )} วัน`
+                                  item.duration_days
+                                )} วัน`
                                 : "-"}
                             </td>
                           </tr>
@@ -1863,7 +1939,7 @@ export default function CheckDC({
             </section>
           </div>
         )}
-  
+
         {/* Workload */}
         {activeTab === "workload" && (
           <div className="space-y-4">
@@ -1873,44 +1949,42 @@ export default function CheckDC({
                   <span className="h-5 w-1 rounded-full bg-blue-700" />
                   Workload ของ DC
                 </h3>
-  
+
                 <p className="mt-0.5 text-[10px] text-slate-500">
                   เปรียบเทียบ Forecast FC และ Workload FC
                 </p>
               </div>
-  
+
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <div className="inline-flex h-9 rounded-lg border border-slate-200 bg-slate-100 p-0.5">
                   <button
                     type="button"
                     onClick={() => setWorkloadViewMode("chart")}
-                    className={`rounded-md px-3 text-[10px] font-black transition ${
-                      workloadViewMode === "chart"
-                        ? "bg-white text-blue-800 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    }`}
+                    className={`rounded-md px-3 text-[10px] font-black transition ${workloadViewMode === "chart"
+                      ? "bg-white text-blue-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                      }`}
                   >
                     กราฟ
                   </button>
-  
+
                   <button
                     type="button"
                     onClick={() => setWorkloadViewMode("table")}
-                    className={`rounded-md px-3 text-[10px] font-black transition ${
-                      workloadViewMode === "table"
-                        ? "bg-white text-blue-800 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    }`}
+                    className={`rounded-md px-3 text-[10px] font-black transition ${workloadViewMode === "table"
+                      ? "bg-white text-blue-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                      }`}
                   >
                     ตาราง
                   </button>
                 </div>
-  
+
                 <label className="block min-w-[180px]">
                   <span className="mb-1 block text-[10px] font-bold text-slate-500">
                     เลือกเดือน
                   </span>
-  
+
                   <select
                     value={activeWorkloadMonth}
                     onChange={(event) =>
@@ -1923,7 +1997,7 @@ export default function CheckDC({
                         {formatThaiMonthYear(currentMonthKey)}
                       </option>
                     )}
-  
+
                     {workloadMonthOptions.map((month) => (
                       <option key={month} value={month}>
                         {formatThaiMonthYear(month)}
@@ -1933,13 +2007,13 @@ export default function CheckDC({
                 </label>
               </div>
             </div>
-  
+
             {workloadError && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
                 {cleanText(workloadError)}
               </div>
             )}
-  
+
             <div className="grid gap-2.5 sm:grid-cols-3">
               {[
                 {
@@ -1973,12 +2047,12 @@ export default function CheckDC({
                   <span
                     className={`absolute inset-y-0 left-0 w-1 ${item.bar}`}
                   />
-  
+
                   <div className="pl-1">
                     <p className="text-[10px] font-bold text-slate-500">
                       {item.label}
                     </p>
-  
+
                     <p
                       className={`mt-1 text-xl font-black ${item.text}`}
                     >
@@ -1988,7 +2062,7 @@ export default function CheckDC({
                 </div>
               ))}
             </div>
-  
+
             {workloadViewMode === "chart" ? (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex flex-col justify-between gap-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/50 px-3.5 py-3 sm:flex-row sm:items-center">
@@ -1996,25 +2070,25 @@ export default function CheckDC({
                     <h4 className="text-sm font-black text-slate-900">
                       กราฟ Forecast และ Workload
                     </h4>
-  
+
                     <p className="mt-0.5 text-[10px] text-slate-500">
                       {formatThaiMonthYear(activeWorkloadMonth)}
                     </p>
                   </div>
-  
+
                   <div className="flex items-center gap-4 text-[10px] font-bold">
                     <div className="flex items-center gap-1.5 text-slate-700">
                       <span className="h-0.5 w-5 rounded-full bg-slate-500" />
                       Forecast FC
                     </div>
-  
+
                     <div className="flex items-center gap-1.5 text-blue-800">
                       <span className="h-0.5 w-5 rounded-full bg-blue-700" />
                       Workload FC
                     </div>
                   </div>
                 </div>
-  
+
                 {loadingWorkload ? (
                   <div className="flex h-[230px] items-center justify-center gap-2 text-xs font-bold text-slate-500">
                     <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />
@@ -2048,7 +2122,7 @@ export default function CheckDC({
                           />
                         </filter>
                       </defs>
-  
+
                       <rect
                         x="0"
                         y="0"
@@ -2056,14 +2130,14 @@ export default function CheckDC({
                         height={workloadChartHeight}
                         fill="#ffffff"
                       />
-  
+
                       {workloadChartGridValues.map(
                         (gridValue, index) => {
                           const y =
                             workloadChartPadding.top +
                             (index / 5) *
-                              workloadChartDrawableHeight;
-  
+                            workloadChartDrawableHeight;
+
                           return (
                             <g key={`grid-${index}`}>
                               <line
@@ -2077,7 +2151,7 @@ export default function CheckDC({
                                 stroke="#e2e8f0"
                                 strokeDasharray="3 3"
                               />
-  
+
                               <text
                                 x={workloadChartPadding.left - 8}
                                 y={y + 3}
@@ -2092,7 +2166,7 @@ export default function CheckDC({
                           );
                         }
                       )}
-  
+
                       <line
                         x1={workloadChartPadding.left}
                         y1={workloadChartPadding.top}
@@ -2103,7 +2177,7 @@ export default function CheckDC({
                         }
                         stroke="#94a3b8"
                       />
-  
+
                       <line
                         x1={workloadChartPadding.left}
                         y1={
@@ -2120,7 +2194,7 @@ export default function CheckDC({
                         }
                         stroke="#94a3b8"
                       />
-  
+
                       <polyline
                         points={forecastChartPoints}
                         fill="none"
@@ -2129,7 +2203,7 @@ export default function CheckDC({
                         strokeLinejoin="round"
                         strokeLinecap="round"
                       />
-  
+
                       <polyline
                         points={workloadChartPoints}
                         fill="none"
@@ -2138,40 +2212,40 @@ export default function CheckDC({
                         strokeLinejoin="round"
                         strokeLinecap="round"
                       />
-  
+
                       {workloadChartData.map((item, index) => {
                         const x = getWorkloadChartX(index);
-  
+
                         const forecastY = getWorkloadChartY(
                           item.forecast
                         );
-  
+
                         const workloadY = getWorkloadChartY(
                           item.workload
                         );
-  
+
                         const tooltipWidth = 124;
                         const tooltipHeight = 53;
-  
+
                         const tooltipX =
                           x + tooltipWidth + 8 >
-                          workloadChartWidth
+                            workloadChartWidth
                             ? x - tooltipWidth - 8
                             : x + 8;
-  
+
                         const tooltipY = Math.max(
                           4,
                           Math.min(
                             Math.min(forecastY, workloadY) -
-                              tooltipHeight -
-                              5,
+                            tooltipHeight -
+                            5,
                             workloadChartHeight -
-                              workloadChartPadding.bottom -
-                              tooltipHeight -
-                              3
+                            workloadChartPadding.bottom -
+                            tooltipHeight -
+                            3
                           )
                         );
-  
+
                         return (
                           <g
                             key={`${item.dateKey}-${index}`}
@@ -2184,7 +2258,7 @@ export default function CheckDC({
                               height={workloadChartDrawableHeight}
                               fill="transparent"
                             />
-  
+
                             <line
                               x1={x}
                               y1={workloadChartPadding.top}
@@ -2197,7 +2271,7 @@ export default function CheckDC({
                               strokeDasharray="3 3"
                               className="pointer-events-none opacity-0 transition-opacity group-hover:opacity-100"
                             />
-  
+
                             <circle
                               cx={x}
                               cy={forecastY}
@@ -2206,7 +2280,7 @@ export default function CheckDC({
                               stroke="#64748b"
                               strokeWidth="2"
                             />
-  
+
                             <circle
                               cx={x}
                               cy={workloadY}
@@ -2215,7 +2289,7 @@ export default function CheckDC({
                               stroke="#1d4ed8"
                               strokeWidth="2"
                             />
-  
+
                             <g
                               className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100"
                               filter="url(#tooltipShadow)"
@@ -2229,7 +2303,7 @@ export default function CheckDC({
                                 fill="#0f172a"
                                 opacity="0.96"
                               />
-  
+
                               <text
                                 x={tooltipX + 8}
                                 y={tooltipY + 13}
@@ -2239,14 +2313,14 @@ export default function CheckDC({
                               >
                                 {item.dateLabel}
                               </text>
-  
+
                               <circle
                                 cx={tooltipX + 10}
                                 cy={tooltipY + 28}
                                 r="2.5"
                                 fill="#94a3b8"
                               />
-  
+
                               <text
                                 x={tooltipX + 17}
                                 y={tooltipY + 31}
@@ -2257,14 +2331,14 @@ export default function CheckDC({
                                 Forecast:{" "}
                                 {formatNumber(item.forecast)}
                               </text>
-  
+
                               <circle
                                 cx={tooltipX + 10}
                                 cy={tooltipY + 42}
                                 r="2.5"
                                 fill="#3b82f6"
                               />
-  
+
                               <text
                                 x={tooltipX + 17}
                                 y={tooltipY + 45}
@@ -2276,7 +2350,7 @@ export default function CheckDC({
                                 {formatNumber(item.workload)}
                               </text>
                             </g>
-  
+
                             <text
                               x={x}
                               y={
@@ -2299,7 +2373,7 @@ export default function CheckDC({
                             >
                               {item.dateLabel.slice(0, 5)}
                             </text>
-  
+
                             {item.dateKey === todayKey && (
                               <text
                                 x={x}
@@ -2331,21 +2405,21 @@ export default function CheckDC({
                       <th className="px-3 py-2.5 font-black">
                         วันที่
                       </th>
-  
+
                       <th className="px-3 py-2.5 text-right font-black">
                         Forecast FC
                       </th>
-  
+
                       <th className="px-3 py-2.5 text-right font-black text-blue-800">
                         Workload FC
                       </th>
-  
+
                       <th className="px-3 py-2.5 text-right font-black">
                         ผลต่าง
                       </th>
                     </tr>
                   </thead>
-  
+
                   <tbody className="divide-y divide-slate-100">
                     {monthlyWorkloadRows.length === 0 ? (
                       <tr>
@@ -2360,19 +2434,19 @@ export default function CheckDC({
                       monthlyWorkloadRows.map((item, index) => {
                         const record =
                           item as Record<string, unknown>;
-  
+
                         const rawDate =
                           getValueIgnoreCase(record, "DATE") ||
                           getValueIgnoreCase(record, "date");
-  
+
                         const dateKey = normalizeDateKey(
                           String(rawDate || "")
                         );
-  
+
                         const forecast = getForecastFc(item);
                         const workload = getWorkloadFc(item);
                         const difference = workload - forecast;
-  
+
                         return (
                           <tr
                             key={`${dateKey}-${index}`}
@@ -2384,30 +2458,29 @@ export default function CheckDC({
                           >
                             <td className="px-3 py-2.5 font-black text-slate-700">
                               {formatThaiDate(dateKey)}
-  
+
                               {dateKey === todayKey && (
                                 <span className="ml-1.5 rounded-full bg-blue-700 px-1.5 py-0.5 text-[8px] font-black text-white">
                                   วันนี้
                                 </span>
                               )}
                             </td>
-  
+
                             <td className="px-3 py-2.5 text-right font-black text-slate-600">
                               {formatNumber(forecast)}
                             </td>
-  
+
                             <td className="px-3 py-2.5 text-right font-black text-blue-800">
                               {formatNumber(workload)}
                             </td>
-  
+
                             <td
-                              className={`px-3 py-2.5 text-right font-black ${
-                                difference > 0
-                                  ? "text-rose-600"
-                                  : difference < 0
-                                    ? "text-emerald-600"
-                                    : "text-slate-500"
-                              }`}
+                              className={`px-3 py-2.5 text-right font-black ${difference > 0
+                                ? "text-rose-600"
+                                : difference < 0
+                                  ? "text-emerald-600"
+                                  : "text-slate-500"
+                                }`}
                             >
                               {difference > 0 ? "+" : ""}
                               {formatNumber(difference)}
