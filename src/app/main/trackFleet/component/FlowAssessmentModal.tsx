@@ -23,6 +23,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
+import ProvinceDatalist from "../../component/thaiProvinces";
 
 const FLOW_API_URL =
   "http://192.168.158.210/api_new_truck/api/flow_data_get.php";
@@ -919,6 +920,43 @@ export default function FlowAssessmentModal({
     }
   };
 
+  const getCurrentDepartment = () => {
+    if (typeof window === "undefined") return "";
+
+    const savedUser =
+      localStorage.getItem("user_info") ||
+      localStorage.getItem("user") ||
+      localStorage.getItem("userInfo");
+
+    if (!savedUser) return "";
+
+    try {
+      const user = JSON.parse(savedUser);
+
+      return String(
+        user?.department ||
+        user?.DEPARTMENT ||
+        user?.department_name ||
+        user?.DEPARTMENT_NAME ||
+        ""
+      )
+        .trim()
+        .toUpperCase();
+    } catch {
+      return "";
+    }
+  };
+
+  const canEditProcessLevel = (processLevel: string | number) => {
+    const department = getCurrentDepartment();
+    const level = Number(processLevel);
+
+    if (department === "FBP") return level === 7;
+    if (department === "KA") return level === 8;
+
+    return true;
+  };
+
   const handleVehicleExtraChange = (
     field: keyof VehicleExtraForm,
     value: string
@@ -1175,6 +1213,19 @@ export default function FlowAssessmentModal({
 
   const handleSaveFlowDates = async (flow: DisplayFlowRow) => {
     const flowId = String(flow.id);
+
+    if (!canEditProcessLevel(flow.process_level)) {
+      const department = getCurrentDepartment();
+
+      setError(
+        department === "FBP"
+          ? "แผนก FBP สามารถกรอกได้เฉพาะ Process Level 7"
+          : department === "KA"
+            ? "แผนก KA สามารถกรอกได้เฉพาะ Process Level 8"
+            : "คุณไม่มีสิทธิ์แก้ไขขั้นตอนนี้"
+      );
+      return;
+    }
 
     const documentFinalStatus = data.flow_data.reduce<
       "cancelled" | "expired" | null
@@ -2073,19 +2124,36 @@ export default function FlowAssessmentModal({
                               </span>
                             </button>
                           ) : (
-                            <input
-                              type="text"
-                              value={vehicleExtraForm[field.key]}
-                              onChange={(event) =>
-                                handleVehicleExtraChange(
-                                  field.key,
-                                  event.target.value
-                                )
-                              }
-                              placeholder={`กรอก${field.label}`}
-                              disabled={savingWarehouseInfo}
-                              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-                            />
+                            <>
+                              <input
+                                type="text"
+                                list={
+                                  field.key === "car_province"
+                                    ? `car-province-options-${vehicleNo}`
+                                    : undefined
+                                }
+                                value={vehicleExtraForm[field.key]}
+                                onChange={(event) =>
+                                  handleVehicleExtraChange(
+                                    field.key,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder={
+                                  field.key === "car_province"
+                                    ? "เลือกหรือพิมพ์จังหวัด"
+                                    : `กรอก${field.label}`
+                                }
+                                disabled={savingWarehouseInfo}
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                              />
+
+                              {field.key === "car_province" && (
+                                <ProvinceDatalist
+                                  id={`car-province-options-${vehicleNo}`}
+                                />
+                              )}
+                            </>
                           )}
                         </div>
                       ))}
@@ -2207,10 +2275,10 @@ export default function FlowAssessmentModal({
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <label
                                   className={`flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-xl border px-3 text-xs font-bold transition ${selectedFile
-                                      ? "border-violet-300 bg-violet-50 text-violet-700"
-                                      : existingFile?.file_name
-                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                        : "border-violet-200 bg-white text-violet-700 hover:border-violet-400 hover:bg-violet-50"
+                                    ? "border-violet-300 bg-violet-50 text-violet-700"
+                                    : existingFile?.file_name
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-violet-200 bg-white text-violet-700 hover:border-violet-400 hover:bg-violet-50"
                                     } ${savingMemoKey !== null
                                       ? "pointer-events-none cursor-not-allowed opacity-50"
                                       : ""
@@ -2475,6 +2543,17 @@ export default function FlowAssessmentModal({
                           <div className="flex min-w-max items-stretch gap-0">
                             {vehicle.rows.map((flow, flowIndex) => {
                               const flowId = String(flow.id);
+                              const currentDepartment = getCurrentDepartment();
+                              const canEditThisProcess = canEditProcessLevel(
+                                flow.process_level
+                              );
+                              const permissionMessage = !canEditThisProcess
+                                ? currentDepartment === "FBP"
+                                  ? "แผนก FBP แก้ไขได้เฉพาะ Process Level 7"
+                                  : currentDepartment === "KA"
+                                    ? "แผนก KA แก้ไขได้เฉพาะ Process Level 8"
+                                    : "ไม่มีสิทธิ์แก้ไขขั้นตอนนี้"
+                                : "";
                               const draft = dateDrafts[flowId] || {
                                 str_date: toDateInputValue(flow.str_date),
                                 end_date: toDateInputValue(flow.end_date),
@@ -2632,11 +2711,11 @@ export default function FlowAssessmentModal({
                                       ? "border-slate-300 bg-slate-100 text-slate-500"
                                       : invalidDateRange
                                         ? "border-rose-300 bg-rose-50/60"
-                                      : hasCompleted
-                                        ? "border-emerald-200 bg-emerald-50/40"
-                                        : hasStarted
-                                          ? "border-blue-200 bg-blue-50/40"
-                                          : "border-slate-200 bg-white"
+                                        : hasCompleted
+                                          ? "border-emerald-200 bg-emerald-50/40"
+                                          : hasStarted
+                                            ? "border-blue-200 bg-blue-50/40"
+                                            : "border-slate-200 bg-white"
                                       }`}
                                   >
                                     <div className="flex items-start justify-between gap-3">
@@ -2644,10 +2723,10 @@ export default function FlowAssessmentModal({
                                         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${hasDocumentFinalStatus
                                           ? "bg-slate-300 text-slate-600"
                                           : hasCompleted
-                                          ? "bg-emerald-600 text-white"
-                                          : hasStarted
-                                            ? "bg-blue-600 text-white"
-                                            : "bg-slate-100 text-slate-500"
+                                            ? "bg-emerald-600 text-white"
+                                            : hasStarted
+                                              ? "bg-blue-600 text-white"
+                                              : "bg-slate-100 text-slate-500"
                                           }`}
                                       >
                                         {flow.process_level}
@@ -2657,23 +2736,23 @@ export default function FlowAssessmentModal({
                                         className={`rounded-full px-2 py-1 text-[9px] font-black ${hasDocumentFinalStatus
                                           ? "bg-slate-200 text-slate-500"
                                           : hasCompleted
-                                          ? "bg-emerald-100 text-emerald-700"
-                                          : hasStarted
-                                            ? "bg-blue-100 text-blue-700"
-                                            : "bg-slate-100 text-slate-400"
+                                            ? "bg-emerald-100 text-emerald-700"
+                                            : hasStarted
+                                              ? "bg-blue-100 text-blue-700"
+                                              : "bg-slate-100 text-slate-400"
                                           }`}
                                       >
                                         {hasDocumentFinalStatus
                                           ? "ไม่สามารถแก้ไขได้"
                                           : isAlreadySaved
                                             ? "บันทึกครบแล้ว"
-                                          : isStartSaved
-                                            ? "บันทึกวันเริ่มแล้ว"
-                                            : hasCompleted
-                                              ? "พร้อมบันทึก"
-                                              : hasStarted
-                                                ? "เลือกวันเริ่มแล้ว"
-                                                : "รอดำเนินการ"}
+                                            : isStartSaved
+                                              ? "บันทึกวันเริ่มแล้ว"
+                                              : hasCompleted
+                                                ? "พร้อมบันทึก"
+                                                : hasStarted
+                                                  ? "เลือกวันเริ่มแล้ว"
+                                                  : "รอดำเนินการ"}
                                       </span>
                                     </div>
 
@@ -2698,9 +2777,20 @@ export default function FlowAssessmentModal({
 
                                         <button
                                           type="button"
-                                          disabled={hasDocumentFinalStatus || isAlreadySaved || isStartSaved}
+                                          disabled={
+                                            !canEditThisProcess ||
+                                            hasDocumentFinalStatus ||
+                                            isAlreadySaved ||
+                                            isStartSaved
+                                          }
+                                          title={permissionMessage}
                                           onClick={(event) => {
-                                            if (!hasDocumentFinalStatus && !isAlreadySaved && !isStartSaved) {
+                                            if (
+                                              canEditThisProcess &&
+                                              !hasDocumentFinalStatus &&
+                                              !isAlreadySaved &&
+                                              !isStartSaved
+                                            ) {
                                               setOpenDatePicker({
                                                 flowId,
                                                 field: "str_date",
@@ -2737,9 +2827,20 @@ export default function FlowAssessmentModal({
 
                                         <button
                                           type="button"
-                                          disabled={hasDocumentFinalStatus || isAlreadySaved || !draft.str_date}
+                                          disabled={
+                                            !canEditThisProcess ||
+                                            hasDocumentFinalStatus ||
+                                            isAlreadySaved ||
+                                            !draft.str_date
+                                          }
+                                          title={permissionMessage}
                                           onClick={(event) => {
-                                            if (!hasDocumentFinalStatus && !isAlreadySaved && draft.str_date) {
+                                            if (
+                                              canEditThisProcess &&
+                                              !hasDocumentFinalStatus &&
+                                              !isAlreadySaved &&
+                                              draft.str_date
+                                            ) {
                                               setOpenDatePicker({
                                                 flowId,
                                                 field: "end_date",
@@ -2906,12 +3007,14 @@ export default function FlowAssessmentModal({
                                       type="button"
                                       onClick={() => handleSaveFlowDates(flow)}
                                       disabled={
+                                        !canEditThisProcess ||
                                         hasDocumentFinalStatus ||
                                         isAlreadySaved ||
                                         savingFlowId !== null ||
                                         !draft.str_date ||
                                         invalidDateRange
                                       }
+                                      title={permissionMessage}
                                       className={`mt-auto inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition ${hasDocumentFinalStatus
                                         ? "cursor-not-allowed bg-slate-300 text-slate-500"
                                         : isAlreadySaved
@@ -2933,15 +3036,17 @@ export default function FlowAssessmentModal({
                                       )}
                                       {savingFlowId === flowId
                                         ? "กำลังบันทึก..."
-                                        : hasDocumentFinalStatus
-                                          ? "ไม่สามารถแก้ไขได้"
-                                          : isAlreadySaved
-                                            ? "บันทึกครบแล้ว"
-                                          : isStartSaved
-                                            ? "บันทึกวันสิ้นสุด"
-                                            : draft.end_date
-                                              ? "บันทึกวันที่"
-                                              : "บันทึกวันเริ่ม"}
+                                        : !canEditThisProcess
+                                          ? "ไม่มีสิทธิ์แก้ไข"
+                                          : hasDocumentFinalStatus
+                                            ? "ไม่สามารถแก้ไขได้"
+                                            : isAlreadySaved
+                                              ? "บันทึกครบแล้ว"
+                                              : isStartSaved
+                                                ? "บันทึกวันสิ้นสุด"
+                                                : draft.end_date
+                                                  ? "บันทึกวันที่"
+                                                  : "บันทึกวันเริ่ม"}
                                     </button>
 
                                     {isFinanceApprovalProcess && (

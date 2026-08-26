@@ -79,16 +79,17 @@ interface RequestStatusHistoryItem {
     id?: string | number;
     request_id?: string | number;
     status?: string;
-    status_details?: string;
-    changed_by?: string;
-    changed_at?: string;
+    status_details?: string | null;
+    changed_by?: string | null;
+    changed_at?: string | null;
 }
 
 interface RequestStatusHistoryResponse {
     status?: string;
-    request_id?: string | number;
+    success?: boolean;
     count?: number;
     data?: RequestStatusHistoryItem[];
+    message?: string;
 }
 
 interface GmApprovalInfo {
@@ -706,25 +707,9 @@ export default function ExportRequestModal({
 
         const statusMap: Record<string, string> = {
             gm_pending: "GM กำลังอนุมัติ",
-            center_pending: "กำลังประเมินกองรถ (FBP)",
             fbp_pending: "กำลังประเมินกองรถ (FBP)",
-            process: "รอดำเนินการตามกระบวนการ (TCAS)",
             progress: "รอดำเนินการตามกระบวนการ (TCAS)",
-            confirm_request: "รอดำเนินการตามกระบวนการ (TCAS)",
-            "confirm request": "รอดำเนินการตามกระบวนการ (TCAS)",
-            in_progress: "รอดำเนินการตามกระบวนการ (TCAS)",
-            reject_gm: "GM ไม่อนุมัติ",
-            reject_by_gm: "GM ไม่อนุมัติ",
-            rejected_by_gm: "GM ไม่อนุมัติ",
-            gm_rejected: "GM ไม่อนุมัติ",
-            reject_center: "ส่วนกลางไม่อนุมัติ",
-            reject_by_center: "ส่วนกลางไม่อนุมัติ",
-            rejected_by_center: "ส่วนกลางไม่อนุมัติ",
-            center_rejected: "ส่วนกลางไม่อนุมัติ",
-            fbp_rejected: "ส่วนกลางไม่อนุมัติ",
-            rejected: "ไม่อนุมัติ",
-            approved: "อนุมัติแล้ว",
-            completed: "ดำเนินการเสร็จสิ้น",
+            reject_by_fbp: "ส่วนกลางไม่อนุมัติ",
         };
 
         if (statusMap[status]) {
@@ -893,10 +878,7 @@ export default function ExportRequestModal({
         }
 
         if (
-            fallbackStatus === "reject_by_gm" ||
-            fallbackStatus === "reject_gm" ||
-            fallbackStatus === "rejected_by_gm" ||
-            fallbackStatus === "gm_rejected"
+            fallbackStatus === "reject_by_gm"
         ) {
             return {
                 status: "reject_by_gm",
@@ -932,101 +914,88 @@ export default function ExportRequestModal({
             return;
         }
 
-        const requestIds = Array.from(
-            new Set(
-                safeRequests
-                    .map((item) => item.id)
-                    .filter(
-                        (id) =>
-                            id !== null &&
-                            id !== undefined
-                    )
-                    .map((id) => String(id))
-            )
-        );
-
-        if (
-            requestIds.length === 0
-        ) {
-            setGmApprovalByRequest({});
-            return;
-        }
-
+        const controller = new AbortController();
         let cancelled = false;
 
         const loadGmHistory = async () => {
             try {
                 setLoadingGmHistory(true);
 
-                const entries =
-                    await Promise.all(
-                        requestIds.map(
-                            async (
-                                requestId
-                            ) => {
-                                try {
-                                    const response =
-                                        await fetch(
-                                            `http://192.168.158.210/api_new_truck/api/request_status_history.php?request_id=${encodeURIComponent(
-                                                requestId
-                                            )}`,
-                                            {
-                                                method: "GET",
-                                                headers: {
-                                                    Accept: "application/json",
-                                                },
-                                                cache: "no-store",
-                                            }
-                                        );
+                const response = await fetch(
+                    "http://192.168.158.210/api_new_truck/api/request_status_history.php",
+                    {
+                        method: "GET",
+                        headers: {
+                            Accept: "application/json",
+                        },
+                        cache: "no-store",
+                        signal: controller.signal,
+                    }
+                );
 
-                                    if (
-                                        !response.ok
-                                    ) {
-                                        throw new Error(
-                                            `HTTP ${response.status}`
-                                        );
-                                    }
+                const result =
+                    (await response.json()) as RequestStatusHistoryResponse;
 
-                                    const result =
-                                        (await response.json()) as RequestStatusHistoryResponse;
-
-                                    const history =
-                                        Array.isArray(
-                                            result.data
-                                        )
-                                            ? result.data
-                                            : [];
-
-                                    return [
-                                        requestId,
-                                        getGmApprovalFromHistory(
-                                            history
-                                        ),
-                                    ] as const;
-                                } catch {
-                                    return [
-                                        requestId,
-                                        {
-                                            status: "",
-                                            statusText: "",
-                                            changedAt: "",
-                                            changedBy: "",
-                                        } satisfies GmApprovalInfo,
-                                    ] as const;
-                                }
-                            }
-                        )
+                if (
+                    !response.ok ||
+                    result.status !== "success"
+                ) {
+                    throw new Error(
+                        result.message ||
+                        `HTTP ${response.status}`
                     );
+                }
+
+                const historyRows = Array.isArray(result.data)
+                    ? result.data
+                    : [];
+
+                const historyByRequest = historyRows.reduce<
+                    Record<string, RequestStatusHistoryItem[]>
+                >((groups, historyItem) => {
+                    if (
+                        historyItem.request_id === null ||
+                        historyItem.request_id === undefined
+                    ) {
+                        return groups;
+                    }
+
+                    const requestId = String(historyItem.request_id);
+
+                    if (!groups[requestId]) {
+                        groups[requestId] = [];
+                    }
+
+                    groups[requestId].push(historyItem);
+
+                    return groups;
+                }, {});
+
+                const approvalByRequest = Object.fromEntries(
+                    Object.entries(historyByRequest).map(
+                        ([requestId, history]) => [
+                            requestId,
+                            getGmApprovalFromHistory(history),
+                        ]
+                    )
+                );
 
                 if (cancelled) {
                     return;
                 }
 
-                setGmApprovalByRequest(
-                    Object.fromEntries(
-                        entries
-                    )
-                );
+                setGmApprovalByRequest(approvalByRequest);
+            } catch (error) {
+                if ((error as Error).name !== "AbortError") {
+                    console.error(
+                        "โหลดประวัติสถานะทั้งหมดไม่สำเร็จ",
+                        error
+                    );
+
+                    if (!cancelled) {
+                        setGmApprovalByRequest({});
+                    }
+                }
             } finally {
                 if (!cancelled) {
                     setLoadingGmHistory(false);
@@ -1038,11 +1007,9 @@ export default function ExportRequestModal({
 
         return () => {
             cancelled = true;
+            controller.abort();
         };
-    }, [
-        open,
-        safeRequests,
-    ]);
+    }, [open]);
 
     // กำหนดช่วงวันที่เริ่มต้นเมื่อเปิด Modal
     useEffect(() => {

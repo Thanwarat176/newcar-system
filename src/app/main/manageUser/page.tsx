@@ -315,7 +315,7 @@ export default function ManageUsersPage() {
         body: JSON.stringify({
           id: targetUser.id,
           em_id: targetUser.em_id,
-          password: "$2y$10$A8hWu0kWO4/fQx20SKy2Yeq6nTwF8GfAsj0k3kawO9OYP0mxh/.Vi", 
+          password: "0000", 
           updated_by: updatedBy,
         }),
       });
