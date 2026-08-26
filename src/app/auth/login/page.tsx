@@ -173,24 +173,18 @@ export default function LoginPage() {
       });
 
       setTimeout(() => {
-        const userWarehouse = String(
+        const userWarehouse =
           data.user.warehouse ||
-            data.user.WAREHOUSE ||
-            data.user.team ||
-            data.user.TEAM ||
-            ""
-        )
-          .trim()
-          .toUpperCase();
-      
-        if (
-          userWarehouse === "WAREHOUSE" ||
-          userWarehouse === "CENTER"
-        ) {
+          data.user.WAREHOUSE ||
+          data.user.team ||
+          data.user.TEAM ||
+          "";
+
+        if (userWarehouse.toUpperCase() === "WAREHOUSE") {
           router.push(PATHS.auth.selectDC);
           return;
         }
-      
+
         router.push(PATHS.main.addFleet);
       }, 1000);
 
