@@ -168,6 +168,7 @@ export default function GMModalDetail({
   onSuccess = () => { },
 }: GMModalDetailProps) {
   const [remark, setRemark] = useState("");
+  const [approvedQty, setApprovedQty] = useState("");
   const [saving, setSaving] = useState(false);
   const [decisionCompleted, setDecisionCompleted] = useState(false);
   const [confirmDecision, setConfirmDecision] =
@@ -184,10 +185,11 @@ export default function GMModalDetail({
     if (!open) return;
 
     setRemark("");
+    setApprovedQty(String(Math.max(0, Math.floor(Number(data.qty) || 0))));
     setConfirmDecision(null);
     setMessage(null);
     setDecisionCompleted(false);
-  }, [open, data.id]);
+  }, [open, data.id, data.qty]);
 
   useEffect(() => {
     if (!open) return;
@@ -211,6 +213,28 @@ export default function GMModalDetail({
 
   if (!open) return null;
   const currentStatusText = getStatusText(data.status);
+  const requestedQty = Math.max(0, Math.floor(Number(data.qty) || 0));
+  const approveQtyGm = Math.max(
+    0,
+    Math.floor(
+      Number(
+        (
+          data as RequestItem & {
+            approve_qty_gm?: number | string | null;
+          }
+        ).approve_qty_gm,
+      ) || 0,
+    ),
+  );
+  const rejectedQty =
+  normalizeStatus(data.status) === "gm_pending"
+    ? 0
+    : Math.max(requestedQty - approveQtyGm, 0);
+  const approvedQtyNumber = Number(approvedQty);
+  const isApprovedQtyValid =
+    Number.isInteger(approvedQtyNumber) &&
+    approvedQtyNumber >= 1;
+
   const updateGmDecision = async (status: GmDecision) => {
     if (!canMakeDecision) {
       setConfirmDecision(null);
@@ -237,6 +261,14 @@ export default function GMModalDetail({
       return;
     }
 
+    if (status === "fbp_pending" && !isApprovedQtyValid) {
+      setMessage({
+        type: "error",
+        text: "กรุณาระบุจำนวนรถที่อนุมัติเป็นจำนวนเต็มตั้งแต่ 1 คันขึ้นไป",
+      });
+      return;
+    }
+
     try {
       setSaving(true);
       setMessage(null);
@@ -245,6 +277,8 @@ export default function GMModalDetail({
         id: Number(data.id),
         status,
         approved_by: getCurrentUserText(),
+        approve_qty_gm:
+          status === "fbp_pending" ? approvedQtyNumber : 0,
         reject_reason:
           status === "reject_by_gm" ? remark.trim() : "",
         status_details:
@@ -367,7 +401,7 @@ export default function GMModalDetail({
                   </span>
 
                   <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
-                    DC: {data.dc_code || "-"}
+                    {data.dc_code || "-"}
                   </span>
                 </div>
               </div>
@@ -424,7 +458,15 @@ export default function GMModalDetail({
                     ["เลขที่เอกสาร", data.running_doc || "-"],
                     ["DC", data.dc_code || "-"],
                     ["ประเภทรถ", data.fleet_truck_type || "-"],
-                    ["จำนวน", `${formatNumber(data.qty)} คัน`],
+                    ["จำนวนที่ขอ", `${formatNumber(data.qty)} คัน`],
+                    [
+                      "จำนวนที่ GM อนุมัติ",
+                      `${formatNumber(approveQtyGm)} คัน`,
+                    ],
+                    [
+                      "จำนวนที่ไม่อนุมัติ",
+                      `${formatNumber(rejectedQty)} คัน`,
+                    ],
                     ["สถานะ", currentStatusText],
                   ].map(([label, value]) => (
                     <div
@@ -521,6 +563,49 @@ export default function GMModalDetail({
                   </div>
 
                   <div className="space-y-4 p-4">
+                    {/* APPROVED QUANTITY */}
+                    <label className="block">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-600">
+                          จำนวนรถที่อนุมัติ
+                        </span>
+
+                        <span className="text-[9px] font-semibold text-slate-400">
+                          ขอทั้งหมด {formatNumber(data.qty)} คัน
+                        </span>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          value={approvedQty}
+                          disabled={saving}
+                          onChange={(event) => {
+                            setApprovedQty(event.target.value);
+                            setMessage(null);
+                          }}
+                          className={`h-11 w-full rounded-xl border bg-slate-50 px-3 pr-14 text-sm font-black text-slate-700 outline-none transition hover:border-blue-300 focus:bg-white focus:ring-4 disabled:cursor-not-allowed disabled:bg-slate-100 ${
+                            approvedQty && !isApprovedQtyValid
+                              ? "border-rose-400 focus:border-rose-500 focus:ring-rose-100"
+                              : "border-slate-300 focus:border-blue-500 focus:ring-blue-100"
+                          }`}
+                        />
+
+                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-bold text-slate-400">
+                          คัน
+                        </span>
+                      </div>
+
+                      {approvedQty && !isApprovedQtyValid && (
+                        <span className="mt-1.5 block text-[10px] font-bold text-rose-600">
+                          กรุณากรอกจำนวนเต็มตั้งแต่ 1 คันขึ้นไป
+                        </span>
+                      )}
+                    </label>
+
                     {/* REMARK */}
                     <label className="block">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -556,9 +641,16 @@ export default function GMModalDetail({
                           type="button"
                           onClick={() => {
                             setMessage(null);
+                            if (!isApprovedQtyValid) {
+                              setMessage({
+                                type: "error",
+                                text: "กรุณาระบุจำนวนรถที่อนุมัติเป็นจำนวนเต็มตั้งแต่ 1 คันขึ้นไป",
+                              });
+                              return;
+                            }
                             setConfirmDecision("fbp_pending");
                           }}
-                          disabled={saving}
+                          disabled={saving || !isApprovedQtyValid}
                           className="group flex min-h-12 w-full items-center justify-between rounded-xl bg-gradient-to-r from-blue-700 to-indigo-700 px-4 text-left text-white shadow-lg shadow-blue-700/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <span>
@@ -638,7 +730,7 @@ export default function GMModalDetail({
                                   }`}
                               >
                                 {confirmDecision === "fbp_pending"
-                                  ? "เมื่อยืนยันแล้ว รายการจะถูกส่งต่อให้ทีม FBP"
+                                  ? `จำนวนที่ขอ ${requestedQty} คัน อนุมัติ ${approvedQtyNumber} คัน และส่งต่อให้ทีม FBP`
                                   : "เมื่อยืนยันแล้ว รายการจะถูกบันทึกว่าไม่อนุมัติ"}
                               </p>
                             </div>
@@ -669,6 +761,8 @@ export default function GMModalDetail({
                               disabled={
                                 saving ||
                                 !canMakeDecision ||
+                                (confirmDecision === "fbp_pending" &&
+                                  !isApprovedQtyValid) ||
                                 (confirmDecision === "reject_by_gm" &&
                                   !remark.trim())
                               }

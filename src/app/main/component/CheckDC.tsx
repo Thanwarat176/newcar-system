@@ -706,54 +706,172 @@ export default function CheckDC({
 
   useEffect(() => {
     if (!resolvedData?.dc_code) {
-      setWorkloads([]);
+      setFleetStats(EMPTY_FLEET_STATS);
       return;
     }
-
+  
     let cancelled = false;
-
-    const fetchWorkload = async () => {
+  
+    const fetchFleetCheck = async () => {
       try {
-        setLoadingWorkload(true);
-        setWorkloadError("");
-
-        const response = await fetch(WORKLOAD_API, {
-          method: "GET",
-          cache: "no-store",
+        setLoadingFleet(true);
+        setFleetError("");
+  
+        const normalizedDcCode = String(resolvedData.dc_code).trim();
+  
+        const params = new URLSearchParams({
+          dc: normalizedDcCode,
         });
-
+  
+        const queryString = params
+          .toString()
+          .replace(/\+/g, "%20");
+  
+        const response = await fetch(
+          `${FLEET_CHECK_API}?${queryString}`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
+            cache: "no-store",
+            credentials: "omit",
+          },
+        );
+  
         const responseText = await response.text();
         let result: unknown = null;
-
+  
         try {
-          result = responseText ? JSON.parse(responseText) : null;
+          result = responseText
+            ? JSON.parse(responseText)
+            : null;
         } catch {
-          throw new Error("Workload API ไม่ได้ส่งข้อมูล JSON กลับมา");
+          throw new Error(
+            "Fleet Check API ไม่ได้ส่งข้อมูล JSON กลับมา",
+          );
         }
-
+  
         if (!response.ok) {
-          throw new Error(`Workload API Error ${response.status}`);
+          const message =
+            result &&
+            typeof result === "object" &&
+            "message" in result
+              ? String(
+                  (result as { message?: unknown })
+                    .message || "",
+                )
+              : "";
+  
+          throw new Error(
+            message ||
+              `Fleet Check API Error ${response.status}`,
+          );
         }
-
+  
+        if (
+          result &&
+          typeof result === "object" &&
+          "success" in result &&
+          (result as { success?: boolean }).success === false
+        ) {
+          const message =
+            "message" in result
+              ? String(
+                  (result as { message?: unknown })
+                    .message || "",
+                )
+              : "";
+  
+          throw new Error(
+            message ||
+              "ไม่สามารถโหลดข้อมูลสถานะกองรถได้",
+          );
+        }
+  
+        const rows =
+          getArrayFromResponse<
+            Record<string, unknown>
+          >(result);
+  
+        const newStats: FleetCheckStats = {
+          total: 0,
+          fleet_in: 0,
+          fleet_supplement: 0,
+          fleet_transferred_in: 0,
+          fleet_crossdock: 0,
+          fleet_transferred_out: 0,
+          fleet_backhaul: 0,
+        };
+  
+        rows.forEach((item) => {
+          const fleetType = normalizeText(
+            getValueIgnoreCase(item, "fleet_type") ||
+              getValueIgnoreCase(item, "type") ||
+              getValueIgnoreCase(item, "fleet_status"),
+          );
+  
+          const quantity = Number(
+            getValueIgnoreCase(item, "qty") ||
+              getValueIgnoreCase(item, "count") ||
+              getValueIgnoreCase(item, "total") ||
+              1,
+          );
+  
+          const safeQuantity = Number.isNaN(quantity)
+            ? 0
+            : quantity;
+  
+          newStats.total += safeQuantity;
+  
+          if (fleetType === "รถในกอง") {
+            newStats.fleet_in += safeQuantity;
+          } else if (fleetType === "รถเสริม") {
+            newStats.fleet_supplement += safeQuantity;
+          } else if (
+            fleetType === "รถโอนมาช่วย" ||
+            fleetType === "โอนมาช่วย"
+          ) {
+            newStats.fleet_transferred_in +=
+              safeQuantity;
+          } else if (
+            fleetType === "CROSS DOCK" ||
+            fleetType === "CROSSDOCK"
+          ) {
+            newStats.fleet_crossdock += safeQuantity;
+          } else if (
+            fleetType === "รถโอนไปช่วยคลังอื่น" ||
+            fleetType === "โอนไปช่วยคลังอื่น"
+          ) {
+            newStats.fleet_transferred_out +=
+              safeQuantity;
+          } else if (fleetType === "BACKHAUL") {
+            newStats.fleet_backhaul += safeQuantity;
+          }
+        });
+  
         if (!cancelled) {
-          setWorkloads(getArrayFromResponse<WorkloadItem>(result));
+          setFleetStats(newStats);
         }
       } catch (error) {
         if (!cancelled) {
-          setWorkloadError(
+          setFleetError(
             error instanceof Error
               ? error.message
-              : "ไม่สามารถโหลดข้อมูล Workload ได้",
+              : "ไม่สามารถโหลดข้อมูลสถานะกองรถได้",
           );
-          setWorkloads([]);
+  
+          setFleetStats(EMPTY_FLEET_STATS);
         }
       } finally {
-        if (!cancelled) setLoadingWorkload(false);
+        if (!cancelled) {
+          setLoadingFleet(false);
+        }
       }
     };
-
-    void fetchWorkload();
-
+  
+    void fetchFleetCheck();
+  
     return () => {
       cancelled = true;
     };

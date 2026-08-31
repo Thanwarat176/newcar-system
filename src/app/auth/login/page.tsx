@@ -125,14 +125,18 @@ export default function LoginPage() {
   }, [alertState]);
 
   const handleLogin = async () => {
-    if (!employeeId || !password) {
+    const loginEmployeeId = employeeId.trim();
+    const loginPassword = password.trim();
+  
+    if (!loginEmployeeId || !loginPassword) {
       setAlertState({
         type: "warning",
         message: "กรุณากรอกข้อมูลให้ครบ",
       });
+  
       return;
     }
-
+  
     try {
       const res = await fetch(
         "http://192.168.158.210/api_new_truck/api/login.php",
@@ -140,64 +144,183 @@ export default function LoginPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Accept: "application/json",
           },
           body: JSON.stringify({
-            employee_id: employeeId,
-            password: password,
+            employee_id: loginEmployeeId,
+            password: loginPassword,
           }),
         }
       );
-
+  
       const data = await res.json();
-
+  
       if (!res.ok) {
         setAlertState({
           type: "error",
-          message: data.message || "เข้าสู่ระบบไม่สำเร็จ",
+          message:
+            data.message ||
+            "เข้าสู่ระบบไม่สำเร็จ",
         });
+  
         return;
       }
-
-      console.log("USER:", data.user);
-
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      if (password === "0000") {
-        router.push(PATHS.auth.resetpassword);
+  
+      if (!data.user) {
+        setAlertState({
+          type: "error",
+          message:
+            "ไม่พบข้อมูลผู้ใช้งานจากระบบ",
+        });
+  
         return;
       }
-
+  
+      console.log("LOGIN USER:", data.user);
+  
+      /*
+       * บันทึกข้อมูล User
+       */
+      localStorage.setItem(
+        "user",
+        JSON.stringify(data.user)
+      );
+  
+      /*
+       * ล้างข้อมูลการเลือกครั้งก่อน
+       * เพื่อไม่ให้ DC หรือ Team เดิมค้าง
+       */
+      localStorage.removeItem("selected_dc");
+      localStorage.removeItem("selected_dcs");
+  
+      localStorage.removeItem(
+        "selected_departments"
+      );
+  
+      localStorage.removeItem(
+        "selected_department_codes"
+      );
+  
+      /*
+       * แจ้ง Component เช่น Sidebar
+       */
+      window.dispatchEvent(
+        new Event("userChanged")
+      );
+  
+      window.dispatchEvent(
+        new Event("selectedDCChanged")
+      );
+  
+      /*
+       * ถ้าเป็นรหัสผ่านเริ่มต้น
+       * ให้ไปหน้าเปลี่ยนรหัสผ่าน
+       */
+      if (loginPassword === "0000") {
+        router.push(
+          PATHS.auth.resetpassword
+        );
+  
+        return;
+      }
+  
       setAlertState({
         type: "success",
-        message: `ยินดีต้อนรับ ${data.user.NAME || data.user.name || ""}`,
+        message: `ยินดีต้อนรับ ${
+          data.user.NAME ||
+          data.user.name ||
+          ""
+        }`,
       });
-
+  
       setTimeout(() => {
-        const userWarehouse =
+        /*
+         * ตรวจจาก User ที่กรอก Login
+         *
+         * CENTER
+         * center
+         * Center
+         *
+         * จะถูกแปลงเป็น CENTER ทั้งหมด
+         */
+        const loginUser =
+          loginEmployeeId.toUpperCase();
+  
+        /*
+         * ใช้สำหรับ User Warehouse ตามปกติเท่านั้น
+         * ไม่เกี่ยวกับเงื่อนไข User CENTER
+         */
+        const userWarehouse = String(
           data.user.warehouse ||
-          data.user.WAREHOUSE ||
-          data.user.team ||
-          data.user.TEAM ||
-          "";
-
-        if (userWarehouse.toUpperCase() === "WAREHOUSE") {
-          router.push(PATHS.auth.selectDC);
+            data.user.WAREHOUSE ||
+            ""
+        )
+          .trim()
+          .toUpperCase();
+  
+        console.log(
+          "LOGIN EMPLOYEE ID:",
+          loginUser
+        );
+  
+        console.log(
+          "LOGIN WAREHOUSE:",
+          userWarehouse
+        );
+  
+        /*
+         * User ที่ Login ด้วย CENTER
+         * ให้ไปหน้าเลือกฝ่าย:
+         *
+         * TCIA
+         * KEY_ACCOUNT
+         * IMP
+         * TCAS
+         * FBP
+         * TSC
+         *
+         * ไม่สนใจว่า warehouse หรือ
+         * department ในฐานข้อมูลเป็นค่าอะไร
+         */
+        if (loginUser === "CENTER") {
+          router.push(
+            PATHS.auth.selectDC
+          );
+  
           return;
         }
-
-        router.push(PATHS.main.addFleet);
+  
+        /*
+         * User Warehouse ตามปกติ
+         * ให้ไปหน้าเลือก DC
+         */
+        if (userWarehouse === "WAREHOUSE") {
+          router.push(
+            PATHS.auth.selectDC
+          );
+  
+          return;
+        }
+  
+        /*
+         * User อื่นไปหน้าเพิ่มกองรถ
+         */
+        router.push(
+          PATHS.main.addFleet
+        );
       }, 1000);
-
     } catch (error) {
-      console.error(error);
-
+      console.error("LOGIN ERROR:", error);
+  
       setAlertState({
         type: "error",
-        message: "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้",
+        message:
+          "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้",
       });
     }
   };
-
+  
+  
   const handleRegister = async () => {
     if (
       !registerData.em_id ||
@@ -244,7 +367,7 @@ export default function LoginPage() {
             name: registerData.name,
             surname: registerData.surname,
             password: registerData.password,
-            user_type: "admin",
+            user_type: "user",
             warehouse: registerData.team,
             department:
               registerData.team === "CENTER" ? registerData.department : null,

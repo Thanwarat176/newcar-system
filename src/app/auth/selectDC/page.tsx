@@ -77,102 +77,46 @@ export default function SelectDCPage() {
   const [errorText, setErrorText] = useState("");
   const [isCenter, setIsCenter] = useState(false);
 
-  /*
-   * ตรวจสอบประเภทผู้ใช้งานและโหลดข้อมูล
-   */
   useEffect(() => {
     const initializePage = async () => {
       try {
         setLoading(true);
         setErrorText("");
-
-        const storedUser = localStorage.getItem("user");
-
-        if (!storedUser) {
-          setErrorText("ไม่พบข้อมูลผู้ใช้งาน กรุณาเข้าสู่ระบบใหม่");
-          return;
-        }
-
-        let user: UserData;
-
-        try {
-          user = JSON.parse(storedUser) as UserData;
-        } catch (error) {
-          console.error("PARSE USER ERROR:", error);
-
+  
+        const savedUser =
+          localStorage.getItem("user");
+  
+        if (!savedUser) {
           setErrorText(
-            "ข้อมูลผู้ใช้งานไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่"
+            "ไม่พบข้อมูลผู้ใช้งาน กรุณาเข้าสู่ระบบใหม่"
           );
-
+  
           return;
         }
-
-        const userWarehouse = String(
-          user.warehouse ||
-            user.WAREHOUSE ||
-            user.team ||
-            user.TEAM ||
+  
+        const user = JSON.parse(savedUser);
+  
+        /*
+         * ตรวจจาก User ที่ Login
+         * ไม่เกี่ยวกับ warehouse
+         */
+        const loginUser = String(
+          user.em_id ||
+            user.employee_id ||
+            user.EMPLOYEE_ID ||
             ""
         )
           .trim()
           .toUpperCase();
-
+  
+        const centerLogin =
+          loginUser === "CENTER";
+  
+        setIsCenter(centerLogin);
+  
         /*
-         * ผู้ใช้งานส่วนกลาง
-         * ไม่ต้องเรียก Warehouse API
+         * โหลด Warehouse API ทุกกรณี
          */
-        if (userWarehouse === "CENTER") {
-          setIsCenter(true);
-          setWarehouses(CENTER_DEPARTMENTS);
-
-          /*
-           * ถ้าเคยเลือกไว้แล้ว ให้นำค่ากลับมาแสดง
-           */
-          const storedDepartments = localStorage.getItem(
-            "selected_departments"
-          );
-
-          if (storedDepartments) {
-            try {
-              const previousDepartments = JSON.parse(
-                storedDepartments
-              ) as Array<{
-                value?: string;
-                label?: string;
-              }>;
-
-              const previousCodes = previousDepartments
-                .map((item) =>
-                  String(item.value || "")
-                    .trim()
-                    .toUpperCase()
-                )
-                .filter(Boolean);
-
-              const matchedDepartments =
-                CENTER_DEPARTMENTS.filter((department) =>
-                  previousCodes.includes(
-                    department.DC_CODE.toUpperCase()
-                  )
-                );
-
-              setSelectedItems(matchedDepartments);
-            } catch (error) {
-              console.error(
-                "PARSE SELECTED DEPARTMENTS ERROR:",
-                error
-              );
-            }
-          }
-
-          return;
-        }
-
-        /*
-         * ผู้ใช้งาน Warehouse
-         */
-        setIsCenter(false);
-
         const res = await fetch(
           "http://192.168.158.210/api_new_truck/api/warehouses.php",
           {
@@ -182,58 +126,198 @@ export default function SelectDCPage() {
             },
           }
         );
-
+  
         const data = await res.json();
-
+  
         if (
           !res.ok ||
           data.status !== "success" ||
           !Array.isArray(data.data)
         ) {
-          throw new Error("โหลดข้อมูล DC ไม่สำเร็จ");
+          throw new Error(
+            "โหลดข้อมูล Warehouse ไม่สำเร็จ"
+          );
         }
-
+  
         const apiWarehouses = (
           data.data as WarehouseItem[]
         ).filter((item) => {
-          const dcCode = String(item.DC_CODE || "")
-            .trim()
-            .toUpperCase();
-
-          return dcCode && dcCode !== "CENTER";
+          return Boolean(
+            String(item.DC_CODE || "").trim()
+          );
         });
-
-        setWarehouses(apiWarehouses);
-
+  
         /*
-         * ถ้าเคยเลือก DC ไว้แล้ว ให้นำค่ากลับมาแสดง
+         * User CENTER:
+         * แสดงทั้งฝ่ายส่วนกลางและ Warehouse
          */
-        const storedDC = localStorage.getItem("selected_dc");
-
-        if (storedDC) {
-          try {
-            const previousDC = JSON.parse(
-              storedDC
-            ) as WarehouseItem;
-
-            const matchedDC = apiWarehouses.find(
-              (item) =>
-                item.DC_CODE.trim().toUpperCase() ===
-                String(previousDC.DC_CODE || "")
+        if (centerLogin) {
+          const combinedItems = [
+            ...CENTER_DEPARTMENTS,
+            ...apiWarehouses,
+          ];
+  
+          /*
+           * ป้องกัน DC_CODE ซ้ำ
+           */
+          const uniqueItems =
+            combinedItems.filter(
+              (item, index, array) => {
+                const currentCode = String(
+                  item.DC_CODE || ""
+                )
+                  .trim()
+                  .toUpperCase();
+  
+                return (
+                  array.findIndex(
+                    (checkItem) =>
+                      String(
+                        checkItem.DC_CODE || ""
+                      )
+                        .trim()
+                        .toUpperCase() ===
+                      currentCode
+                  ) === index
+                );
+              }
+            );
+  
+          setWarehouses(uniqueItems);
+  
+          /*
+           * โหลดฝ่ายและ Warehouse
+           * ที่เคยเลือกไว้
+           */
+          const savedDepartments =
+            localStorage.getItem(
+              "selected_departments"
+            );
+  
+          const savedDCs =
+            localStorage.getItem(
+              "selected_dcs"
+            );
+  
+          const selectedCodes: string[] = [];
+  
+          if (savedDepartments) {
+            try {
+              const departments =
+                JSON.parse(
+                  savedDepartments
+                ) as Array<{
+                  value?: string;
+                }>;
+  
+              departments.forEach((item) => {
+                const code = String(
+                  item.value || ""
+                )
+                  .trim()
+                  .toUpperCase();
+  
+                if (code) {
+                  selectedCodes.push(code);
+                }
+              });
+            } catch (error) {
+              console.error(
+                "อ่าน selected_departments ไม่สำเร็จ:",
+                error
+              );
+            }
+          }
+  
+          if (savedDCs) {
+            try {
+              const selectedWarehouses =
+                JSON.parse(
+                  savedDCs
+                ) as WarehouseItem[];
+  
+              selectedWarehouses.forEach(
+                (item) => {
+                  const code = String(
+                    item.DC_CODE || ""
+                  )
+                    .trim()
+                    .toUpperCase();
+  
+                  if (code) {
+                    selectedCodes.push(code);
+                  }
+                }
+              );
+            } catch (error) {
+              console.error(
+                "อ่าน selected_dcs ไม่สำเร็จ:",
+                error
+              );
+            }
+          }
+  
+          const restoredItems =
+            uniqueItems.filter((item) =>
+              selectedCodes.includes(
+                String(item.DC_CODE || "")
                   .trim()
                   .toUpperCase()
+              )
             );
-
+  
+          setSelectedItems(restoredItems);
+  
+          return;
+        }
+  
+        /*
+         * User ทั่วไป:
+         * เห็นเฉพาะ Warehouse จาก API
+         */
+        setWarehouses(apiWarehouses);
+  
+        const savedSelectedDC =
+          localStorage.getItem(
+            "selected_dc"
+          );
+  
+        if (savedSelectedDC) {
+          try {
+            const previousDC =
+              JSON.parse(
+                savedSelectedDC
+              ) as WarehouseItem;
+  
+            const matchedDC =
+              apiWarehouses.find(
+                (item) =>
+                  String(item.DC_CODE || "")
+                    .trim()
+                    .toUpperCase() ===
+                  String(
+                    previousDC.DC_CODE || ""
+                  )
+                    .trim()
+                    .toUpperCase()
+              );
+  
             if (matchedDC) {
               setSelectedItems([matchedDC]);
             }
           } catch (error) {
-            console.error("PARSE SELECTED DC ERROR:", error);
+            console.error(
+              "อ่าน selected_dc ไม่สำเร็จ:",
+              error
+            );
           }
         }
       } catch (error) {
-        console.error("INITIALIZE PAGE ERROR:", error);
-
+        console.error(
+          "INITIALIZE PAGE ERROR:",
+          error
+        );
+  
         setErrorText(
           "ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง"
         );
@@ -241,13 +325,10 @@ export default function SelectDCPage() {
         setLoading(false);
       }
     };
-
+  
     initializePage();
   }, []);
 
-  /*
-   * กรองข้อมูลจากช่องค้นหา
-   */
   const filteredWarehouses = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
 
@@ -352,100 +433,129 @@ export default function SelectDCPage() {
     setErrorText("");
   };
 
-  /*
-   * บันทึกและไปหน้าถัดไป
-   */
   const handleContinue = () => {
     if (selectedItems.length === 0) {
       setErrorText(
         isCenter
-          ? "กรุณาเลือกฝ่ายส่วนกลางอย่างน้อย 1 ฝ่าย"
+          ? "กรุณาเลือกฝ่ายหรือ Warehouse อย่างน้อย 1 รายการ"
           : "กรุณาเลือก DC ก่อนดำเนินการต่อ"
       );
-
+  
       return;
     }
-
+  
+    /*
+     * User CENTER เลือกได้หลายรายการ
+     */
     if (isCenter) {
       /*
-       * บันทึกรายละเอียดฝ่ายส่วนกลาง
+       * แยกรายการฝ่ายส่วนกลาง
        */
-      const selectedDepartments = selectedItems.map(
-        (item) => ({
-          value: item.DC_CODE,
-          label: item.DC_NAME,
-          type: item.DC_TYPE,
-        })
-      );
-
+      const selectedDepartments =
+        selectedItems
+          .filter(
+            (item) =>
+              String(item.DC_TYPE || "")
+                .trim()
+                .toUpperCase() === "CENTER"
+          )
+          .map((item) => ({
+            value: item.DC_CODE,
+            label: item.DC_NAME,
+            type: "CENTER",
+          }));
+  
       /*
-       * ตัวอย่าง:
-       * [
-       *   {
-       *     value: "TCAS",
-       *     label: "ฝ่ายสัญญาและสนับสนุนงานบริการระบบงานขนส่ง",
-       *     type: "CENTER"
-       *   },
-       *   {
-       *     value: "FBP",
-       *     label: "ฝ่ายดูแลและพัฒนาคู่ค้าระบบงานขนส่ง",
-       *     type: "CENTER"
-       *   }
-       * ]
+       * แยกรายการ Warehouse
        */
+      const selectedWarehouses =
+        selectedItems
+          .filter(
+            (item) =>
+              String(item.DC_TYPE || "")
+                .trim()
+                .toUpperCase() !== "CENTER"
+          )
+          .map((item) => ({
+            DC_CODE: item.DC_CODE,
+            DC_NAME: item.DC_NAME || "",
+            DC_TYPE: item.DC_TYPE || "",
+          }));
+  
       localStorage.setItem(
         "selected_departments",
-        JSON.stringify(selectedDepartments)
+        JSON.stringify(
+          selectedDepartments
+        )
       );
-
-      /*
-       * เก็บเฉพาะรหัสสำหรับใช้ส่ง API
-       * ตัวอย่าง ["TCAS", "FBP"]
-       */
+  
       localStorage.setItem(
         "selected_department_codes",
         JSON.stringify(
           selectedDepartments.map(
-            (department) => department.value
+            (item) => item.value
           )
         )
       );
-
+  
+      localStorage.setItem(
+        "selected_dcs",
+        JSON.stringify(
+          selectedWarehouses
+        )
+      );
+  
       /*
-       * ล้างค่า DC เดิม ป้องกันข้อมูลเก่าค้าง
+       * selected_dc ใช้ DC แรก
+       * เพื่อรองรับ Component เดิม
        */
-      localStorage.removeItem("selected_dc");
-      localStorage.removeItem("selected_dcs");
+      if (selectedWarehouses.length > 0) {
+        localStorage.setItem(
+          "selected_dc",
+          JSON.stringify(
+            selectedWarehouses[0]
+          )
+        );
+      } else {
+        localStorage.removeItem(
+          "selected_dc"
+        );
+      }
     } else {
-      const selectedDC = selectedItems[0];
-
-      const selectedDCData = {
-        DC_CODE: selectedDC.DC_CODE,
-        DC_NAME: selectedDC.DC_NAME || "",
-        DC_TYPE: selectedDC.DC_TYPE || "",
-      };
-
+      /*
+       * User ทั่วไปเลือกได้ 1 Warehouse
+       */
+      const selectedDC =
+        selectedItems[0];
+  
       localStorage.setItem(
         "selected_dc",
-        JSON.stringify(selectedDCData)
+        JSON.stringify({
+          DC_CODE: selectedDC.DC_CODE,
+          DC_NAME:
+            selectedDC.DC_NAME || "",
+          DC_TYPE:
+            selectedDC.DC_TYPE || "",
+        })
       );
-
-      /*
-       * ล้างค่าฝ่ายส่วนกลางเดิม
-       */
-      localStorage.removeItem("selected_departments");
+  
+      localStorage.removeItem(
+        "selected_dcs"
+      );
+  
+      localStorage.removeItem(
+        "selected_departments"
+      );
+  
       localStorage.removeItem(
         "selected_department_codes"
       );
     }
-
-    /*
-     * แจ้ง Component อื่น เช่น Sidebar
-     */
+  
     window.dispatchEvent(
       new Event("selectedDCChanged")
     );
-
+  
     router.push(PATHS.main.addFleet);
   };
 
@@ -504,8 +614,7 @@ export default function SelectDCPage() {
         {isCenter && !loading && (
           <div className="mt-4 flex items-center justify-between gap-3">
             <p className="text-xs text-slate-500">
-              เลือกแล้ว {selectedItems.length} จาก{" "}
-              {CENTER_DEPARTMENTS.length} ฝ่าย
+              เลือกแล้ว {selectedItems.length} 
             </p>
 
             <button

@@ -110,9 +110,6 @@ export default function Sidebar(
           "selected_departments"
         );
 
-      /*
-       * อ่านข้อมูล User
-       */
       if (savedUser) {
         try {
           const parsedUser =
@@ -319,17 +316,25 @@ export default function Sidebar(
   const normalizedRole = useMemo(() => {
     return normalizeValue(
       userInfo?.ROLE ||
-        userInfo?.role ||
-        userInfo?.user_type ||
-        userInfo?.POSITION
+      userInfo?.role ||
+      userInfo?.user_type ||
+      userInfo?.POSITION
     );
+  }, [userInfo]);
+
+  /*
+   * user_type ใช้สำหรับตรวจสอบสิทธิ์ Admin โดยตรง
+   * ไม่รวมกับ ROLE, POSITION, department หรือ warehouse
+   */
+  const normalizedUserType = useMemo(() => {
+    return normalizeValue(userInfo?.user_type);
   }, [userInfo]);
 
   const normalizedDepartment =
     useMemo(() => {
       return normalizeValue(
         userInfo?.department ||
-          userInfo?.DEPARTMENT
+        userInfo?.DEPARTMENT
       );
     }, [userInfo]);
 
@@ -337,14 +342,14 @@ export default function Sidebar(
     useMemo(() => {
       return normalizeValue(
         userInfo?.warehouse ||
-          userInfo?.WAREHOUSE
+        userInfo?.WAREHOUSE
       );
     }, [userInfo]);
 
   const normalizedTeam = useMemo(() => {
     return normalizeValue(
       userInfo?.team ||
-        userInfo?.TEAM
+      userInfo?.TEAM
     );
   }, [userInfo]);
 
@@ -374,16 +379,6 @@ export default function Sidebar(
         )
         .filter(Boolean);
     }, [selectedDepartments]);
-
-  /*
-   * สิทธิ์ Superadmin
-   */
-  const hasSuperadminAccess =
-    useMemo(() => {
-      return (
-        normalizedRole === "SUPERADMIN"
-      );
-    }, [normalizedRole]);
 
   /*
    * แสดงข้อมูลตรง Team
@@ -457,97 +452,40 @@ export default function Sidebar(
       .toUpperCase();
   }, [displayName]);
 
-  /*
-   * สร้างรายการเมนูตามสิทธิ์
-   */
   const menuItems = useMemo<MenuItem[]>(() => {
     const items: MenuItem[] = [];
-  
-    /*
-     * CENTER:
-     * ใช้เฉพาะฝ่ายที่เลือกจาก selected_departments
-     *
-     * ผู้ใช้งานทั่วไป:
-     * ใช้ Department, Warehouse และ Team ตาม User
-     */
-    const accessValues = new Set<string>();
-  
-    /*
-     * Role สามารถใช้ตรวจ Superadmin ได้
-     */
-    if (normalizedRole) {
-      accessValues.add(normalizedRole);
-    }
-  
-    if (isCenterUser) {
-      /*
-       * สำคัญ:
-       * CENTER ไม่ใส่ normalizedDepartment เดิม
-       * เพราะข้อมูล User อาจเป็น IMP แต่ผู้ใช้เลือก KEY_ACCOUNT
-       */
-      normalizedSelectedDepartments.forEach(
-        (department) => {
-          accessValues.add(department);
-        }
-      );
-    } else {
-      /*
-       * ผู้ใช้งานที่ไม่ใช่ CENTER
-       */
-      if (normalizedDepartment) {
-        accessValues.add(normalizedDepartment);
-      }
-  
-      if (normalizedWarehouse) {
-        accessValues.add(normalizedWarehouse);
-      }
-  
-      if (normalizedTeam) {
-        accessValues.add(normalizedTeam);
-      }
-    }
-  
-    const hasAccess = (
-      ...allowedValues: string[]
-    ) => {
-      return allowedValues.some((value) =>
-        accessValues.has(
-          normalizeValue(value)
-        )
-      );
-    };
-  
-    const isGM = hasAccess("GM");
-    const isFBP = hasAccess("FBP");
-    const isIMP = hasAccess("IMP");
-    const isTCAS = hasAccess("TCAS");
-    const isTCIA = hasAccess("TCIA");
-    const isTSC = hasAccess("TSC");
-  
-    /*
-     * normalizeValue จะเปลี่ยน
-     * KEY_ACCOUNT เป็น KEYACCOUNT
-     */
-    const isKEYACCOUNT = hasAccess(
-      "KEY_ACCOUNT",
-      "KEYACCOUNT"
-    );
-  
-    /*
-     * ทุกคนเห็นเมนูขอเพิ่มกองรถ
-     */
+
+    const activeDepartments =
+      isCenterUser &&
+        normalizedSelectedDepartments.length > 0
+        ? normalizedSelectedDepartments
+        : normalizedDepartment
+          ? [normalizedDepartment]
+          : [];
+
+    const isIMP =
+      activeDepartments.includes("IMP");
+
+    const isFBP =
+      activeDepartments.includes("FBP");
+
+    const isAdmin =
+      normalizedUserType === "ADMIN";
+
+    const isSuperadmin =
+      normalizedUserType === "SUPERADMIN";
+
+    // ทุกคนเห็น
     items.push({
       label: "ขอเพิ่มกองรถ",
       path: PATHS.main.addFleet,
       icon: Truck,
     });
-  
-    /*
-     * เฉพาะ GM
-     */
+
+    // ฝ่าย IMP หรือผู้ใช้ warehouse = GM
     if (
-      hasSuperadminAccess ||
-      isGM
+      isIMP ||
+      normalizedWarehouse === "GM"
     ) {
       items.push({
         label: "คำขอจากคลัง",
@@ -555,109 +493,66 @@ export default function Sidebar(
         icon: Inbox,
       });
     }
-  
-    /*
-     * เฉพาะ FBP หรือ IMP
-     *
-     * KEY_ACCOUNT จะไม่เห็นเมนูนี้
-     */
-    if (
-      hasSuperadminAccess ||
-      isFBP ||
-      isIMP
-    ) {
+
+    // ฝ่าย IMP หรือ FBP
+    if (isIMP || isFBP) {
       items.push({
         label: "รอประเมินกองรถ",
         path: PATHS.main.waitingFleet,
         icon: Clock3,
       });
     }
-  
-    /*
-     * TCAS, FBP, KEY_ACCOUNT และ IMP
-     */
-    if (
-      hasSuperadminAccess ||
-      isTCAS ||
-      isFBP ||
-      isKEYACCOUNT ||
-      isIMP
-    ) {
+
+    // user_type admin หรือ superadmin
+    if (isAdmin || isSuperadmin) {
       items.push({
-        label:
-          "ติดตามกองรถออกใหม่/ทดแทน",
+        label: "ติดตามกองรถออกใหม่/ทดแทน",
         path: PATHS.main.trackFleet,
         icon: Route,
       });
     }
-  
-    /*
-     * เฉพาะ IMP
-     */
-    if (
-      hasSuperadminAccess ||
-      isIMP
-    ) {
+
+    // ฝ่าย IMP หรือ superadmin
+    if (isIMP || isSuperadmin) {
       items.push({
-        label:
-          "จัดการกระบวนการทำงาน",
-        path:
-          PATHS.main.manageProcess,
+        label: "จัดการกระบวนการทำงาน",
+        path: PATHS.main.manageProcess,
         icon: Settings,
       });
-    }
-  
-    /*
-     * เฉพาะ Superadmin
-     */
-    if (hasSuperadminAccess) {
+
       items.push({
         label: "จัดการการใช้งาน",
         path: PATHS.main.manageUser,
         icon: Shield,
       });
     }
-  
-    /*
-     * ตอนนี้ TCIA และ TSC
-     * ยังไม่มีเมนูเฉพาะ
-     */
-    void isTCIA;
-    void isTSC;
-  
+
+    console.log("MENU PERMISSION:", {
+      isCenterUser,
+      userDepartment: normalizedDepartment,
+      selectedDepartments:
+        normalizedSelectedDepartments,
+      activeDepartments,
+      isIMP,
+      isFBP,
+      isAdmin,
+      isSuperadmin,
+      menus: items.map((item) => item.label),
+    });
+
     return items;
   }, [
-    normalizedRole,
+    isCenterUser,
+    normalizedSelectedDepartments,
     normalizedDepartment,
     normalizedWarehouse,
-    normalizedTeam,
-    normalizedSelectedDepartments,
-    isCenterUser,
-    hasSuperadminAccess,
+    normalizedUserType,
   ]);
-  
-  const canChangeWarehouse =
-    useMemo(() => {
-      return (
-        normalizedWarehouse ===
-          "WAREHOUSE" ||
-        normalizedWarehouse === "GM" ||
-        normalizedDepartment === "GM" ||
-        normalizedTeam === "GM" ||
-        isCenterUser ||
-        hasSuperadminAccess
-      );
-    }, [
-      normalizedWarehouse,
-      normalizedDepartment,
-      normalizedTeam,
-      isCenterUser,
-      hasSuperadminAccess,
-    ]);
 
-  /*
-   * Console ตรวจสอบสิทธิ์
-   */
+  const canChangeWarehouse = useMemo(() => {
+    return normalizedDepartment === "IMP";
+  }, [normalizedDepartment]);
+
   useEffect(() => {
     if (!userInfo) {
       return;
@@ -665,6 +560,7 @@ export default function Sidebar(
 
     console.log("SIDEBAR ACCESS:", {
       role: normalizedRole,
+      userType: normalizedUserType,
       department:
         normalizedDepartment,
       warehouse:
@@ -682,6 +578,7 @@ export default function Sidebar(
   }, [
     userInfo,
     normalizedRole,
+    normalizedUserType,
     normalizedDepartment,
     normalizedWarehouse,
     normalizedTeam,
@@ -836,18 +733,16 @@ export default function Sidebar(
               <Link
                 key={item.path}
                 href={item.path}
-                className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] transition ${
-                  isActive
+                className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] transition ${isActive
                     ? "bg-white text-blue-900"
                     : "text-blue-100 hover:bg-white/[0.08] hover:text-white"
-                }`}
+                  }`}
               >
                 <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${
-                    isActive
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${isActive
                       ? "bg-blue-100 text-blue-700"
                       : "bg-white/[0.06] text-blue-200"
-                  }`}
+                    }`}
                 >
                   <Icon size={14} />
                 </div>

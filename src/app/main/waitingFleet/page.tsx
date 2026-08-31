@@ -51,6 +51,7 @@ interface RequestItem {
   license_replace: string[] | string;
 
   qty: number;
+  approve_qty_gm?: number | string | null;
   approved_qty?: number | string | null;
 
   usage_date: string;
@@ -90,6 +91,8 @@ export default function WaitingFleetPage() {
   const [openDetailModal, setOpenDetailModal] = useState(false);
 
   const [searchText, setSearchText] = useState("");
+  const [requestTypeFilter, setRequestTypeFilter] = useState("all");
+  const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
 
@@ -463,6 +466,13 @@ export default function WaitingFleetPage() {
     String(detail.status || "").trim().toLowerCase();
 
   const getQtySummary = (item: RequestItem) => {
+    const originalQty = Math.max(Number(item.qty || 0), 0);
+    const gmApprovedQty = Math.max(
+      Number(item.approve_qty_gm || 0),
+      0,
+    );
+    const requestedQty = gmApprovedQty > 0 ? gmApprovedQty : originalQty;
+
     const details =
       isReplacementRequest(item) && Array.isArray(item.details)
         ? item.details
@@ -470,7 +480,7 @@ export default function WaitingFleetPage() {
 
     if (details.length > 0) {
       return {
-        requestedQty: details.length,
+        requestedQty,
         approvedQty: details.filter(
           (detail) => getDetailStatus(detail) === "progress"
         ).length,
@@ -483,7 +493,6 @@ export default function WaitingFleetPage() {
       };
     }
 
-    const requestedQty = Math.max(Number(item.qty || 0), 0);
     const approvedQty = Math.max(Number(item.approved_qty || 0), 0);
 
     return {
@@ -599,31 +608,87 @@ export default function WaitingFleetPage() {
     return [];
   };
 
-  const dashboardSummary = useMemo(() => {
-    const fbp_pending = sidebarFilteredRequests.filter(
-      (item) => isFbpPendingItem(item)
-    ).length;
+  const statusCounts = useMemo(() => {
+    const allItems = sidebarFilteredRequests.filter(
+      (item) =>
+        isFbpPendingItem(item) ||
+        isFbpRejectedItem(item) ||
+        isApprovedItem(item),
+    );
 
-    const rejectedByCenter = sidebarFilteredRequests.filter(
-      (item) => isFbpRejectedItem(item)
-    ).length;
+    const pendingItems = sidebarFilteredRequests.filter((item) =>
+      isFbpPendingItem(item),
+    );
+    const rejectedItems = sidebarFilteredRequests.filter((item) =>
+      isFbpRejectedItem(item),
+    );
+    const approvedItems = sidebarFilteredRequests.filter((item) =>
+      isApprovedItem(item),
+    );
 
-    const approved = sidebarFilteredRequests.filter(
-      (item) => isApprovedItem(item)
-    ).length;
+    const pendingQty = pendingItems.reduce(
+      (sum, item) => sum + getQtySummary(item).pendingQty,
+      0,
+    );
+    const rejectedQty = rejectedItems.reduce(
+      (sum, item) => sum + getQtySummary(item).notApprovedQty,
+      0,
+    );
+    const approvedQty = approvedItems.reduce((sum, item) => {
+      const qtySummary = getQtySummary(item);
+
+      return (
+        sum +
+        (qtySummary.approvedQty > 0
+          ? qtySummary.approvedQty
+          : qtySummary.requestedQty)
+      );
+    }, 0);
 
     return {
-      total: sidebarFilteredRequests.filter(
-        (item) =>
-          isFbpPendingItem(item) ||
-          isFbpRejectedItem(item) ||
-          isApprovedItem(item)
-      ).length,
-      fbp_pending,
-      rejectedByCenter,
-      approved,
+      all: {
+        qty: pendingQty + rejectedQty + approvedQty,
+        items: allItems.length,
+      },
+      fbpPending: {
+        qty: pendingQty,
+        items: pendingItems.length,
+      },
+      rejected: {
+        qty: rejectedQty,
+        items: rejectedItems.length,
+      },
+      approved: {
+        qty: approvedQty,
+        items: approvedItems.length,
+      },
     };
   }, [sidebarFilteredRequests]);
+
+  const requestTypeOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        sidebarFilteredRequests
+          .map((item) => String(item.fleet_type || "").trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "th"));
+  }, [sidebarFilteredRequests]);
+
+  const truckTypeOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        sidebarFilteredRequests
+          .filter(
+            (item) =>
+              requestTypeFilter === "all" ||
+              String(item.fleet_type || "").trim() === requestTypeFilter,
+          )
+          .map((item) => String(item.fleet_truck_type || "").trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "th"));
+  }, [sidebarFilteredRequests, requestTypeFilter]);
 
   const dcTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>();
@@ -681,6 +746,19 @@ export default function WaitingFleetPage() {
     // อนุมัติแล้ว = โชว์ 0 รายการ
     if (statusFilter === "approved") {
       list = list.filter((item) => isApprovedItem(item));
+    }
+
+    if (requestTypeFilter !== "all") {
+      list = list.filter(
+        (item) => String(item.fleet_type || "").trim() === requestTypeFilter,
+      );
+    }
+
+    if (truckTypeFilter !== "all") {
+      list = list.filter(
+        (item) =>
+          String(item.fleet_truck_type || "").trim() === truckTypeFilter,
+      );
     }
 
     if (dcTypeFilter !== "all") {
@@ -745,6 +823,8 @@ export default function WaitingFleetPage() {
   }, [
     sidebarFilteredRequests,
     statusFilter,
+    requestTypeFilter,
+    truckTypeFilter,
     dcTypeFilter,
     dcFilter,
     searchText,
@@ -1013,8 +1093,9 @@ export default function WaitingFleetPage() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: dashboardSummary.total,
-                sub: "รวมรายการที่รอการประเมิน",
+                count: statusCounts.all.qty,
+                itemCount: statusCounts.all.items,
+                sub: "รวมจำนวนรถทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -1029,8 +1110,9 @@ export default function WaitingFleetPage() {
               {
                 key: "fbp_pending",
                 label: "รอทีม FBP ประเมินข้อมูล",
-                count: dashboardSummary.fbp_pending,
-                sub: "รายการที่รอการพิจารณา",
+                count: statusCounts.fbpPending.qty,
+                itemCount: statusCounts.fbpPending.items,
+                sub: "จำนวนรถที่รอการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
                 inactiveClass:
@@ -1045,8 +1127,9 @@ export default function WaitingFleetPage() {
               {
                 key: "reject_by_fbp",
                 label: "ทีม FBP ไม่อนุมัติ",
-                count: dashboardSummary.rejectedByCenter,
-                sub: "รายการที่ไม่ผ่านการประเมิน",
+                count: statusCounts.rejected.qty,
+                itemCount: statusCounts.rejected.items,
+                sub: "จำนวนรถที่ไม่ผ่านการประเมิน",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1061,8 +1144,9 @@ export default function WaitingFleetPage() {
               {
                 key: "approved",
                 label: "อนุมัติแล้ว",
-                count: dashboardSummary.approved,
-                sub: "รายการที่ผ่านการประเมิน",
+                count: statusCounts.approved.qty,
+                itemCount: statusCounts.approved.items,
+                sub: "จำนวนรถที่ผ่านการประเมิน",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1080,6 +1164,7 @@ export default function WaitingFleetPage() {
               key,
               label,
               count,
+              itemCount,
               sub,
               activeClass,
               inactiveClass,
@@ -1139,7 +1224,10 @@ export default function WaitingFleetPage() {
                       className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {count}
+                      {formatNumber(count)}
+                      <span className="ml-1 text-sm font-black opacity-60">
+                        คัน
+                      </span>
                     </p>
 
                     <span
@@ -1148,7 +1236,7 @@ export default function WaitingFleetPage() {
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      รายการ
+                      {formatNumber(itemCount)} รายการ
                     </span>
                   </div>
                 </button>
@@ -1178,7 +1266,7 @@ export default function WaitingFleetPage() {
 
           <div className="grid gap-3 lg:grid-cols-12">
             {/* SEARCH */}
-            <div className="lg:col-span-4">
+            <div className="lg:col-span-3">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1208,8 +1296,69 @@ export default function WaitingFleetPage() {
               </div>
             </div>
 
-            {/* DC TYPE */}
+            {/* REQUEST TYPE */}
             <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทคำขอ
+              </label>
+
+              <div className="relative">
+                <Filter
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+                <select
+                  value={requestTypeFilter}
+                  onChange={(e) => {
+                    setRequestTypeFilter(e.target.value);
+                    setTruckTypeFilter("all");
+                  }}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทคำขอ</option>
+                  {requestTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
+            {/* TRUCK TYPE */}
+            <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทรถ
+              </label>
+
+              <div className="relative">
+                <Truck
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+                <select
+                  value={truckTypeFilter}
+                  onChange={(e) => setTruckTypeFilter(e.target.value)}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทรถ</option>
+                  {truckTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
+            {/* DC TYPE */}
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
@@ -1241,7 +1390,7 @@ export default function WaitingFleetPage() {
             </div>
 
             {/* DC */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
@@ -1270,7 +1419,7 @@ export default function WaitingFleetPage() {
             </div>
 
             {/* DATE */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1404,6 +1553,8 @@ export default function WaitingFleetPage() {
                 type="button"
                 onClick={() => {
                   setSearchText("");
+                  setRequestTypeFilter("all");
+                  setTruckTypeFilter("all");
                   setDcTypeFilter("all");
                   setDcFilter("all");
                   setStatusFilter("all");
@@ -1459,6 +1610,7 @@ export default function WaitingFleetPage() {
                       "เลขที่เอกสาร",
                       "DC Type",
                       "DC",
+                      "ประเภทคำขอ",
                       "ประเภทรถ",
                       "ทะเบียนทดแทน",
                       "จำนวน",
@@ -1592,9 +1744,12 @@ export default function WaitingFleetPage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-bold text-slate-700">
-                                  {item.fleet_truck_type || "-"}
+                                  {item.fleet_type || "-"}
                                 </p>
-                                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                              </td>
+
+                              <td className="whitespace-nowrap px-3 py-3">
+                                <p className="font-bold text-slate-700">
                                   {item.fleet_type || "-"}
                                 </p>
                               </td>
@@ -1658,7 +1813,9 @@ export default function WaitingFleetPage() {
                                 ) : (
                                   <div className="text-center">
                                     <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
-                                      {formatNumber(item.qty)}
+                                      {formatNumber(
+                                        getQtySummary(item).requestedQty,
+                                      )}
                                     </span>
                                   </div>
                                 )}

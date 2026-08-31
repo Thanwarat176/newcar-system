@@ -72,6 +72,8 @@ interface ApprovedSupplierApiItem {
     Company_ID?: string | number | null;
     Company_Name?: string | null;
     TRUCK_TYPE?: string | null;
+    replacement_licenses?: string[] | string | null;
+    REPLACEMENT_LICENSES?: string[] | string | null;
 }
 
 interface SupplierItem {
@@ -210,6 +212,7 @@ interface ApprovedSupplierRow {
     companyName: string;
     truckType: string;
     qty: number;
+    replacementLicenses: string[];
 }
 
 interface FleetCheckStats {
@@ -225,6 +228,19 @@ interface FleetCheckStats {
 type FbpDecision =
     | "approve"
     | "reject_by_fbp";
+
+const normalizeFleetTypeKey = (value: unknown) =>
+    String(value || "")
+        .trim()
+        .replace(/\s+/g, "")
+        .toUpperCase();
+
+const STANDARD_REPLACEMENT_FLEET_TYPES = new Set([
+    normalizeFleetTypeKey("รถทดแทน"),
+    normalizeFleetTypeKey("รถทดแทน 7 ปี"),
+    normalizeFleetTypeKey("รถทดแทนหมดอายุ"),
+    normalizeFleetTypeKey("รถหมดอายุ"),
+]);
 
 
 
@@ -583,6 +599,38 @@ export default function FleetModalDetail({
                         qty: Number(
                             supplier.qty || 0
                         ),
+
+                        replacementLicenses: (() => {
+                            const raw =
+                                supplier.replacement_licenses ??
+                                supplier.REPLACEMENT_LICENSES ??
+                                [];
+
+                            if (Array.isArray(raw)) {
+                                return raw
+                                    .map((license) => String(license).trim())
+                                    .filter(Boolean);
+                            }
+
+                            const text = String(raw || "").trim();
+                            if (!text) return [];
+
+                            try {
+                                const parsed = JSON.parse(text);
+                                if (Array.isArray(parsed)) {
+                                    return parsed
+                                        .map((license) => String(license).trim())
+                                        .filter(Boolean);
+                                }
+                            } catch {
+                                // รองรับข้อมูลเดิมที่คั่นทะเบียนด้วย comma
+                            }
+
+                            return text
+                                .split(",")
+                                .map((license) => license.trim())
+                                .filter(Boolean);
+                        })(),
                     })
                 )
             );
@@ -602,13 +650,25 @@ export default function FleetModalDetail({
                     truckType:
                         data.fleet_truck_type || "",
                     qty:
-                        initialQty > 0
-                            ? initialQty
-                            : 1,
+                        STANDARD_REPLACEMENT_FLEET_TYPES.has(
+                            normalizeFleetTypeKey(data.fleet_type)
+                        )
+                            ? 1
+                            : initialQty > 0
+                                ? initialQty
+                                : 1,
+                    replacementLicenses: [],
                 },
             ]);
         }
-    }, [open, data.id, data.qty, data.fleet_truck_type]);
+    }, [
+        open,
+        data.id,
+        data.qty,
+        data.fleet_type,
+        data.fleet_truck_type,
+        data.approved_suppliers,
+    ]);
 
     useEffect(() => {
         if (!open) return;
@@ -1515,9 +1575,64 @@ export default function FleetModalDetail({
         return Array.from(dcSet).sort();
     }, [allRequests, data.dc_code]);
 
-    const isReplacementRequest =
-        normalizeText(data.fleet_type) ===
-        normalizeText("รถทดแทน");
+    const isStandardReplacementType =
+        STANDARD_REPLACEMENT_FLEET_TYPES.has(
+            normalizeFleetTypeKey(data.fleet_type)
+        );
+
+    // รถทดแทนทั้ง 3 กลุ่มใช้ฟอร์มผู้ให้บริการ/ประเภทรถ/จำนวน
+    // และจับคู่ทะเบียนแบบหลายทะเบียนต่อรถอนุมัติหนึ่งรายการ
+    const isReplacementRequest = false;
+
+    const replacementLicenseOptions = useMemo(() => {
+        const licenses = new Set<string>();
+
+        if (Array.isArray(data.details)) {
+            data.details.forEach((detail) => {
+                const license = String(detail.license || "").trim();
+                const province = String(detail.province || "").trim();
+
+                if (license) {
+                    licenses.add(
+                        province ? `${license} - ${province}` : license
+                    );
+                }
+            });
+        }
+
+        if (licenses.size === 0) {
+            if (Array.isArray(data.license_replace)) {
+                data.license_replace.forEach((license) => {
+                    const value = String(license || "").trim();
+                    if (value) licenses.add(value);
+                });
+            } else {
+                const raw = String(data.license_replace || "").trim();
+
+                if (raw) {
+                    try {
+                        const parsed = JSON.parse(raw);
+
+                        if (Array.isArray(parsed)) {
+                            parsed.forEach((license) => {
+                                const value = String(license || "").trim();
+                                if (value) licenses.add(value);
+                            });
+                        } else {
+                            licenses.add(raw);
+                        }
+                    } catch {
+                        raw.split(",").forEach((license) => {
+                            const value = license.trim();
+                            if (value) licenses.add(value);
+                        });
+                    }
+                }
+            }
+        }
+
+        return Array.from(licenses);
+    }, [data.details, data.license_replace]);
 
     const updateSingleVehicleState = (
         rowKey: string,
@@ -1679,6 +1794,7 @@ export default function FleetModalDetail({
         companyName: "",
         truckType: data.fleet_truck_type || "",
         qty: defaultQty,
+        replacementLicenses: [],
     });
 
     const addApprovedSupplier = () => {
@@ -1728,6 +1844,39 @@ export default function FleetModalDetail({
                 };
             })
         );
+
+        setMessage(null);
+    };
+
+    const toggleReplacementLicense = (
+        rowId: string,
+        license: string
+    ) => {
+        setApprovedSuppliers((current) => {
+            const selectedByAnotherRow = current.some(
+                (row) =>
+                    row.rowId !== rowId &&
+                    row.replacementLicenses.includes(license)
+            );
+
+            if (selectedByAnotherRow) return current;
+
+            return current.map((row) => {
+                if (row.rowId !== rowId) return row;
+
+                const isSelected =
+                    row.replacementLicenses.includes(license);
+
+                return {
+                    ...row,
+                    replacementLicenses: isSelected
+                        ? row.replacementLicenses.filter(
+                            (item) => item !== license
+                        )
+                        : [...row.replacementLicenses, license],
+                };
+            });
+        });
 
         setMessage(null);
     };
@@ -1801,12 +1950,19 @@ export default function FleetModalDetail({
     };
 
     const totalApprovedQty = useMemo(() => {
+        if (isStandardReplacementType) {
+            // รถทดแทนแต่ละรายการนับเป็นรถอนุมัติ 1 คัน
+            // ไม่ว่าจะเลือกทะเบียนเดิมกี่ทะเบียน
+            return approvedSuppliers.filter(
+                (item) => item.replacementLicenses.length > 0
+            ).length;
+        }
+
         return approvedSuppliers.reduce(
-            (total, item) =>
-                total + Number(item.qty || 0),
+            (total, item) => total + Number(item.qty || 0),
             0
         );
-    }, [approvedSuppliers]);
+    }, [approvedSuppliers, isStandardReplacementType]);
 
     const savedApprovedSuppliers = useMemo(() => {
         return parseApprovedSuppliers(
@@ -1826,10 +1982,27 @@ export default function FleetModalDetail({
 
     const draftApprovedQty = totalApprovedQty;
 
-    const draftNotApprovedQty = Math.max(
-        requestedQty - draftApprovedQty,
+    const selectedReplacementLicenseCount = useMemo(() => {
+        const selected = new Set<string>();
+
+        approvedSuppliers.forEach((row) => {
+            row.replacementLicenses.forEach((license) => {
+                if (license) selected.add(license);
+            });
+        });
+
+        return selected.size;
+    }, [approvedSuppliers]);
+
+    const unassignedReplacementLicenseCount = Math.max(
+        replacementLicenseOptions.length -
+        selectedReplacementLicenseCount,
         0
     );
+
+    const draftNotApprovedQty = isStandardReplacementType
+        ? unassignedReplacementLicenseCount
+        : Math.max(requestedQty - draftApprovedQty, 0);
 
     const replacementVehicleOptions =
         useMemo<ReplacementVehicleOption[]>(() => {
@@ -1951,9 +2124,13 @@ export default function FleetModalDetail({
             (item) =>
                 item.companyName.trim() !== "" &&
                 item.truckType.trim() !== "" &&
-                Number(item.qty) > 0
+                Number(item.qty) > 0 &&
+                (
+                    !isStandardReplacementType ||
+                    item.replacementLicenses.length > 0
+                )
         );
-    }, [approvedSuppliers]);
+    }, [approvedSuppliers, isStandardReplacementType]);
 
     const approveRequest = async () => {
         if (!canMakeDecision) {
@@ -1975,7 +2152,9 @@ export default function FleetModalDetail({
         if (!isSupplierRowsValid) {
             setMessage({
                 type: "error",
-                text: "กรุณาเลือกผู้ให้บริการ ประเภทรถ และจำนวนให้ครบ",
+                text: isStandardReplacementType
+                    ? "กรุณาเลือกผู้ให้บริการ ประเภทรถ จำนวน และทะเบียนเดิมที่ทดแทนให้ครบ"
+                    : "กรุณาเลือกผู้ให้บริการ ประเภทรถ และจำนวนให้ครบ",
             });
             return;
         }
@@ -1984,6 +2163,14 @@ export default function FleetModalDetail({
             setMessage({
                 type: "error",
                 text: "จำนวนรถต้องมากกว่า 0",
+            });
+            return;
+        }
+
+        if (draftNotApprovedQty > 0 && !rejectReason.trim()) {
+            setMessage({
+                type: "error",
+                text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} ${isStandardReplacementType ? "ทะเบียน" : "คัน"}`,
             });
             return;
         }
@@ -2019,8 +2206,33 @@ export default function FleetModalDetail({
                     company_id: item.companyId,
                     company_name: item.companyName,
                     truck_type: item.truckType,
-                    qty: Number(item.qty),
+
+                    // รถทดแทน 1 รายการ นับอนุมัติ 1 คัน
+                    qty: isStandardReplacementType
+                        ? 1
+                        : Number(item.qty),
+
+                    replacement_licenses: item.replacementLicenses,
                 })),
+
+                replacement_mappings: isStandardReplacementType
+                    ? approvedSuppliers.map((item) => ({
+                        company_id: item.companyId,
+                        company_name: item.companyName,
+                        truck_type: item.truckType,
+
+                        // รายการนี้คือรถใหม่ที่อนุมัติ 1 คัน
+                        approved_qty: 1,
+
+                        // รถใหม่ 1 คัน สามารถแทนรถเดิมได้หลายทะเบียน
+                        replacement_licenses: item.replacementLicenses,
+                    }))
+                    : [],
+
+                replaced_license_qty:
+                    selectedReplacementLicenseCount,
+                unassigned_license_qty:
+                    unassignedReplacementLicenseCount,
 
                 approved_truck_type:
                     approvedSuppliers[0]?.truckType ||
@@ -2067,22 +2279,6 @@ export default function FleetModalDetail({
                 throw new Error(
                     result?.message || "บันทึกการจัดรถไม่สำเร็จ"
                 );
-            }
-
-            if (draftNotApprovedQty > 0 && !remark.trim()) {
-                setMessage({
-                    type: "error",
-                    text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`,
-                });
-                return;
-            }
-
-            if (draftNotApprovedQty > 0 && !rejectReason.trim()) {
-                setMessage({
-                    type: "error",
-                    text: `กรุณาระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`,
-                });
-                return;
             }
 
             setMessage({
@@ -2732,7 +2928,7 @@ export default function FleetModalDetail({
             .trim()
             .toLowerCase();
     };
-    
+
     const isDetailFinalized = (
         item: RequestDetailItem
     ) => {
@@ -3397,7 +3593,7 @@ export default function FleetModalDetail({
                                     </span>
 
                                     <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
-                                        DC: {data.dc_code || "-"}
+                                        {data.dc_code || "-"}
                                     </span>
 
                                     <span
@@ -4544,78 +4740,126 @@ export default function FleetModalDetail({
 
                                     <div className="space-y-4 p-4">
                                         {/* จำนวนที่กำลังกรอก */}
-                                        <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200">
-                                            {[
-                                                {
-                                                    label:
-                                                        "จำนวนที่ขอ",
-                                                    value:
-                                                        requestedQty,
-                                                    className:
-                                                        "text-slate-800",
-                                                    bgClass:
-                                                        "bg-slate-50",
-                                                },
-                                                {
-                                                    label:
-                                                        "จำนวนที่อนุมัติ",
-                                                    value:
-                                                        draftApprovedQty,
-                                                    className:
-                                                        draftApprovedQty >
-                                                            requestedQty
-                                                            ? "text-rose-700"
-                                                            : "text-blue-700",
-                                                    bgClass:
-                                                        "bg-blue-50/70",
-                                                },
-                                                {
-                                                    label:
-                                                        "จำนวนไม่อนุมัติ",
-                                                    value:
-                                                        draftNotApprovedQty,
-                                                    className:
-                                                        draftNotApprovedQty >
-                                                            0
-                                                            ? "text-rose-700"
-                                                            : "text-emerald-700",
-                                                    bgClass:
-                                                        draftNotApprovedQty >
-                                                            0
-                                                            ? "bg-rose-50/70"
-                                                            : "bg-emerald-50/70",
-                                                },
-                                            ].map(
-                                                (item, index) => (
-                                                    <div
-                                                        key={
-                                                            item.label
-                                                        }
-                                                        className={`px-2 py-3 text-center ${item.bgClass} ${index > 0
-                                                            ? "border-l border-slate-200"
-                                                            : ""
-                                                            }`}
-                                                    >
-                                                        <p className="text-[9px] font-bold text-slate-500">
-                                                            {
+                                        <div
+                                            className={`grid overflow-hidden rounded-xl border border-slate-200 ${isStandardReplacementType
+                                                ? "grid-cols-2 sm:grid-cols-4"
+                                                : "grid-cols-3"
+                                                }`}
+                                        >
+                                            {(isStandardReplacementType
+                                                ? [
+                                                    {
+                                                        label: "ทะเบียนที่ขอทดแทน",
+                                                        value: replacementLicenseOptions.length,
+                                                        unit: "ทะเบียน",
+                                                        className: "text-slate-800",
+                                                        bgClass: "bg-slate-50",
+                                                    },
+                                                    {
+                                                        label: "รถที่อนุมัติ",
+                                                        value: draftApprovedQty,
+                                                        unit: "คัน",
+                                                        className:
+                                                            draftApprovedQty > requestedQty
+                                                                ? "text-rose-700"
+                                                                : "text-blue-700",
+                                                        bgClass: "bg-blue-50/70",
+                                                    },
+                                                    {
+                                                        label: "ทะเบียนที่ครอบคลุม",
+                                                        value: selectedReplacementLicenseCount,
+                                                        unit: "ทะเบียน",
+                                                        className: "text-emerald-700",
+                                                        bgClass: "bg-emerald-50/70",
+                                                    },
+                                                    {
+                                                        label: "ยังไม่ถูกทดแทน",
+                                                        value: unassignedReplacementLicenseCount,
+                                                        unit: "ทะเบียน",
+                                                        className:
+                                                            unassignedReplacementLicenseCount > 0
+                                                                ? "text-rose-700"
+                                                                : "text-emerald-700",
+                                                        bgClass:
+                                                            unassignedReplacementLicenseCount > 0
+                                                                ? "bg-rose-50/70"
+                                                                : "bg-emerald-50/70",
+                                                    },
+                                                ]
+                                                : [
+                                                    {
+                                                        label:
+                                                            "จำนวนที่ขอ",
+                                                        value:
+                                                            requestedQty,
+                                                        className:
+                                                            "text-slate-800",
+                                                        bgClass:
+                                                            "bg-slate-50",
+                                                        unit: "คัน",
+                                                    },
+                                                    {
+                                                        label:
+                                                            "จำนวนที่อนุมัติ",
+                                                        value:
+                                                            draftApprovedQty,
+                                                        className:
+                                                            draftApprovedQty >
+                                                                requestedQty
+                                                                ? "text-rose-700"
+                                                                : "text-blue-700",
+                                                        bgClass:
+                                                            "bg-blue-50/70",
+                                                        unit: "คัน",
+                                                    },
+                                                    {
+                                                        label:
+                                                            "จำนวนไม่อนุมัติ",
+                                                        value:
+                                                            draftNotApprovedQty,
+                                                        className:
+                                                            draftNotApprovedQty >
+                                                                0
+                                                                ? "text-rose-700"
+                                                                : "text-emerald-700",
+                                                        bgClass:
+                                                            draftNotApprovedQty >
+                                                                0
+                                                                ? "bg-rose-50/70"
+                                                                : "bg-emerald-50/70",
+                                                        unit: "คัน",
+                                                    },
+                                                ]).map(
+                                                    (item, index) => (
+                                                        <div
+                                                            key={
                                                                 item.label
                                                             }
-                                                        </p>
-
-                                                        <p
-                                                            className={`mt-1 text-lg font-black ${item.className}`}
+                                                            className={`px-2 py-3 text-center ${item.bgClass} ${index > 0
+                                                                ? "border-l border-slate-200"
+                                                                : ""
+                                                                }`}
                                                         >
-                                                            {formatNumber(
-                                                                item.value
-                                                            )}
+                                                            <p className="text-[9px] font-bold text-slate-500">
+                                                                {
+                                                                    item.label
+                                                                }
+                                                            </p>
 
-                                                            <span className="ml-1 text-[9px] font-bold text-slate-400">
-                                                                คัน
-                                                            </span>
-                                                        </p>
-                                                    </div>
-                                                )
-                                            )}
+                                                            <p
+                                                                className={`mt-1 text-lg font-black ${item.className}`}
+                                                            >
+                                                                {formatNumber(
+                                                                    item.value
+                                                                )}
+
+                                                                <span className="ml-1 text-[9px] font-bold text-slate-400">
+                                                                    {item.unit}
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    )
+                                                )}
                                         </div>
 
                                         {/* ผู้ให้บริการ */}
@@ -4802,10 +5046,18 @@ export default function FleetModalDetail({
                                                                             type="number"
                                                                             min={1}
                                                                             step={1}
-                                                                            value={Number(row.qty) > 0 ? Number(row.qty) : ""}
-                                                                            disabled={saving}
+                                                                            value={
+                                                                                isStandardReplacementType
+                                                                                    ? 1
+                                                                                    : Number(row.qty) > 0
+                                                                                        ? Number(row.qty)
+                                                                                        : ""
+                                                                            }
+                                                                            disabled={saving || isStandardReplacementType}
                                                                             onFocus={(event) => event.currentTarget.select()}
                                                                             onChange={(event) => {
+                                                                                if (isStandardReplacementType) return;
+
                                                                                 const rawValue = event.target.value;
 
                                                                                 updateApprovedSupplier(
@@ -4817,14 +5069,158 @@ export default function FleetModalDetail({
                                                                                 );
                                                                             }}
                                                                             onBlur={() => {
-                                                                                if (Number(row.qty) <= 0) {
-                                                                                    updateApprovedSupplier(row.rowId, "qty", 1);
+                                                                                if (
+                                                                                    !isStandardReplacementType &&
+                                                                                    Number(row.qty) <= 0
+                                                                                ) {
+                                                                                    updateApprovedSupplier(
+                                                                                        row.rowId,
+                                                                                        "qty",
+                                                                                        1
+                                                                                    );
                                                                                 }
                                                                             }}
                                                                             className="h-10 w-full rounded-xl border border-slate-300 bg-white px-2 text-center text-sm font-black text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                                                                         />
                                                                     </label>
                                                                 </div>
+
+                                                                {/* ทะเบียนเดิมที่รถอนุมัติรายการนี้ทดแทน */}
+                                                                {isStandardReplacementType && (
+                                                                    <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
+                                                                        <div className="mb-2 flex items-start justify-between gap-3">
+                                                                            <div className="min-w-0">
+                                                                                <p className="text-[10px] font-black text-blue-900">
+                                                                                    ทะเบียนเดิมที่ทดแทน
+                                                                                    <span className="ml-1 text-rose-500">
+                                                                                        *
+                                                                                    </span>
+                                                                                </p>
+
+                                                                                <p className="mt-0.5 text-[9px] font-medium leading-relaxed text-blue-600">
+                                                                                    รถที่อนุมัติ 1 คัน สามารถเลือกทดแทนรถเดิมได้หลายทะเบียน
+                                                                                </p>
+                                                                            </div>
+
+                                                                            <span className="shrink-0 rounded-full border border-blue-200 bg-white px-2 py-1 text-[9px] font-black text-blue-700 shadow-sm">
+                                                                                {(row.replacementLicenses ?? []).length}{" "}
+                                                                                ทะเบียน
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {/* ทะเบียนที่เลือกแล้ว */}
+                                                                        {(row.replacementLicenses ?? []).length > 0 && (
+                                                                            <div className="mb-2 flex flex-wrap gap-1.5">
+                                                                                {(row.replacementLicenses ?? []).map(
+                                                                                    (license) => (
+                                                                                        <button
+                                                                                            key={license}
+                                                                                            type="button"
+                                                                                            disabled={saving}
+                                                                                            onClick={() =>
+                                                                                                toggleReplacementLicense(
+                                                                                                    row.rowId,
+                                                                                                    license
+                                                                                                )
+                                                                                            }
+                                                                                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[9px] font-black text-blue-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                        >
+                                                                                            <span>{license}</span>
+                                                                                            <span className="text-xs leading-none">
+                                                                                                ×
+                                                                                            </span>
+                                                                                        </button>
+                                                                                    )
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* ตัวเลือกทะเบียนรถเดิม */}
+                                                                        <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2">
+                                                                            {replacementLicenseOptions.length === 0 ? (
+                                                                                <p className="py-4 text-center text-[10px] font-bold text-slate-400">
+                                                                                    ไม่พบทะเบียนรถเดิม
+                                                                                </p>
+                                                                            ) : (
+                                                                                replacementLicenseOptions.map(
+                                                                                    (license) => {
+                                                                                        const isSelected = (
+                                                                                            row.replacementLicenses ?? []
+                                                                                        ).includes(license);
+
+                                                                                        const selectedByAnotherRow =
+                                                                                            approvedSuppliers.some(
+                                                                                                (supplier) =>
+                                                                                                    supplier.rowId !==
+                                                                                                    row.rowId &&
+                                                                                                    (
+                                                                                                        supplier.replacementLicenses ??
+                                                                                                        []
+                                                                                                    ).includes(license)
+                                                                                            );
+
+                                                                                        return (
+                                                                                            <label
+                                                                                                key={license}
+                                                                                                className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 transition ${isSelected
+                                                                                                    ? "border-blue-300 bg-blue-50"
+                                                                                                    : selectedByAnotherRow
+                                                                                                        ? "cursor-not-allowed border-slate-100 bg-slate-50 opacity-50"
+                                                                                                        : "cursor-pointer border-transparent hover:border-blue-100 hover:bg-blue-50/50"
+                                                                                                    }`}
+                                                                                            >
+                                                                                                <input
+                                                                                                    type="checkbox"
+                                                                                                    checked={isSelected}
+                                                                                                    disabled={
+                                                                                                        saving ||
+                                                                                                        selectedByAnotherRow
+                                                                                                    }
+                                                                                                    onChange={() =>
+                                                                                                        toggleReplacementLicense(
+                                                                                                            row.rowId,
+                                                                                                            license
+                                                                                                        )
+                                                                                                    }
+                                                                                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                                                                                />
+
+                                                                                                <span
+                                                                                                    className={`min-w-0 flex-1 truncate text-[10px] font-bold ${isSelected
+                                                                                                        ? "text-blue-800"
+                                                                                                        : "text-slate-600"
+                                                                                                        }`}
+                                                                                                >
+                                                                                                    {license}
+                                                                                                </span>
+
+                                                                                                {selectedByAnotherRow && (
+                                                                                                    <span className="shrink-0 text-[8px] font-bold text-slate-400">
+                                                                                                        ใช้แล้ว
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </label>
+                                                                                        );
+                                                                                    }
+                                                                                )
+                                                                            )}
+                                                                        </div>
+
+                                                                        {(row.replacementLicenses ?? []).length > 0 && (
+                                                                            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2">
+                                                                                <p className="text-[9px] font-black text-emerald-700">
+                                                                                    อนุมัติรถ {formatNumber(row.qty)} คัน
+                                                                                    ทดแทนรถเดิม{" "}
+                                                                                    {formatNumber(
+                                                                                        (row.replacementLicenses ?? [])
+                                                                                            .length
+                                                                                    )}{" "}
+                                                                                    ทะเบียน
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
 
                                                                 {row.companyId && (
                                                                     <p className="text-[9px] font-medium text-slate-400">
@@ -4852,16 +5248,18 @@ export default function FleetModalDetail({
                                                 </div>
                                             )}
 
-                                        {totalApprovedQty <
-                                            requestedQty &&
-                                            totalApprovedQty >
-                                            0 && (
+                                        {draftNotApprovedQty > 0 &&
+                                            totalApprovedQty > 0 && (
                                                 <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
-                                                    มีจำนวนไม่อนุมัติ{" "}
+                                                    {isStandardReplacementType
+                                                        ? "ยังมีทะเบียนเดิมที่ไม่ได้เลือกรถทดแทน "
+                                                        : "มีจำนวนไม่อนุมัติ "}
                                                     {formatNumber(
                                                         draftNotApprovedQty
                                                     )}{" "}
-                                                    คัน
+                                                    {isStandardReplacementType
+                                                        ? "ทะเบียน"
+                                                        : "คัน"}
                                                 </div>
                                             )}
 
@@ -4901,12 +5299,14 @@ export default function FleetModalDetail({
                                                             setRejectReason(event.target.value);
                                                             setMessage(null);
                                                         }}
-                                                        placeholder={`ระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} คัน`}
+                                                        placeholder={`ระบุเหตุผลที่ไม่อนุมัติ ${draftNotApprovedQty} ${isStandardReplacementType ? "ทะเบียน" : "คัน"}`}
                                                         className="w-full resize-none rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-100 disabled:bg-slate-100"
                                                     />
 
                                                     <span className="mt-1.5 block text-[10px] font-medium text-rose-500">
-                                                        จำเป็นต้องระบุ เนื่องจากมีรถไม่อนุมัติ {draftNotApprovedQty} คัน
+                                                        จำเป็นต้องระบุ เนื่องจากมี{isStandardReplacementType ? "ทะเบียนที่ยังไม่ได้รับการทดแทน" : "รถไม่อนุมัติ"}{" "}
+                                                        {draftNotApprovedQty}{" "}
+                                                        {isStandardReplacementType ? "ทะเบียน" : "คัน"}
                                                     </span>
                                                 </label>
                                             )}

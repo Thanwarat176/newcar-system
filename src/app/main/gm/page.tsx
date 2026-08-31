@@ -41,6 +41,7 @@ interface RequestItem {
   fleet_truck_type: string;
   license_replace: string[] | string;
   qty: number;
+  approve_qty_gm?: number | string | null;
   usage_date: string;
   workload: number;
   truckturn: number;
@@ -90,6 +91,8 @@ export default function GmStatusPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [searchText, setSearchText] = useState("");
+  const [requestTypeFilter, setRequestTypeFilter] = useState("all");
+  const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
 
@@ -490,6 +493,38 @@ export default function GmStatusPage() {
     return value;
   };
 
+  const getQtySummary = (item: RequestItem) => {
+    const requestedQty = Math.max(0, Number(item.qty) || 0);
+    const itemStatus = normalizeStatus(item.status);
+
+    if (itemStatus === "reject_by_gm") {
+      return {
+        requestedQty,
+        approvedQty: 0,
+        notApprovedQty: requestedQty,
+      };
+    }
+
+    if (itemStatus === "fbp_pending") {
+      const approvedQty = Math.max(
+        0,
+        Number(item.approve_qty_gm) || 0,
+      );
+
+      return {
+        requestedQty,
+        approvedQty,
+        notApprovedQty: Math.max(requestedQty - approvedQty, 0),
+      };
+    }
+
+    return {
+      requestedQty,
+      approvedQty: 0,
+      notApprovedQty: 0,
+    };
+  };
+
   const formatStatusText = (status?: string) => {
     const value = normalizeStatus(status);
 
@@ -669,6 +704,31 @@ export default function GmStatusPage() {
     return Array.from(uniqueTypes).sort();
   }, [warehouseFilteredRequests]);
 
+  const requestTypeOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        warehouseFilteredRequests
+          .map((item) => String(item.fleet_type || "").trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "th"));
+  }, [warehouseFilteredRequests]);
+
+  const truckTypeOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        warehouseFilteredRequests
+          .filter(
+            (item) =>
+              requestTypeFilter === "all" ||
+              String(item.fleet_type || "").trim() === requestTypeFilter,
+          )
+          .map((item) => String(item.fleet_truck_type || "").trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "th"));
+  }, [warehouseFilteredRequests, requestTypeFilter]);
+
   const dcOptions = useMemo(() => {
     const uniqueDC = new Set<string>();
 
@@ -698,6 +758,20 @@ export default function GmStatusPage() {
         if (itemStatus !== statusFilter) return false;
       }
 
+      if (
+        requestTypeFilter !== "all" &&
+        String(item.fleet_type || "").trim() !== requestTypeFilter
+      ) {
+        return false;
+      }
+
+      if (
+        truckTypeFilter !== "all" &&
+        String(item.fleet_truck_type || "").trim() !== truckTypeFilter
+      ) {
+        return false;
+      }
+
       // filter dc type
       if (dcTypeFilter !== "all") {
         if ((item.dc_type || "").trim() !== dcTypeFilter) return false;
@@ -706,6 +780,20 @@ export default function GmStatusPage() {
       // filter dc
       if (dcFilter !== "all") {
         if ((item.dc_code || "").trim() !== dcFilter) return false;
+      }
+
+      if (hasRequestDateRange) {
+        const requestDateKey = getRequestDateKey(item);
+        const startDateKey = formatDateToKey(requestDateRange[0].startDate);
+        const endDateKey = formatDateToKey(requestDateRange[0].endDate);
+
+        if (
+          requestDateKey === "ไม่ระบุวันที่" ||
+          requestDateKey < startDateKey ||
+          requestDateKey > endDateKey
+        ) {
+          return false;
+        }
       }
 
       // filter search
@@ -732,9 +820,13 @@ export default function GmStatusPage() {
   }, [
     warehouseFilteredRequests,
     statusFilter,
+    requestTypeFilter,
+    truckTypeFilter,
     dcTypeFilter,
     dcFilter,
     searchText,
+    hasRequestDateRange,
+    requestDateRange,
   ]);
 
   const sortedRequests = useMemo(() => {
@@ -822,22 +914,35 @@ export default function GmStatusPage() {
   }, [groupedFilteredByRequestDate, sortConfig]);
 
   const statusCounts = useMemo(() => {
+    const summarize = (items: RequestItem[]) => ({
+      qty: items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0),
+      items: items.length,
+    });
+
     return {
-      all: warehouseFilteredRequests.filter((item) =>
-        isAllowedCardStatus(item.status)
-      ).length,
+      all: summarize(
+        warehouseFilteredRequests.filter((item) =>
+          isAllowedCardStatus(item.status),
+        ),
+      ),
 
-      gmPending: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "gm_pending"
-      ).length,
+      gmPending: summarize(
+        warehouseFilteredRequests.filter(
+          (item) => normalizeStatus(item.status) === "gm_pending",
+        ),
+      ),
 
-      rejected: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "reject_by_gm"
-      ).length,
+      rejected: summarize(
+        warehouseFilteredRequests.filter(
+          (item) => normalizeStatus(item.status) === "reject_by_gm",
+        ),
+      ),
 
-      fbp_pending: warehouseFilteredRequests.filter(
-        (item) => normalizeStatus(item.status) === "fbp_pending"
-      ).length,
+      fbp_pending: summarize(
+        warehouseFilteredRequests.filter(
+          (item) => normalizeStatus(item.status) === "fbp_pending",
+        ),
+      ),
     };
   }, [warehouseFilteredRequests]);
 
@@ -959,8 +1064,9 @@ export default function GmStatusPage() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: statusCounts.all,
-                sub: "รวมมรายการทั้งหมด",
+                count: statusCounts.all.qty,
+                itemCount: statusCounts.all.items,
+                sub: "รวมจำนวนรถทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -975,8 +1081,9 @@ export default function GmStatusPage() {
               {
                 key: "gm_pending",
                 label: "รอ GM อนุมัติ",
-                count: statusCounts.gmPending,
-                sub: "รายการที่รอการพิจารณาจาก GM",
+                count: statusCounts.gmPending.qty,
+                itemCount: statusCounts.gmPending.items,
+                sub: "จำนวนรถที่รอการพิจารณาจาก GM",
                 activeClass:
                   "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
                 inactiveClass:
@@ -991,8 +1098,9 @@ export default function GmStatusPage() {
               {
                 key: "reject_by_gm",
                 label: "GM ไม่อนุมัติ",
-                count: statusCounts.rejected,
-                sub: "รายการที่ไม่ผ่านการอนุมัติ",
+                count: statusCounts.rejected.qty,
+                itemCount: statusCounts.rejected.items,
+                sub: "จำนวนรถที่ไม่ผ่านการอนุมัติ",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1007,8 +1115,9 @@ export default function GmStatusPage() {
               {
                 key: "fbp_pending",
                 label: "GM อนุมัติแล้ว",
-                count: statusCounts.fbp_pending,
-                sub: "รายการที่ผ่านการอนุมัติแล้ว",
+                count: statusCounts.fbp_pending.qty,
+                itemCount: statusCounts.fbp_pending.items,
+                sub: "จำนวนรถที่ผ่านการอนุมัติแล้ว",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1026,6 +1135,7 @@ export default function GmStatusPage() {
               key,
               label,
               count,
+              itemCount,
               sub,
               activeClass,
               inactiveClass,
@@ -1085,7 +1195,8 @@ export default function GmStatusPage() {
                       className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {count}
+                      {formatNumber(count)}
+                      <span className="ml-1 text-sm font-black opacity-60">คัน</span>
                     </p>
 
                     <span
@@ -1094,7 +1205,7 @@ export default function GmStatusPage() {
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      รายการ
+                      {formatNumber(itemCount)} รายการ
                     </span>
                   </div>
                 </button>
@@ -1131,7 +1242,7 @@ export default function GmStatusPage() {
           {/* FILTER INPUTS */}
           <div className="grid gap-3 lg:grid-cols-12">
             {/* SEARCH */}
-            <div className="lg:col-span-4">
+            <div className="lg:col-span-3">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1162,8 +1273,53 @@ export default function GmStatusPage() {
               </div>
             </div>
 
-            {/* DC TYPE */}
+            {/* REQUEST TYPE */}
             <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทคำขอ
+              </label>
+              <div className="relative">
+                <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
+                <select
+                  value={requestTypeFilter}
+                  onChange={(e) => {
+                    setRequestTypeFilter(e.target.value);
+                    setTruckTypeFilter("all");
+                  }}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทคำขอ</option>
+                  {requestTypeOptions.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">▼</span>
+              </div>
+            </div>
+
+            {/* TRUCK TYPE */}
+            <div className="lg:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ประเภทรถ
+              </label>
+              <div className="relative">
+                <Truck size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
+                <select
+                  value={truckTypeFilter}
+                  onChange={(e) => setTruckTypeFilter(e.target.value)}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                >
+                  <option value="all">ทุกประเภทรถ</option>
+                  {truckTypeOptions.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">▼</span>
+              </div>
+            </div>
+
+            {/* DC TYPE */}
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
@@ -1198,7 +1354,7 @@ export default function GmStatusPage() {
             </div>
 
             {/* DC */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
@@ -1230,7 +1386,7 @@ export default function GmStatusPage() {
             </div>
 
             {/* DATE */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1365,6 +1521,8 @@ export default function GmStatusPage() {
                 type="button"
                 onClick={() => {
                   setSearchText("");
+                  setRequestTypeFilter("all");
+                  setTruckTypeFilter("all");
                   setDcTypeFilter("all");
                   setDcFilter("all");
                   setStatusFilter("all");
@@ -1401,53 +1559,51 @@ export default function GmStatusPage() {
               <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
-                  {[
-  "ลำดับ",
-  "เลขที่เอกสาร",
-  "DC Type",
-  "DC",
-  "ประเภทรถ",
-  "ทะเบียนทดแทน",
-  "จำนวน",
-  "วันที่ใช้งาน",
-  "ผู้ขอ",
-  "สถานะ",
-  "รายละเอียด",
-].map((col, i) => {
-  const sortKey: SortKey | null =
-    col === "เลขที่เอกสาร"
-      ? "running_doc"
-      : col === "วันที่ใช้งาน"
-        ? "usage_date"
-        : null;
+                    {[
+                      "ลำดับ",
+                      "เลขที่เอกสาร",
+                      "DC Type",
+                      "DC",
+                      "ประเภทคำขอ",
+                      "ประเภทรถ",
+                      "ทะเบียนทดแทน",
+                      "จำนวน",
+                      "วันที่ใช้งาน",
+                      "ผู้ขอ",
+                      "สถานะ",
+                      "รายละเอียด",
+                    ].map((col, i) => {
+                      const sortKey: SortKey | null =
+                        col === "เลขที่เอกสาร"
+                          ? "running_doc"
+                          : col === "วันที่ใช้งาน"
+                            ? "usage_date"
+                            : null;
 
-  return (
-    <th
-      key={col}
-      onClick={() => {
-        if (sortKey) {
-          handleSort(sortKey);
-        }
-      }}
-      className={`whitespace-nowrap bg-transparent px-3 py-3 ${
-        i === 0
-          ? "sticky left-0 z-30 w-[52px] text-center"
-          : ""
-      } ${i === 6 ? "text-center" : ""} ${
-        i === 10 ? "text-right" : ""
-      } ${
-        sortKey
-          ? "cursor-pointer select-none transition hover:bg-blue-700"
-          : ""
-      }`}
-    >
-      <span className="inline-flex items-center gap-1.5">
-        {col}
-        {sortKey && renderSortIcon(sortKey)}
-      </span>
-    </th>
-  );
-})}
+                      return (
+                        <th
+                          key={col}
+                          onClick={() => {
+                            if (sortKey) {
+                              handleSort(sortKey);
+                            }
+                          }}
+                          className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0
+                              ? "sticky left-0 z-30 w-[52px] text-center"
+                              : ""
+                            } ${i === 6 ? "text-center" : ""} ${i === 10 ? "text-right" : ""
+                            } ${sortKey
+                              ? "cursor-pointer select-none transition hover:bg-blue-700"
+                              : ""
+                            }`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            {col}
+                            {sortKey && renderSortIcon(sortKey)}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
 
@@ -1478,29 +1634,29 @@ export default function GmStatusPage() {
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
-  <button
-    type="button"
-    onClick={() => handleSort("request_date")}
-    className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-blue-100 hover:text-blue-800"
-    title="กดเพื่อเรียงวันที่ขอ"
-  >
-    <CalendarDays
-      size={13}
-      className="text-blue-400"
-    />
+                              <button
+                                type="button"
+                                onClick={() => handleSort("request_date")}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-blue-100 hover:text-blue-800"
+                                title="กดเพื่อเรียงวันที่ขอ"
+                              >
+                                <CalendarDays
+                                  size={13}
+                                  className="text-blue-400"
+                                />
 
-    <span>วันที่ขอ: {formatThaiDate(date)}</span>
+                                <span>วันที่ขอ: {formatThaiDate(date)}</span>
 
-    {renderSortIcon("request_date")}
-  </button>
+                                {renderSortIcon("request_date")}
+                              </button>
 
-  {isTodayRequest(date) && (
-    <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
-      New
-    </span>
-  )}
+                              {isTodayRequest(date) && (
+                                <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
+                                  New
+                                </span>
+                              )}
 
-</div>
+                            </div>
                           </td>
                         </tr>
 
@@ -1554,10 +1710,13 @@ export default function GmStatusPage() {
 
                                 <td className="whitespace-nowrap px-3 py-3">
                                   <p className="font-bold text-slate-700">
-                                    {item.fleet_truck_type || "-"}
-                                  </p>
-                                  <p className="mt-0.5 text-[10px] font-medium text-slate-400">
                                     {item.fleet_type || "-"}
+                                  </p>
+                                </td>
+
+                                <td className="whitespace-nowrap px-3 py-3">
+                                  <p className="font-bold text-slate-700">
+                                    {item.fleet_truck_type || "-"}
                                   </p>
                                 </td>
 
@@ -1585,10 +1744,52 @@ export default function GmStatusPage() {
                                   )}
                                 </td>
 
-                                <td className="px-3 py-3 text-center">
-                                  <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
-                                    {formatNumber(item.qty)}
-                                  </span>
+                                <td className="px-3 py-3">
+                                  {normalizeStatus(item.status) ===
+                                    "reject_by_gm" ||
+                                  normalizeStatus(item.status) ===
+                                    "fbp_pending" ? (
+                                    <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                      <div className="px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-slate-400">
+                                          จำนวนขอ
+                                        </p>
+                                        <p className="mt-0.5 text-xs font-black text-slate-700">
+                                          {formatNumber(
+                                            getQtySummary(item).requestedQty,
+                                          )}
+                                        </p>
+                                      </div>
+
+                                      <div className="border-l border-slate-100 bg-emerald-50 px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-emerald-500">
+                                          อนุมัติ
+                                        </p>
+                                        <p className="mt-0.5 text-xs font-black text-emerald-700">
+                                          {formatNumber(
+                                            getQtySummary(item).approvedQty,
+                                          )}
+                                        </p>
+                                      </div>
+
+                                      <div className="border-l border-slate-100 bg-rose-50 px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-rose-500">
+                                          ไม่อนุมัติ
+                                        </p>
+                                        <p className="mt-0.5 text-xs font-black text-rose-700">
+                                          {formatNumber(
+                                            getQtySummary(item).notApprovedQty,
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-center">
+                                      <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
+                                        {formatNumber(item.qty)}
+                                      </span>
+                                    </div>
+                                  )}
                                 </td>
 
                                 <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-600">

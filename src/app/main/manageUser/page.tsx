@@ -246,6 +246,64 @@ export default function ManageUsersPage() {
     });
   }, [users, search, userType, status, department, warehouse]);
 
+  const groupedRows = useMemo(() => {
+    const warehouseGroups = new Map<string, Map<string, UserItem[]>>();
+
+    filteredUsers.forEach((user) => {
+      const warehouseName = String(user.warehouse || "ไม่ระบุ Warehouse").trim();
+      const departmentName = String(user.department || "ไม่ระบุหน่วยงาน").trim();
+
+      if (!warehouseGroups.has(warehouseName)) {
+        warehouseGroups.set(warehouseName, new Map());
+      }
+
+      const departmentGroups = warehouseGroups.get(warehouseName)!;
+
+      if (!departmentGroups.has(departmentName)) {
+        departmentGroups.set(departmentName, []);
+      }
+
+      departmentGroups.get(departmentName)!.push(user);
+    });
+
+    return Array.from(warehouseGroups.entries())
+      .sort(([warehouseA], [warehouseB]) =>
+        warehouseA.localeCompare(warehouseB, "th")
+      )
+      .flatMap(([warehouseName, departmentGroups]) => {
+        const warehouseUserCount = Array.from(departmentGroups.values()).reduce(
+          (total, departmentUsers) => total + departmentUsers.length,
+          0
+        );
+
+        return [
+          {
+            type: "warehouse" as const,
+            key: `warehouse-${warehouseName}`,
+            name: warehouseName,
+            count: warehouseUserCount,
+          },
+          ...Array.from(departmentGroups.entries())
+            .sort(([departmentA], [departmentB]) =>
+              departmentA.localeCompare(departmentB, "th")
+            )
+            .flatMap(([departmentName, departmentUsers]) => [
+              {
+                type: "department" as const,
+                key: `department-${warehouseName}-${departmentName}`,
+                name: departmentName,
+                count: departmentUsers.length,
+              },
+              ...departmentUsers.map((user) => ({
+                type: "user" as const,
+                key: `user-${user.id}`,
+                user,
+              })),
+            ]),
+        ];
+      });
+  }, [filteredUsers]);
+
   const handleSearch = () => {
     // ค้นหาฝั่งหน้าเว็บจาก users ที่โหลดมาแล้ว
   };
@@ -1006,13 +1064,56 @@ export default function ManageUsersPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredUsers.map((user) => {
+                  groupedRows.map((row) => {
+                    if (row.type === "warehouse") {
+                      return (
+                        <tr key={row.key}>
+                          <td
+                            colSpan={6}
+                            className="border-b border-blue-200 bg-blue-950 px-4 py-3 text-white"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="flex items-center gap-2 text-xs font-extrabold tracking-wide">
+                                <Warehouse size={15} />
+                                Warehouse: {row.name}
+                              </span>
+                              <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold">
+                                {row.count} ผู้ใช้งาน
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    if (row.type === "department") {
+                      return (
+                        <tr key={row.key}>
+                          <td
+                            colSpan={6}
+                            className="border-b border-blue-100 bg-blue-50 px-6 py-2"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="flex items-center gap-2 text-[11px] font-bold text-blue-800">
+                                <Building2 size={13} />
+                                Department: {row.name}
+                              </span>
+                              <span className="text-[10px] font-semibold text-blue-500">
+                                {row.count} รายการ
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const user = row.user;
                     const isUpdating = updatingUserId === String(user.id);
                     const currentStatus = normalizeStatus(user.status);
 
                     return (
                       <tr
-                        key={user.id}
+                        key={row.key}
                         className="group bg-white text-xs transition hover:bg-blue-50/35"
                       >
                         <td className="border-b border-slate-100 px-4 py-2.5">

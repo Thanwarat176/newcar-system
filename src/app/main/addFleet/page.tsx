@@ -137,6 +137,7 @@ interface VehicleWarehouseInfoResponse {
 
 interface RequestItem {
   id: number | null;
+  request_id?: number | string | null;
   running_doc: string;
   dc_type: string;
   dc_code: string;
@@ -199,7 +200,7 @@ interface UserInfo {
 type StatusFilter =
   | "all"
   | "gm_pending"
-  | "center_pending"
+  | "fbp_pending"
   | "process"
   | "completed"
   | "rejected";
@@ -936,10 +937,23 @@ export default function AddFleetPage() {
               flowSummaryItem?.status_details ??
               null,
 
-            qty:
-              flowSummaryItem?.qty ??
-              requestItem?.qty ??
+            qty: Math.max(
+              Number(
+                requestItem?.qty ??
+                flowSummaryItem?.qty ??
+                0,
+              ) || 0,
               0,
+            ),
+
+            approved_qty: Math.max(
+              Number(
+                flowSummaryItem?.approved_qty ??
+                requestItem?.approved_qty ??
+                0,
+              ) || 0,
+              0,
+            ),
 
             usage_date:
               flowSummaryItem?.usage_date ||
@@ -1252,7 +1266,7 @@ export default function AddFleetPage() {
     const value = normalizeStatus(status);
 
     if (value === "gm_pending") return "รอ GM อนุมัติ";
-    if (value === "center_pending") return "กำลังประเมินกองรถ (FBP)";
+    if (value === "fbp_pending") return "กำลังประเมินกองรถ (FBP)";
     if (value === "process") return "ดำเนินการตามกระบวนการ (TCAS)";
 
     if (
@@ -1294,7 +1308,7 @@ export default function AddFleetPage() {
       return "bg-purple-50 text-purple-700 border-purple-200";
     }
 
-    if (value === "center_pending") {
+    if (value === "fbp_pending") {
       return "bg-yellow-50 text-yellow-700 border-yellow-200";
     }
 
@@ -1321,8 +1335,8 @@ export default function AddFleetPage() {
     const value = normalizeStatus(status);
 
     // FBP กำลังพิจารณา
-    // normalizeStatus("fbp_pending") จะได้ center_pending
-    if (rawValue === "fbp_pending" || value === "center_pending") {
+    // normalizeStatus("fbp_pending") จะได้ fbp_pending
+    if (rawValue === "fbp_pending" || value === "fbp_pending") {
       return {
         dotClass: "bg-amber-500",
         textClass: "text-amber-700",
@@ -1906,45 +1920,75 @@ export default function AddFleetPage() {
 
   const statusCounts = useMemo(() => {
     const result = {
-      all: 0,
-      gmPending: 0,
-      centerPending: 0,
-      process: 0,
-      completed: 0,
-      rejected: 0,
+      all: { qty: 0, items: 0 },
+      gmPending: { qty: 0, items: 0 },
+      centerPending: { qty: 0, items: 0 },
+      process: { qty: 0, items: 0 },
+      completed: { qty: 0, items: 0 },
+      rejected: { qty: 0, items: 0 },
     };
 
-    warehouseFilteredAllRows.forEach((item) => {
+    const requestKeys = {
+      all: new Set<string>(),
+      gmPending: new Set<string>(),
+      centerPending: new Set<string>(),
+      process: new Set<string>(),
+      completed: new Set<string>(),
+      rejected: new Set<string>(),
+    };
+
+    warehouseFilteredAllRows.forEach((item, index) => {
       const status = normalizeStatus(item.status);
       const vehicleQty = getVisibleVehicleQty(item);
 
-      // ✅ ทุกสถานะต้องถูกนับใน "ทั้งหมด"
-      result.all += vehicleQty;
+      // ใช้ key เดียวกันสำหรับรถทุกคันที่อยู่ภายใต้คำขอเดียวกัน
+      const requestKey = String(
+        item.request_id ??
+        item.id ??
+        item.running_doc ??
+        `request-${index}`,
+      );
+
+      // ตัวเลขหลักนับจำนวนรถ ส่วน Set ใช้นับจำนวนคำขอโดยไม่ซ้ำ
+      result.all.qty += vehicleQty;
+      requestKeys.all.add(requestKey);
 
       if (status === "gm_pending") {
-        result.gmPending += vehicleQty;
+        result.gmPending.qty += vehicleQty;
+        requestKeys.gmPending.add(requestKey);
         return;
       }
 
-      if (status === "center_pending") {
-        result.centerPending += vehicleQty;
+      if (status === "fbp_pending") {
+        result.centerPending.qty += vehicleQty;
+        requestKeys.centerPending.add(requestKey);
         return;
       }
 
       if (status === "process") {
-        result.process += vehicleQty;
+        result.process.qty += vehicleQty;
+        requestKeys.process.add(requestKey);
         return;
       }
 
       if (status === "completed") {
-        result.completed += vehicleQty;
+        result.completed.qty += vehicleQty;
+        requestKeys.completed.add(requestKey);
         return;
       }
 
       if (status === "rejected") {
-        result.rejected += vehicleQty;
+        result.rejected.qty += vehicleQty;
+        requestKeys.rejected.add(requestKey);
       }
     });
+
+    result.all.items = requestKeys.all.size;
+    result.gmPending.items = requestKeys.gmPending.size;
+    result.centerPending.items = requestKeys.centerPending.size;
+    result.process.items = requestKeys.process.size;
+    result.completed.items = requestKeys.completed.size;
+    result.rejected.items = requestKeys.rejected.size;
 
     return result;
   }, [warehouseFilteredAllRows]);
@@ -2109,7 +2153,7 @@ export default function AddFleetPage() {
                   ? "ดูทั้งหมด"
                   : statusFilter === "gm_pending"
                     ? "รอ GM อนุมัติ"
-                    : statusFilter === "center_pending"
+                    : statusFilter === "fbp_pending"
                       ? "กำลังประเมินกองรถ (FBP)"
                       : statusFilter === "process"
                         ? "ดำเนินการตามกระบวนการ (TCAS)"
@@ -2155,7 +2199,8 @@ export default function AddFleetPage() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: statusCounts.all,
+                count: statusCounts.all.qty,
+                itemCount: statusCounts.all.items,
                 sub: "จำนวนรถรวมทุกสถานะ",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
@@ -2171,7 +2216,8 @@ export default function AddFleetPage() {
               {
                 key: "gm_pending",
                 label: "รอ GM อนุมัติ",
-                count: statusCounts.gmPending,
+                count: statusCounts.gmPending.qty,
+                itemCount: statusCounts.gmPending.items,
                 sub: "จำนวนรถที่รอ GM พิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-purple-600 via-violet-600 to-fuchsia-600 text-white ring-purple-300/40",
@@ -2185,10 +2231,11 @@ export default function AddFleetPage() {
                 shortLabel: "GM",
               },
               {
-                key: "center_pending",
-                label: "จำนวนรถที่รอ FBP พิจารณา",
-                count: statusCounts.centerPending,
-                sub: "รายการที่รอส่วนกลางพิจารณา",
+                key: "fbp_pending",
+                label: "รอ FBP พิจารณา",
+                count: statusCounts.centerPending.qty,
+                itemCount: statusCounts.centerPending.items,
+                sub: "จำนวนรถที่รอ FBP พิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
                 inactiveClass:
@@ -2203,7 +2250,8 @@ export default function AddFleetPage() {
               {
                 key: "process",
                 label: "กำลังดำเนินการ (TCAS)",
-                count: statusCounts.process,
+                count: statusCounts.process.qty,
+                itemCount: statusCounts.process.items,
                 sub: "จำนวนรถที่ได้รับการอนุมัติ",
                 activeClass:
                   "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
@@ -2219,7 +2267,8 @@ export default function AddFleetPage() {
               {
                 key: "completed",
                 label: "เสร็จสิ้นกระบวนการ",
-                count: statusCounts.completed,
+                count: statusCounts.completed.qty,
+                itemCount: statusCounts.completed.items,
                 sub: "จำนวนรถที่ส่งมอบคลังแล้ว",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
@@ -2235,7 +2284,8 @@ export default function AddFleetPage() {
               {
                 key: "rejected",
                 label: "ไม่อนุมัติ",
-                count: statusCounts.rejected,
+                count: statusCounts.rejected.qty,
+                itemCount: statusCounts.rejected.items,
                 sub: "จำนวนรถที่ไม่ผ่านการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
@@ -2254,6 +2304,7 @@ export default function AddFleetPage() {
               key,
               label,
               count,
+              itemCount,
               sub,
               activeClass,
               inactiveClass,
@@ -2319,7 +2370,8 @@ export default function AddFleetPage() {
                       className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {count}
+                       {count.toLocaleString("th-TH")}
+                      <span className="ml-1 text-sm font-black opacity-60">คัน</span>
                     </p>
 
                     <span
@@ -2328,9 +2380,10 @@ export default function AddFleetPage() {
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      คัน
+                      {itemCount.toLocaleString("th-TH")} รายการ
                     </span>
                   </div>
+
                 </button>
               );
             },
@@ -2753,6 +2806,7 @@ export default function AddFleetPage() {
                         "DC Type",
                         "DC",
                         "ประเภทรถ",
+                        "ประเภทคำขอ",
                         "จำนวน",
                         "วันที่ใช้งาน",
                         "ผู้ขอ",
@@ -2765,6 +2819,7 @@ export default function AddFleetPage() {
                         "DC Type",
                         "DC",
                         "ประเภทรถ",
+                        "ประเภทคำขอ",
                         "ทะเบียนทดแทน",
                         statusFilter === "rejected"
                           ? "จำนวนทั้งหมด / อนุมัติ / ไม่อนุมัติ"
@@ -3064,10 +3119,13 @@ export default function AddFleetPage() {
 
                                   <td className="whitespace-nowrap px-3 py-3">
                                     <p className="font-bold text-slate-700">
-                                      {item.fleet_truck_type || "-"}
-                                    </p>
-                                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
                                       {item.fleet_type || "-"}
+                                    </p>
+                                  </td>
+
+                                  <td className="whitespace-nowrap px-3 py-3">
+                                    <p className="font-bold text-slate-700">
+                                      {item.fleet_truck_type || "-"}
                                     </p>
                                   </td>
 

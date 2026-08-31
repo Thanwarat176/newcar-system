@@ -335,16 +335,6 @@ export default function TrackFleetPage() {
       const listWithProgress =
         requestRows.flat();
 
-      console.log(
-        "REQUESTS FROM request_get.php:",
-        list
-      );
-
-      console.log(
-        "ROWS BY approved_qty:",
-        listWithProgress
-      );
-
       setRequests(listWithProgress);
     } catch (err) {
       console.error(
@@ -790,24 +780,45 @@ export default function TrackFleetPage() {
     return [];
   };
 
-  const dashboardSummary = useMemo(() => {
-    const progress = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "progress"
-    ).length;
+  const statusCounts = useMemo(() => {
+    const getRequestQty = (item: RequestItem) => {
+      const qty = Number(item.qty || 0);
+      return Number.isFinite(qty) ? Math.max(qty, 0) : 0;
+    };
 
-    const rejectedByCenter = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "reject_by_center"
-    ).length;
+    const allItems = sidebarFilteredRequests.filter((item) =>
+      isAllowedCardStatus(item.status),
+    );
+    const progressItems = sidebarFilteredRequests.filter(
+      (item) => normalizeStatus(item.status) === "progress",
+    );
+    const rejectedItems = sidebarFilteredRequests.filter(
+      (item) => normalizeStatus(item.status) === "reject_by_center",
+    );
+    const approvedItems = sidebarFilteredRequests.filter(
+      (item) => normalizeStatus(item.status) === "approved",
+    );
 
-    const approved = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "approved"
-    ).length;
+    const sumQty = (items: RequestItem[]) =>
+      items.reduce((sum, item) => sum + getRequestQty(item), 0);
 
     return {
-      total: progress + rejectedByCenter + approved,
-      progress,
-      rejectedByCenter,
-      approved,
+      all: {
+        qty: sumQty(allItems),
+        items: allItems.length,
+      },
+      progress: {
+        qty: sumQty(progressItems),
+        items: progressItems.length,
+      },
+      rejected: {
+        qty: sumQty(rejectedItems),
+        items: rejectedItems.length,
+      },
+      approved: {
+        qty: sumQty(approvedItems),
+        items: approvedItems.length,
+      },
     };
   }, [sidebarFilteredRequests]);
 
@@ -1241,8 +1252,9 @@ export default function TrackFleetPage() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: dashboardSummary.total,
-                sub: "รวมรายการที่รอการประเมิน",
+                count: statusCounts.all.qty,
+                itemCount: statusCounts.all.items,
+                sub: "รวมจำนวนรถทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -1257,8 +1269,9 @@ export default function TrackFleetPage() {
               {
                 key: "progress",
                 label: "คำขอรอพิจารณา (TCAS)",
-                count: dashboardSummary.progress,
-                sub: "รายการที่รอการพิจารณา",
+                count: statusCounts.progress.qty,
+                itemCount: statusCounts.progress.items,
+                sub: "จำนวนรถที่รอการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
                 inactiveClass:
@@ -1273,8 +1286,9 @@ export default function TrackFleetPage() {
               {
                 key: "reject_by_center",
                 label: "ไม่ผ่านการประเมิน (TCAS)",
-                count: dashboardSummary.rejectedByCenter,
-                sub: "รายการที่ไม่ผ่านการประเมิน",
+                count: statusCounts.rejected.qty,
+                itemCount: statusCounts.rejected.items,
+                sub: "จำนวนรถที่ไม่ผ่านการประเมิน",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1289,8 +1303,9 @@ export default function TrackFleetPage() {
               {
                 key: "approved",
                 label: "เสร็จสิ้นกระบวนการ ",
-                count: dashboardSummary.approved,
-                sub: "รายการที่ผ่านการประเมิน",
+                count: statusCounts.approved.qty,
+                itemCount: statusCounts.approved.items,
+                sub: "จำนวนรถที่เสร็จสิ้นกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1308,6 +1323,7 @@ export default function TrackFleetPage() {
               key,
               label,
               count,
+              itemCount,
               sub,
               activeClass,
               inactiveClass,
@@ -1372,7 +1388,10 @@ export default function TrackFleetPage() {
                       className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {count}
+                      {formatNumber(count)}
+                      <span className="ml-1 text-sm font-black opacity-60">
+                        คัน
+                      </span>
                     </p>
 
                     <span
@@ -1381,7 +1400,7 @@ export default function TrackFleetPage() {
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      รายการ
+                      {formatNumber(itemCount)} รายการ
                     </span>
                   </div>
                 </button>
@@ -1412,12 +1431,8 @@ export default function TrackFleetPage() {
             </span>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[repeat(16,minmax(0,1fr))]">
-            <div
-              className={
-                "lg:col-span-2"
-              }
-            >
+          <div className="grid gap-3 lg:grid-cols-12">
+            <div className="lg:col-span-3">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1503,7 +1518,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
@@ -1534,7 +1549,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
@@ -1562,42 +1577,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-3">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                สถานะ
-              </label>
-
-              <div className="relative">
-                <Filter
-                  size={14}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
-                />
-
-                <select
-                  value={currentProcessFilter}
-                  onChange={(e) => setCurrentProcessFilter(e.target.value)}
-                  className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
-                >
-                  <option value="all">ทุกสถานะ</option>
-
-                  {currentProcessOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
-                  ▼
-                </span>
-              </div>
-            </div>
-
-            <div
-              className={
-                statusFilter === "progress" ? "lg:col-span-2" : "lg:col-span-3"
-              }
-            >
+            <div className="lg:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1732,7 +1712,6 @@ export default function TrackFleetPage() {
                   setSearchText("");
                   setFleetTypeFilter("all");
                   setTruckTypeFilter("all");
-                  setCurrentProcessFilter("all");
                   setDcTypeFilter("all");
                   setDcFilter("all");
                   setStatusFilter("all");
@@ -1757,6 +1736,7 @@ export default function TrackFleetPage() {
             </div>
           </div>
         </div>
+
 
         <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

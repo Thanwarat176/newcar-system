@@ -44,6 +44,15 @@ interface WarehouseItem {
     [key: string]: any;
 }
 
+interface MasterTypeItem {
+    id: string;
+    type: string;
+    created_at?: string | null;
+    created_by?: string | null;
+    updated_at?: string | null;
+    updated_by?: string | null;
+}
+
 interface NewVehicleRequestModalProps {
     open: boolean;
     onClose: () => void;
@@ -69,7 +78,8 @@ export default function NewVehicleRequestModal({
 }: NewVehicleRequestModalProps) {
     const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
     const [trucks, setTrucks] = useState<TruckItem[]>([]);
-
+    const [masterTypes, setMasterTypes] = useState<MasterTypeItem[]>([]);
+    const [loadingMasterTypes, setLoadingMasterTypes] = useState(false);
     const [formData, setFormData] = useState<FormData>({
         fleet_type: "",
         fleet_truck_type: "",
@@ -135,6 +145,16 @@ export default function NewVehicleRequestModal({
             .trim()
             .replace(/\s+/g, " ")
             .toUpperCase();
+    };
+
+    const replacementTypesRequiringLicense = [
+        "รถทดแทน",
+        "รถทดแทน 7 ปี",
+        "ทดแทนรถลาออก",
+    ];
+
+    const requiresReplacementLicense = (fleetType: string) => {
+        return replacementTypesRequiringLicense.includes(fleetType.trim());
     };
 
     const today = useMemo(() => {
@@ -203,30 +223,96 @@ export default function NewVehicleRequestModal({
         return normalizeText(userWarehouse) === "WAREHOUSE";
     }, [userWarehouse]);
 
+    const isCenterUser = useMemo(() => {
+        if (!userInfo) return false;
+
+        const centerFields = [
+            userInfo.department,
+            userInfo.DEPARTMENT,
+            userInfo.warehouse,
+            userInfo.WAREHOUSE,
+            userInfo.warehouses,
+            userInfo.WAREHOUSES,
+            userInfo.team,
+            userInfo.TEAM,
+            userInfo.original_warehouse,
+        ];
+
+        return centerFields.some((value) => normalizeText(value) === "CENTER");
+    }, [userInfo]);
+
+    const isCenterZeroFields = useMemo(() => {
+        const fleetType = formData.fleet_type.trim();
+
+        return (
+            isCenterUser &&
+            (fleetType === "รถทดแทน 7 ปี" || fleetType === "ทดแทนรถลาออก")
+        );
+    }, [isCenterUser, formData.fleet_type]);
+
+    useEffect(() => {
+        if (!open) return;
+
+        console.log("========== CENTER ZERO FIELDS DEBUG ==========");
+        console.log("warehouse:", userInfo?.warehouse || userInfo?.WAREHOUSE);
+        console.log("department:", userInfo?.department || userInfo?.DEPARTMENT);
+        console.log("fleet_type:", formData.fleet_type);
+        console.log("isCenterUser:", isCenterUser);
+        console.log("isCenterZeroFields:", isCenterZeroFields);
+        console.log("==============================================");
+    }, [open, userInfo, formData.fleet_type, isCenterUser, isCenterZeroFields]);
+
+    useEffect(() => {
+        if (!open) return;
+
+        setFormData((prev) => {
+            if (isCenterZeroFields) {
+                return {
+                    ...prev,
+                    workload: "0",
+                    truckturn: "0",
+                };
+            }
+
+            const cameFromCenterZeroFields =
+                isCenterUser && prev.workload === "0" && prev.truckturn === "0";
+
+            if (cameFromCenterZeroFields) {
+                return {
+                    ...prev,
+                    workload: "",
+                    truckturn: "",
+                };
+            }
+
+            return prev;
+        });
+    }, [open, isCenterUser, isCenterZeroFields]);
+
     const requestBy = useMemo(() => {
         if (!userInfo) return "";
-    
+
         const name = String(
             getValueIgnoreCase(userInfo, "name") || ""
         ).trim();
-    
+
         const surname = String(
             getValueIgnoreCase(userInfo, "surname") || ""
         ).trim();
-    
+
         const emId = String(
             userInfo.em_id ||
             userInfo.employee_id ||
             userInfo.id ||
             ""
         ).trim();
-    
+
         const fullName = `${name} ${surname}`.trim();
-    
+
         if (fullName && emId) {
             return `${fullName} (${emId})`;
         }
-    
+
         return fullName || emId;
     }, [userInfo]);
 
@@ -406,7 +492,7 @@ export default function NewVehicleRequestModal({
 
     const resetLicenseFieldsAfterWarehouseChange = () => {
         const qtyNumber = Number(formData.qty || 0);
-        const isReplacementTruck = formData.fleet_type === "รถทดแทน";
+        const isReplacementTruck = requiresReplacementLicense(formData.fleet_type);
 
         // ล้างทะเบียนของคลังเดิม แต่สร้างช่องใหม่ตามจำนวนรถเดิม
         setLicenseReplaceList(
@@ -581,12 +667,22 @@ export default function NewVehicleRequestModal({
                 upperWarehouse === "WAREHOUSE" ||
                 upperWarehouse === "GM";
 
-            const mergedUserInfo = {
-                ...parsedUser,
-                original_warehouse: userWarehouse,
-            };
-
-            setUserInfo(mergedUserInfo);
+                const mergedUserInfo = {
+                    ...parsedUser,
+                    original_warehouse: userWarehouse,
+                };
+                
+                setUserInfo(mergedUserInfo);
+                
+                console.log("========== USER DEPARTMENT DEBUG ==========");
+                console.log("USER INFO:", mergedUserInfo);
+                console.log("userInfo.warehouse:", mergedUserInfo.warehouse);
+                console.log("userInfo.DEPARTMENT:", mergedUserInfo.DEPARTMENT);
+                console.log("userInfo.team:", mergedUserInfo.team);
+                console.log("userInfo.TEAM:", mergedUserInfo.TEAM);
+                console.log("userInfo.warehouse:", mergedUserInfo.warehouse);
+                console.log("userInfo.WAREHOUSE:", mergedUserInfo.WAREHOUSE);
+                console.log("===========================================");
 
             let parsedSelectedDC: WarehouseItem | null = null;
 
@@ -651,6 +747,56 @@ export default function NewVehicleRequestModal({
             setIsCenterMode(false);
             setError("อ่านข้อมูลผู้ใช้งานไม่ได้ กรุณา Login ใหม่");
         }
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+
+        const fetchMasterTypes = async () => {
+            try {
+                setLoadingMasterTypes(true);
+
+                const res = await fetch(
+                    "http://192.168.158.210/api_new_truck/api/master_type.php",
+                    {
+                        method: "GET",
+                        cache: "no-store",
+                    }
+                );
+
+                if (!res.ok) {
+                    throw new Error("โหลดประเภทคำขอไม่สำเร็จ");
+                }
+
+                const response = await res.json();
+
+                const list: MasterTypeItem[] = Array.isArray(response)
+                    ? response
+                    : Array.isArray(response.data)
+                        ? response.data
+                        : Array.isArray(response.result)
+                            ? response.result
+                            : [];
+
+                // ตัดช่องว่างและ \r\n ที่ติดมากับ type
+                const cleanedList = list
+                    .map((item) => ({
+                        ...item,
+                        type: String(item.type || "").trim(),
+                    }))
+                    .filter((item) => item.type !== "");
+
+                setMasterTypes(cleanedList);
+            } catch (error) {
+                console.error("โหลดประเภทคำขอไม่สำเร็จ:", error);
+                setError("เกิดข้อผิดพลาดในการโหลดประเภทคำขอ");
+                setMasterTypes([]);
+            } finally {
+                setLoadingMasterTypes(false);
+            }
+        };
+
+        fetchMasterTypes();
     }, [open]);
 
     useEffect(() => {
@@ -790,7 +936,7 @@ export default function NewVehicleRequestModal({
     ]);
 
     const needLicenseList = useMemo(() => {
-        return formData.fleet_type === "รถทดแทน";
+        return requiresReplacementLicense(formData.fleet_type);
     }, [formData.fleet_type]);
 
     useEffect(() => {
@@ -951,7 +1097,7 @@ export default function NewVehicleRequestModal({
 
         // ถ้าเปลี่ยนประเภทคำขอ
         if (name === "fleet_type") {
-            const nextNeedLicenseList = value === "รถทดแทน" || value === "รถเสริม";
+            const nextNeedLicenseList = requiresReplacementLicense(value);
 
             if (!nextNeedLicenseList) {
                 setLicenseReplaceList([]);
@@ -971,7 +1117,7 @@ export default function NewVehicleRequestModal({
             return;
         }
 
-        // ถ้าเปลี่ยนจำนวน และไม่ใช่รถทดแทน ให้ล้างทะเบียน
+        // ถ้าเปลี่ยนจำนวน และไม่ใช่ประเภทที่ต้องระบุทะเบียนทดแทน ให้ล้างทะเบียน
         if (name === "qty" && !needLicenseList) {
             setLicenseReplaceList([]);
             setLicenseCheckMessages({});
@@ -1295,8 +1441,8 @@ export default function NewVehicleRequestModal({
             !formData.fleet_truck_type ||
             !formData.qty ||
             !formData.usage_date ||
-            !formData.workload.trim() ||
-            !formData.truckturn.trim()
+            (!isCenterZeroFields &&
+                (!formData.workload.trim() || !formData.truckturn.trim()))
         ) {
             setError("กรุณากรอกข้อมูลที่จำเป็นให้ครบ");
             return;
@@ -1307,12 +1453,12 @@ export default function NewVehicleRequestModal({
             return;
         }
 
-        if (toNumber(formData.workload) <= 0) {
+        if (!isCenterZeroFields && toNumber(formData.workload) <= 0) {
             setError("Workload ต้องมากกว่า 0");
             return;
         }
 
-        if (Number(formData.truckturn) <= 0) {
+        if (!isCenterZeroFields && Number(formData.truckturn) <= 0) {
             setError("Truck Turn ต้องมากกว่า 0");
             return;
         }
@@ -1371,8 +1517,10 @@ export default function NewVehicleRequestModal({
                 qty: Number(formData.qty),
 
                 usage_date: formData.usage_date,
-                workload: toNumber(formData.workload),
-                truckturn: Number(formData.truckturn || 0),
+                workload: isCenterZeroFields ? 0 : toNumber(formData.workload),
+                truckturn: isCenterZeroFields
+                    ? 0
+                    : Number(formData.truckturn || 0),
 
                 status: "gm_pending",
                 request_by: requestBy,
@@ -1596,16 +1744,25 @@ export default function NewVehicleRequestModal({
                                 <label className="mb-1 block text-xs font-semibold text-slate-500">
                                     ประเภทคำขอ <span className="text-red-500">*</span>
                                 </label>
+
                                 <select
                                     name="fleet_type"
                                     value={formData.fleet_type}
                                     onChange={handleChange}
-                                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    disabled={loadingMasterTypes}
+                                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                                 >
-                                    <option value="">-- เลือกประเภทคำขอ --</option>
-                                    <option value="รถออกใหม่">รถออกใหม่</option>
-                                    <option value="รถเสริม">รถเสริม</option>
-                                    <option value="รถทดแทน">รถทดแทน</option>
+                                    <option value="">
+                                        {loadingMasterTypes
+                                            ? "กำลังโหลดประเภทคำขอ..."
+                                            : "-- เลือกประเภทคำขอ --"}
+                                    </option>
+
+                                    {masterTypes.map((item) => (
+                                        <option key={item.id} value={item.type}>
+                                            {item.type}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -1832,10 +1989,14 @@ export default function NewVehicleRequestModal({
                                     type="text"
                                     inputMode="numeric"
                                     name="workload"
-                                    value={formData.workload}
+                                    value={isCenterZeroFields ? "0" : formData.workload}
                                     onChange={handleChange}
-                                    required
-                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    disabled={isCenterZeroFields}
+                                    required={!isCenterZeroFields}
+                                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isCenterZeroFields
+                                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
+                                        : "border-slate-300 focus:border-blue-500"
+                                        }`}
                                     placeholder="0"
                                 />
                             </div>
@@ -1847,12 +2008,16 @@ export default function NewVehicleRequestModal({
                                 <input
                                     type="number"
                                     name="truckturn"
-                                    value={formData.truckturn}
+                                    value={isCenterZeroFields ? "0" : formData.truckturn}
                                     min={0}
                                     step="0.01"
                                     onChange={handleChange}
-                                    required
-                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    disabled={isCenterZeroFields}
+                                    required={!isCenterZeroFields}
+                                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isCenterZeroFields
+                                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
+                                        : "border-slate-300 focus:border-blue-500"
+                                        }`}
                                     placeholder="0.00"
                                 />
                             </div>
@@ -1862,7 +2027,7 @@ export default function NewVehicleRequestModal({
                                     <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
                                         <div className="mb-3">
                                             <p className="text-xs font-bold text-orange-700">
-                                                ทะเบียนรถสำหรับ{formData.fleet_type}
+                                                ป้ายทะเบียนรถที่ถูกทดแทน
                                             </p>
                                             <p className="mt-0.5 text-xs text-orange-600">
                                                 กรุณาเลือกให้ครบตามจำนวน {formData.qty} คัน
@@ -1972,9 +2137,9 @@ export default function NewVehicleRequestModal({
                                                                         </p>
                                                                     </div>
                                                                 ) : (
-                                                                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
-                                                                    ยังไม่ได้เลือกข้อมูลรถ
-                                                                </div>
+                                                                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                                                                        ยังไม่ได้เลือกข้อมูลรถ
+                                                                    </div>
                                                                 )}
                                                             </div>
 
