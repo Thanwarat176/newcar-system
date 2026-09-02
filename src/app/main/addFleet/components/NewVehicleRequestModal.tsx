@@ -150,11 +150,24 @@ export default function NewVehicleRequestModal({
     const replacementTypesRequiringLicense = [
         "รถทดแทน",
         "รถทดแทน 7 ปี",
+        "รถหมดอายุ",
         "ทดแทนรถลาออก",
     ];
 
     const requiresReplacementLicense = (fleetType: string) => {
         return replacementTypesRequiringLicense.includes(fleetType.trim());
+    };
+
+    const fleetTypesRequiring126Days = [
+        "รถออกใหม่",
+        "รถทดแทน",
+        "รถทดแทน 7 ปี",
+        "รถหมดอายุ",
+        "ทดแทนรถลาออก",
+    ];
+
+    const requires126Days = (fleetType: string) => {
+        return fleetTypesRequiring126Days.includes(fleetType.trim());
     };
 
     const today = useMemo(() => {
@@ -186,10 +199,7 @@ export default function NewVehicleRequestModal({
             return addDaysToDate(today, 30);
         }
 
-        if (
-            formData.fleet_type === "รถออกใหม่" ||
-            formData.fleet_type === "รถทดแทน"
-        ) {
+        if (requires126Days(formData.fleet_type)) {
             return addDaysToDate(today, 126);
         }
 
@@ -1469,10 +1479,7 @@ export default function NewVehicleRequestModal({
                 return;
             }
 
-            if (
-                formData.fleet_type === "รถออกใหม่" ||
-                formData.fleet_type === "รถทดแทน"
-            ) {
+            if (requires126Days(formData.fleet_type)) {
                 setError(
                     "รถออกใหม่/รถทดแทน ต้องเลือกวันที่ใช้งานหลังจากวันนี้อย่างน้อย 126 วัน"
                 );
@@ -1970,8 +1977,8 @@ export default function NewVehicleRequestModal({
 
                                 <div className="mt-2 mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
                                     <span className="font-bold">เงื่อนไขวันที่ใช้งาน:</span>{" "}
-                                    รถออกใหม่/รถทดแทน ต้องรอทำการอย่างน้อย 126 วัน • รถเสริม
-                                    ต้องรอทำการอย่างน้อย 30 วัน
+                                    รถออกใหม่/รถทดแทน (รถทดแทน 7 ปี, รถหมดอายุ และทดแทนรถลาออก)
+                                    ต้องรอทำการอย่างน้อย 126 วัน • รถเสริมต้องรอทำการอย่างน้อย 30 วัน
                                     {formData.fleet_type && (
                                         <span className="ml-1 font-bold">
                                             เลือกได้ตั้งแต่ {formatShowDate(minUsageDate)} เป็นต้นไป

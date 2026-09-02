@@ -1750,7 +1750,7 @@ export default function WaitingFleetPage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-bold text-slate-700">
-                                  {item.fleet_type || "-"}
+                                  {item.fleet_truck_type || "-"}
                                 </p>
                               </td>
 

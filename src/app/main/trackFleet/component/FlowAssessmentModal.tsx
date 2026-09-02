@@ -72,6 +72,30 @@ interface RequestInfo {
   approved_truck_type: string | null;
   approved_qty: string | null;
   status_details: string | null;
+  details?: RequestVehicleDetail[];
+  vehicle_warehouse_info?: VehicleWarehouseInfoData[];
+}
+
+interface RequestVehicleDetail {
+  id?: string | number;
+  request_id?: string | number;
+  license?: string | null;
+  province?: string | null;
+  truck_type?: string | null;
+  company_name?: string | null;
+  license_replace?: string | null;
+  province_replace?: string | null;
+  truck_type_replace?: string | null;
+  company_name_replace?: string | null;
+  status?: string | null;
+  warehouse_info?: VehicleWarehouseInfoData | null;
+  warehouse_plan_date?: string | null;
+  car_model?: string | null;
+  car_brand?: string | null;
+  car_chassis?: string | null;
+  car_engine?: string | null;
+  car_license?: string | null;
+  car_province?: string | null;
 }
 
 interface MasterFileResponse {
@@ -128,6 +152,8 @@ interface CarItem {
   car_chassis?: string | null;
   car_engine?: string | null;
   car_license?: string | null;
+  car_province?: string | null;
+  warehouse_info?: VehicleWarehouseInfoData | null;
 
   memo_files?: ExistingMemoFiles;
 }
@@ -207,6 +233,8 @@ interface VehicleWarehouseInfoData {
   car_engine?: string | null;
   car_license?: string | null;
   car_province?: string | null;
+  number_feb?: string | null;
+  date_number_feb?: string | null;
   number_fbp?: string | null;
   date_number_fbp?: string | null;
   number_tis?: string | null;
@@ -408,10 +436,138 @@ function normalizeApiData(result: ApiResponse): FlowResponseData | null {
 
   if (!source.request) return null;
 
+  const request = source.request;
+  const warehouseList = Array.isArray(request.vehicle_warehouse_info)
+    ? request.vehicle_warehouse_info
+    : [];
+  const detailList = Array.isArray(request.details) ? request.details : [];
+
+  const findWarehouseInfo = (
+    vehicleNo: string | number,
+    index: number,
+    detail?: RequestVehicleDetail
+  ) =>
+    detail?.warehouse_info ||
+    warehouseList.find(
+      (info) => String(info.vehicle_no) === String(vehicleNo)
+    ) ||
+    warehouseList[index] ||
+    null;
+
+  const mergeCarData = (
+    car: CarItem,
+    index: number,
+    detail?: RequestVehicleDetail
+  ): CarItem => {
+    const warehouseInfo = findWarehouseInfo(car.vehicle_no, index, detail);
+
+    return {
+      ...car,
+      warehouse_info: warehouseInfo,
+      warehouse_plan_date:
+        warehouseInfo?.warehouse_plan_date ??
+        detail?.warehouse_plan_date ??
+        car.warehouse_plan_date ??
+        null,
+      car_model:
+        warehouseInfo?.car_model ?? detail?.car_model ?? car.car_model ?? null,
+      car_brand:
+        warehouseInfo?.car_brand ?? detail?.car_brand ?? car.car_brand ?? null,
+      car_chassis:
+        warehouseInfo?.car_chassis ??
+        detail?.car_chassis ??
+        car.car_chassis ??
+        null,
+      car_engine:
+        warehouseInfo?.car_engine ??
+        detail?.car_engine ??
+        car.car_engine ??
+        null,
+      car_license:
+        warehouseInfo?.car_license ??
+        detail?.car_license ??
+        car.car_license ??
+        null,
+      car_province:
+        warehouseInfo?.car_province ??
+        detail?.car_province ??
+        car.car_province ??
+        null,
+      number_fbp:
+        warehouseInfo?.number_fbp ??
+        warehouseInfo?.number_feb ??
+        car.number_fbp ??
+        null,
+      date_number_fbp:
+        warehouseInfo?.date_number_fbp ??
+        warehouseInfo?.date_number_feb ??
+        car.date_number_fbp ??
+        null,
+      number_tis: warehouseInfo?.number_tis ?? car.number_tis ?? null,
+      date_number_tis:
+        warehouseInfo?.date_number_tis ?? car.date_number_tis ?? null,
+      number_til: warehouseInfo?.number_til ?? car.number_til ?? null,
+      date_number_til:
+        warehouseInfo?.date_number_til ?? car.date_number_til ?? null,
+      number_ask: warehouseInfo?.number_ask ?? car.number_ask ?? null,
+      date_number_ask:
+        warehouseInfo?.date_number_ask ?? car.date_number_ask ?? null,
+      number_kleasing:
+        warehouseInfo?.number_kleasing ?? car.number_kleasing ?? null,
+      date_number_kleasing:
+        warehouseInfo?.date_number_kleasing ?? car.date_number_kleasing ?? null,
+      number_ttb: warehouseInfo?.number_ttb ?? car.number_ttb ?? null,
+      date_number_ttb:
+        warehouseInfo?.date_number_ttb ?? car.date_number_ttb ?? null,
+      number_thaiolix:
+        warehouseInfo?.number_thaiolix ?? car.number_thaiolix ?? null,
+      date_number_thaiolix:
+        warehouseInfo?.date_number_thaiolix ?? car.date_number_thaiolix ?? null,
+    };
+  };
+
+  const sourceCars = Array.isArray(source.cars) ? source.cars : [];
+  const cars =
+    sourceCars.length > 0
+      ? sourceCars.map((car, index) => {
+        const detail =
+          detailList.find(
+            (item) =>
+              item.id !== null &&
+              item.id !== undefined &&
+              String(item.id) === String(car.detail_id)
+          ) || detailList[index];
+
+        return mergeCarData(car, index, detail);
+      })
+      : detailList.map((detail, index) => {
+        const vehicleNo = detail.warehouse_info?.vehicle_no ?? index + 1;
+
+        return mergeCarData(
+          {
+            vehicle_no: vehicleNo,
+            license:
+              detail.license_replace || detail.license || "-",
+            province:
+              detail.province_replace || detail.province || "-",
+            truck_type:
+              detail.truck_type_replace || detail.truck_type || "-",
+            company_name:
+              detail.company_name_replace || detail.company_name || "-",
+            detail_id:
+              detail.id === null || detail.id === undefined
+                ? null
+                : String(detail.id),
+          },
+          index,
+          detail
+        );
+      });
+
   return {
-    request: source.request,
+    request,
     steps: Array.isArray(source.steps) ? source.steps : [],
-    cars: Array.isArray(source.cars) ? source.cars : [],
+    cars,
     flow_data: Array.isArray(source.flow_data) ? source.flow_data : [],
     is_initialized: Boolean(source.is_initialized),
   };
@@ -506,6 +662,38 @@ function toDateInputValue(value?: string | null) {
   const datePart = String(value).trim().split(/[ T]/)[0];
 
   return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : "";
+}
+
+function toVehicleExtraForm(
+  info?: Partial<VehicleWarehouseInfoData & CarItem> | null
+): VehicleExtraForm {
+  if (!info) return { ...emptyVehicleExtraForm };
+
+  return {
+    warehouse_plan_date: toDateInputValue(info.warehouse_plan_date),
+    car_model: info.car_model || "",
+    car_brand: info.car_brand || "",
+    car_chassis: info.car_chassis || "",
+    car_engine: info.car_engine || "",
+    car_license: info.car_license || "",
+    car_province: info.car_province || "",
+    number_fbp: info.number_fbp || info.number_feb || "",
+    date_number_fbp: toDateInputValue(
+      info.date_number_fbp || info.date_number_feb
+    ),
+    number_tis: info.number_tis || "",
+    date_number_tis: toDateInputValue(info.date_number_tis),
+    number_til: info.number_til || "",
+    date_number_til: toDateInputValue(info.date_number_til),
+    number_ask: info.number_ask || "",
+    date_number_ask: toDateInputValue(info.date_number_ask),
+    number_kleasing: info.number_kleasing || "",
+    date_number_kleasing: toDateInputValue(info.date_number_kleasing),
+    number_ttb: info.number_ttb || "",
+    date_number_ttb: toDateInputValue(info.date_number_ttb),
+    number_thaiolix: info.number_thaiolix || "",
+    date_number_thaiolix: toDateInputValue(info.date_number_thaiolix),
+  };
 }
 
 function normalizeSlaDays(value?: string | number | null) {
@@ -755,6 +943,8 @@ export default function FlowAssessmentModal({
 
       const selectedCar = filteredData.cars[0];
 
+      setVehicleExtraForm(toVehicleExtraForm(selectedCar));
+
       setExistingMemoFiles(
         selectedCar?.memo_files &&
           typeof selectedCar.memo_files === "object"
@@ -838,33 +1028,10 @@ export default function FlowAssessmentModal({
     const info = result.data;
 
     if (!info) {
-      setVehicleExtraForm(emptyVehicleExtraForm);
       return;
     }
 
-    setVehicleExtraForm({
-      warehouse_plan_date: toDateInputValue(info.warehouse_plan_date),
-      car_model: info.car_model || "",
-      car_brand: info.car_brand || "",
-      car_chassis: info.car_chassis || "",
-      car_engine: info.car_engine || "",
-      car_license: info.car_license || "",
-      car_province: info.car_province || "",
-      number_fbp: info.number_fbp || "",
-      date_number_fbp: toDateInputValue(info.date_number_fbp),
-      number_tis: info.number_tis || "",
-      date_number_tis: toDateInputValue(info.date_number_tis),
-      number_til: info.number_til || "",
-      date_number_til: toDateInputValue(info.date_number_til),
-      number_ask: info.number_ask || "",
-      date_number_ask: toDateInputValue(info.date_number_ask),
-      number_kleasing: info.number_kleasing || "",
-      date_number_kleasing: toDateInputValue(info.date_number_kleasing),
-      number_ttb: info.number_ttb || "",
-      date_number_ttb: toDateInputValue(info.date_number_ttb),
-      number_thaiolix: info.number_thaiolix || "",
-      date_number_thaiolix: toDateInputValue(info.date_number_thaiolix),
-    });
+    setVehicleExtraForm(toVehicleExtraForm(info));
 
     console.log("Vehicle warehouse info:", info);
   };
@@ -995,7 +1162,7 @@ export default function FlowAssessmentModal({
         action: "warehouse_info",
         request_id: String(requestId),
         vehicle_no: String(vehicleNo),
-
+      
         warehouse_plan_date:
           vehicleExtraForm.warehouse_plan_date || null,
         car_model: vehicleExtraForm.car_model.trim(),
@@ -1003,7 +1170,8 @@ export default function FlowAssessmentModal({
         car_chassis: vehicleExtraForm.car_chassis.trim(),
         car_engine: vehicleExtraForm.car_engine.trim(),
         car_license: vehicleExtraForm.car_license.trim(),
-
+        car_province: vehicleExtraForm.car_province.trim(),
+      
         user,
       };
 

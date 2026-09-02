@@ -233,7 +233,8 @@ export default function GMModalDetail({
   const approvedQtyNumber = Number(approvedQty);
   const isApprovedQtyValid =
     Number.isInteger(approvedQtyNumber) &&
-    approvedQtyNumber >= 1;
+    approvedQtyNumber >= 1 &&
+    approvedQtyNumber <= requestedQty;
 
   const updateGmDecision = async (status: GmDecision) => {
     if (!canMakeDecision) {
@@ -264,7 +265,7 @@ export default function GMModalDetail({
     if (status === "fbp_pending" && !isApprovedQtyValid) {
       setMessage({
         type: "error",
-        text: "กรุณาระบุจำนวนรถที่อนุมัติเป็นจำนวนเต็มตั้งแต่ 1 คันขึ้นไป",
+        text: `จำนวนรถที่อนุมัติต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง ${requestedQty} คัน และห้ามมากกว่าจำนวนที่ขอ`,
       });
       return;
     }
@@ -579,6 +580,7 @@ export default function GMModalDetail({
                         <input
                           type="number"
                           min={1}
+                          max={requestedQty}
                           step={1}
                           inputMode="numeric"
                           value={approvedQty}
@@ -601,7 +603,7 @@ export default function GMModalDetail({
 
                       {approvedQty && !isApprovedQtyValid && (
                         <span className="mt-1.5 block text-[10px] font-bold text-rose-600">
-                          กรุณากรอกจำนวนเต็มตั้งแต่ 1 คันขึ้นไป
+                          จำนวนที่อนุมัติต้องไม่เกินจำนวนที่ขอ {requestedQty} คัน
                         </span>
                       )}
                     </label>
@@ -644,7 +646,7 @@ export default function GMModalDetail({
                             if (!isApprovedQtyValid) {
                               setMessage({
                                 type: "error",
-                                text: "กรุณาระบุจำนวนรถที่อนุมัติเป็นจำนวนเต็มตั้งแต่ 1 คันขึ้นไป",
+                                text: `จำนวนรถที่อนุมัติต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง ${requestedQty} คัน และห้ามมากกว่าจำนวนที่ขอ`,
                               });
                               return;
                             }

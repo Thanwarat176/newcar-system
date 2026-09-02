@@ -1004,6 +1004,8 @@ export default function AddFleetPage() {
       );
 
       const classifiedList: RequestItem[] = mergedList.map((item) => {
+        const backendStatus = String(item.status || "").trim().toLowerCase();
+        const fleetType = String(item.fleet_type || "").trim();
         const statusDetails = String(item.status_details || "").trim();
 
         const levelFromStatusDetails = Number(
@@ -1031,6 +1033,11 @@ export default function AddFleetPage() {
           nextStatus = "completed";
         } else if (currentLevel === 9 || currentLevel === 10) {
           nextStatus = "rejected";
+        }
+
+        // รถเสริมถือว่าเสร็จสิ้นทันที เมื่อ Backend ส่งสถานะ progress
+        if (backendStatus === "progress" && fleetType === "รถเสริม") {
+          nextStatus = "completed";
         }
 
         return {

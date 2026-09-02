@@ -45,14 +45,9 @@ interface RequestItem {
   remark: string;
 
   approved_qty?: number | string | null;
-  approved_suppliers?: unknown;
-  approved_truck_type?: string | null;
   details?: RequestDetailItem[];
-  latest_process_id?: string | number | null;
   latest_process_name?: string | null;
   latest_process_level?: string | number | null;
-  latest_str_date?: string | null;
-  latest_end_date?: string | null;
 
   running_doc_vehicle_no?: string;
   vehicle_no?: string | number;
@@ -60,7 +55,17 @@ interface RequestItem {
   current_step?: number;
   total_steps?: number;
   current_process?: string;
-  vehicle_progress?: VehicleProgress[];
+  vehicle_warehouse_info?: VehicleWarehouseInfo[];
+  vehicle_info?: VehicleWarehouseInfo | null;
+}
+
+interface VehicleWarehouseInfo {
+  vehicle_no?: string | number | null;
+  car_chassis?: string | null;
+  car_model?: string | null;
+  car_brand?: string | null;
+  car_engine?: string | null;
+  car_license?: string | null;
 }
 
 interface RequestDetailItem {
@@ -77,15 +82,7 @@ interface RequestDetailItem {
   company_id_replace: string | null;
   company_name_replace: string | null;
   status: string;
-}
-
-interface VehicleProgress {
-  vehicle_no: string | number;
-  running_doc_vehicle_no: string;
-  license: string;
-  current_step: number;
-  total_steps: number;
-  current_process: string;
+  warehouse_info?: VehicleWarehouseInfo | null;
 }
 
 interface UserInfo {
@@ -96,6 +93,59 @@ interface UserInfo {
 }
 
 type StatusFilter = "all" | "progress" | "reject_by_center" | "approved";
+
+const normalizeStatus = (status?: string) => {
+  const value = String(status || "").trim().toLowerCase();
+
+  if (
+    value === "progress" ||
+    value === "confirm_request" ||
+    value === "confirm request" ||
+    value === "in_progress" ||
+    value === "คำขอรอพิจารณา (TCAS)"
+  ) {
+    return "progress";
+  }
+
+  return value;
+};
+
+const getProcessStatus = (item: RequestItem) => {
+  const step = Number(
+    item.current_step ?? item.latest_process_level ?? 0
+  );
+  const totalSteps = Number(item.total_steps || 8);
+  const process = String(
+    item.current_process ||
+      item.latest_process_name ||
+      "ยังไม่พบข้อมูลขั้นตอน"
+  ).trim();
+  const isRejected =
+    normalizeStatus(item.status) === "reject_by_center";
+
+  return {
+    value: `${step}|${process}`,
+    label: isRejected
+      ? process
+      : `${step}/${totalSteps} : ${process}`,
+  };
+};
+
+const formatVehicleValue = (value?: string | null) => {
+  if (value === null || value === undefined || value.trim() === "") {
+    return "ไม่มีข้อมูล ❌";
+  }
+
+  return value;
+};
+
+const getVehicleValues = (item: RequestItem) => [
+  item.vehicle_info?.car_chassis,
+  item.vehicle_info?.car_model,
+  item.vehicle_info?.car_brand,
+  item.vehicle_info?.car_engine,
+  item.vehicle_info?.car_license,
+];
 
 export default function TrackFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
@@ -113,6 +163,7 @@ export default function TrackFleetPage() {
   const [openDetailModal, setOpenDetailModal] = useState(false);
 
   const [searchText, setSearchText] = useState("");
+  const [vehicleSearchText, setVehicleSearchText] = useState("");
   const [fleetTypeFilter, setFleetTypeFilter] = useState("all");
   const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [currentProcessFilter, setCurrentProcessFilter] = useState("all");
@@ -303,6 +354,13 @@ export default function TrackFleetPage() {
             (_, index) => {
               const vehicleNo = index + 1;
               const vehicleDetail = item.details?.[index];
+              const vehicleInfo =
+                vehicleDetail?.warehouse_info ||
+                item.vehicle_warehouse_info?.find(
+                  (info) => String(info.vehicle_no) === String(vehicleNo)
+                ) ||
+                item.vehicle_warehouse_info?.[index] ||
+                null;
               const hasLatestProcess =
                 item.latest_process_level !== null &&
                 item.latest_process_level !== undefined &&
@@ -317,6 +375,7 @@ export default function TrackFleetPage() {
                   vehicleDetail?.license_replace ||
                   vehicleDetail?.license ||
                   "",
+                vehicle_info: vehicleInfo,
                 current_step: hasLatestProcess
                   ? Number(item.latest_process_level)
                   : 0,
@@ -325,7 +384,6 @@ export default function TrackFleetPage() {
                   item.latest_process_name ||
                   "ยังไม่พบข้อมูลขั้นตอน",
                 qty: 1,
-                vehicle_progress: [],
               };
             }
           );
@@ -662,22 +720,6 @@ export default function TrackFleetPage() {
     return numberValue.toLocaleString("en-US");
   };
 
-  const normalizeStatus = (status?: string) => {
-    const value = String(status || "").trim().toLowerCase();
-
-    if (
-      value === "progress" ||
-      value === "confirm_request" ||
-      value === "confirm request" ||
-      value === "in_progress" ||
-      value === "คำขอรอพิจารณา (TCAS)"
-    ) {
-      return "progress";
-    }
-
-    return value;
-  };
-
   const isAllowedCardStatus = (status?: string) => {
     const value = normalizeStatus(status);
 
@@ -686,98 +728,6 @@ export default function TrackFleetPage() {
       value === "reject_by_center" ||
       value === "approved"
     );
-  };
-
-  const formatStatusText = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    if (value === "progress") return "คำขอรอพิจารณา (TCAS)";
-    if (value === "reject_by_center") return "ไม่ผ่านการประเมิน (TCAS)";
-    if (value === "approved") return "เสร็จสิ้นกระบวนการ ";
-
-    return status || "-";
-  };
-
-  const getStatusClass = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    if (value === "progress") {
-      return "bg-amber-50 text-amber-700 border-amber-200";
-    }
-
-    if (value === "reject_by_center") {
-      return "bg-red-50 text-red-700 border-red-200";
-    }
-
-    if (value === "approved") {
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    }
-
-    return "bg-slate-50 text-slate-600 border-slate-200";
-  };
-
-
-  const getStatusVisual = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    if (value === "progress") {
-      return {
-        dotClass: "bg-amber-500",
-        textClass: "text-amber-700",
-        hint: "รอการพิจารณา",
-      };
-    }
-
-    if (value === "reject_by_center") {
-      return {
-        dotClass: "bg-rose-500",
-        textClass: "text-rose-700",
-        hint: "ไม่ผ่านการประเมิน",
-      };
-    }
-
-    if (value === "approved") {
-      return {
-        dotClass: "bg-emerald-500",
-        textClass: "text-emerald-700",
-        hint: "ผ่านการประเมิน",
-      };
-    }
-
-    return {
-      dotClass: "bg-slate-400",
-      textClass: "text-slate-600",
-      hint: "สถานะรายการ",
-    };
-  };
-
-  const getLicenseList = (licenseReplace: string[] | string) => {
-    if (Array.isArray(licenseReplace)) {
-      return licenseReplace.map((item) => String(item).trim()).filter(Boolean);
-    }
-
-    if (typeof licenseReplace === "string") {
-      const value = licenseReplace.trim();
-
-      if (!value) return [];
-
-      try {
-        const parsed = JSON.parse(value);
-
-        if (Array.isArray(parsed)) {
-          return parsed.map((item) => String(item).trim()).filter(Boolean);
-        }
-
-        return [value];
-      } catch {
-        return value
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-      }
-    }
-
-    return [];
   };
 
   const statusCounts = useMemo(() => {
@@ -845,6 +795,14 @@ export default function TrackFleetPage() {
     return Array.from(values).sort();
   }, [sidebarFilteredRequests]);
 
+  const statusOptions = [
+    { value: "all", label: "ทุกสถานะ" },
+    { value: "progress", label: "กำลังดำเนินการ" },
+    { value: "reject_by_center", label: "ไม่ผ่านการประเมิน" },
+    { value: "approved", label: "เสร็จสิ้นกระบวนการ" },
+  ] as const;
+  
+
   const processFilterSource = useMemo(() => {
     let list = sidebarFilteredRequests;
   
@@ -896,28 +854,12 @@ export default function TrackFleetPage() {
 
   const currentProcessOptions = useMemo(() => {
     const options = new Map<string, string>();
-  
+
     processFilterSource.forEach((item) => {
-      const step = Number(
-        item.current_step ?? item.latest_process_level ?? 0
-      );
-  
-      const process = String(
-        item.current_process ||
-          item.latest_process_name ||
-          "ยังไม่พบข้อมูลขั้นตอน"
-      ).trim();
-  
-      const value = `${step}|${process}`;
-  
-      const label =
-        statusFilter === "reject_by_center"
-          ? `${step} : ${process}`
-          : `${step}/8 : ${process}`;
-  
-      options.set(value, label);
+      const status = getProcessStatus(item);
+      options.set(status.value, status.label);
     });
-  
+
     return Array.from(options, ([value, label]) => ({
       value,
       label,
@@ -926,7 +868,7 @@ export default function TrackFleetPage() {
         Number(a.value.split("|")[0]) -
         Number(b.value.split("|")[0])
     );
-  }, [processFilterSource, statusFilter]);
+  }, [processFilterSource]);
   
   const dcTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>();
@@ -997,14 +939,10 @@ export default function TrackFleetPage() {
     }
 
     if (currentProcessFilter !== "all") {
-      list = list.filter((item) => {
-        const step = Number(item.current_step ?? item.latest_process_level ?? 0);
-        const process = String(
-          item.current_process || item.latest_process_name || "ยังไม่พบข้อมูลขั้นตอน"
-        ).trim();
-
-        return `${step}|${process}` === currentProcessFilter;
-      });
+      list = list.filter(
+        (item) =>
+          getProcessStatus(item).value === currentProcessFilter
+      );
     }
 
     if (dcTypeFilter !== "all") {
@@ -1045,6 +983,37 @@ export default function TrackFleetPage() {
       });
     }
 
+    const vehicleKeyword = vehicleSearchText.trim().toLowerCase();
+
+    if (vehicleKeyword) {
+      const emptyKeywords = new Set([
+        "ว่าง",
+        "ข้อมูลว่าง",
+        "ไม่มีข้อมูล",
+        "null",
+        "ไม่มีข้อมูล ❌",
+      ]);
+
+      list = list.filter((item) => {
+        const vehicleValues = getVehicleValues(item);
+
+        if (emptyKeywords.has(vehicleKeyword)) {
+          return vehicleValues.some(
+            (value) =>
+              value === null ||
+              value === undefined ||
+              String(value).trim() === ""
+          );
+        }
+
+        return vehicleValues
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join(" ")
+          .toLowerCase()
+          .includes(vehicleKeyword);
+      });
+    }
+
     if (hasRequestDateRange) {
       const startDateKey = formatDateToKey(requestDateRange[0].startDate);
       const endDateKey = formatDateToKey(requestDateRange[0].endDate);
@@ -1065,6 +1034,7 @@ export default function TrackFleetPage() {
     dcTypeFilter,
     dcFilter,
     searchText,
+    vehicleSearchText,
     hasRequestDateRange,
     requestDateRange,
   ]);
@@ -1342,9 +1312,7 @@ export default function TrackFleetPage() {
                   type="button"
                   onClick={() => {
                     setStatusFilter(key);
-                    if (key !== "progress") {
-                      setCurrentProcessFilter("all");
-                    }
+                    setCurrentProcessFilter("all");
                   }}
                   className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
                     }`}
@@ -1410,7 +1378,7 @@ export default function TrackFleetPage() {
         </div>
 
         <div className="relative z-30 mb-4 overflow-visible rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 shadow-[0_10px_30px_rgba(15,23,42,0.07)] sm:px-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
                 <SlidersHorizontal size={16} />
@@ -1426,13 +1394,13 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
+            <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
               พบ {formatNumber(filteredVehicleCount)} คัน
             </span>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-12">
-            <div className="lg:col-span-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-10">
+            <div className="sm:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1462,7 +1430,38 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ค้นหาข้อมูลรถ
+              </label>
+
+              <div className="relative">
+                <Truck
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+                <input
+                  type="text"
+                  value={vehicleSearchText}
+                  onChange={(e) => setVehicleSearchText(e.target.value)}
+                  placeholder="เลขตัวถัง, รุ่น, ยี่ห้อ, เครื่อง, ทะเบียน หรือ ว่าง"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                />
+
+                {vehicleSearchText && (
+                  <button
+                    type="button"
+                    onClick={() => setVehicleSearchText("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"
+                    aria-label="ล้างการค้นหาข้อมูลรถ"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทคำขอ
               </label>
@@ -1490,7 +1489,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2">
+            <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทรถ
               </label>
@@ -1500,25 +1499,25 @@ export default function TrackFleetPage() {
                   size={14}
                   className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
                 />
-                <select
-                  value={truckTypeFilter}
-                  onChange={(e) => setTruckTypeFilter(e.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
-                >
-                  <option value="all">ทุกประเภทรถ</option>
+                <input
+                  type="text"
+                  list="truck-type-filter-options"
+                  value={truckTypeFilter === "all" ? "" : truckTypeFilter}
+                  onChange={(e) =>
+                    setTruckTypeFilter(e.target.value || "all")
+                  }
+                  placeholder="พิมพ์ค้นหาประเภทรถ"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                />
+                <datalist id="truck-type-filter-options">
                   {truckTypeOptions.map((truckType) => (
-                    <option key={truckType} value={truckType}>
-                      {truckType}
-                    </option>
+                    <option key={truckType} value={truckType} />
                   ))}
-                </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
-                  ▼
-                </span>
+                </datalist>
               </div>
             </div>
 
-            <div className="lg:col-span-1">
+            <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
@@ -1548,8 +1547,7 @@ export default function TrackFleetPage() {
                 </span>
               </div>
             </div>
-
-            <div className="lg:col-span-1">
+            <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
@@ -1559,25 +1557,23 @@ export default function TrackFleetPage() {
                   size={14}
                   className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
                 />
-                <select
-                  value={dcFilter}
-                  onChange={(e) => setDcFilter(e.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
-                >
-                  <option value="all">ทุก DC</option>
+                <input
+                  type="text"
+                  list="dc-filter-options"
+                  value={dcFilter === "all" ? "" : dcFilter}
+                  onChange={(e) => setDcFilter(e.target.value || "all")}
+                  placeholder="พิมพ์ค้นหา DC"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                />
+                <datalist id="dc-filter-options">
                   {dcOptions.map((dc) => (
-                    <option key={dc} value={dc}>
-                      {dc}
-                    </option>
+                    <option key={dc} value={dc} />
                   ))}
-                </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
-                  ▼
-                </span>
+                </datalist>
               </div>
             </div>
 
-            <div className="lg:col-span-2">
+            <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1622,7 +1618,7 @@ export default function TrackFleetPage() {
               {showRequestDatePicker && (
                 <div
                   ref={requestDatePickerRef}
-                  className="fixed z-[99999] w-[330px] overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
+                  className="fixed z-[99999] w-[calc(100vw-2rem)] max-w-[330px] overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
                   style={{
                     top: requestDatePickerPosition.top,
                     left: requestDatePickerPosition.left,
@@ -1705,16 +1701,18 @@ export default function TrackFleetPage() {
               )}
             </div>
 
-            <div className="flex items-end lg:col-span-1">
+            <div className="flex items-end">
               <button
                 type="button"
                 onClick={() => {
                   setSearchText("");
+                  setVehicleSearchText("");
                   setFleetTypeFilter("all");
                   setTruckTypeFilter("all");
                   setDcTypeFilter("all");
                   setDcFilter("all");
                   setStatusFilter("all");
+                  setCurrentProcessFilter("all");
                   setHasRequestDateRange(false);
                   setRequestDateRange([
                     {
@@ -1737,7 +1735,6 @@ export default function TrackFleetPage() {
           </div>
         </div>
 
-
         <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1759,7 +1756,7 @@ export default function TrackFleetPage() {
             </div>
 
             <div className="max-h-[calc(100vh-430px)] min-h-[450px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
-              <table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
                     {[
@@ -1768,6 +1765,7 @@ export default function TrackFleetPage() {
                       "DC Type",
                       "DC",
                       "ประเภทรถ",
+                      "ข้อมูลรถ",
                       "วันที่ใช้งาน",
                       "ผู้ขอ",
                       "สถานะ",
@@ -1778,7 +1776,7 @@ export default function TrackFleetPage() {
                         className={`whitespace-nowrap bg-transparent px-3 py-3 ${index === 0
                           ? "sticky left-0 z-30 w-[52px] text-center"
                           : ""
-                          } ${index === 6 ? "text-center" : ""} ${index === 9 ? "text-right" : ""
+                          } ${index === 7 ? "text-center" : ""} ${index === 9 ? "text-right" : ""
                           }`}
                       >
                         {col}
@@ -1875,6 +1873,37 @@ export default function TrackFleetPage() {
                                 </p>
                               </td>
 
+                              <td className="px-3 py-3">
+                                <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
+                                  <div className="grid grid-cols-[72px_1fr] gap-x-2">
+                                    <span className="font-bold text-slate-400">เลขตัวถัง</span>
+                                    <span className="break-all font-black text-slate-700">
+                                      {formatVehicleValue(item.vehicle_info?.car_chassis)}
+                                    </span>
+
+                                    <span className="font-bold text-slate-400">รุ่นรถ</span>
+                                    <span className="font-black text-slate-700">
+                                      {formatVehicleValue(item.vehicle_info?.car_model)}
+                                    </span>
+
+                                    <span className="font-bold text-slate-400">ยี่ห้อ</span>
+                                    <span className="font-black text-slate-700">
+                                      {formatVehicleValue(item.vehicle_info?.car_brand)}
+                                    </span>
+
+                                    <span className="font-bold text-slate-400">เลขเครื่อง</span>
+                                    <span className="break-all font-black text-slate-700">
+                                      {formatVehicleValue(item.vehicle_info?.car_engine)}
+                                    </span>
+
+                                    <span className="font-bold text-slate-400">ทะเบียน</span>
+                                    <span className="font-black text-slate-700">
+                                      {formatVehicleValue(item.vehicle_info?.car_license)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-black text-slate-700">
                                   {formatThaiDate(item.usage_date)}
@@ -1920,9 +1949,7 @@ export default function TrackFleetPage() {
                                               : "text-blue-700"
                                               }`}
                                           >
-                                            {isRejected
-                                              ? item.current_process || "ไม่ผ่านการประเมิน"
-                                              : `${item.current_step ?? 0}/${item.total_steps || 8} : ${item.current_process || "ยังไม่พบข้อมูลขั้นตอน"}`}
+                                            {getProcessStatus(item).label}
                                           </p>
                                         </div>
                                       </div>

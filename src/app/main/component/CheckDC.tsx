@@ -88,6 +88,17 @@ interface FleetCheckStats {
 type DashboardPair = { actual: number; planned: number };
 type DashboardMatrix = Record<string, Record<string, DashboardPair>>;
 type DashboardStatus = { id: number; name: string; code: number };
+type FleetSummaryRow = {
+  truck_type: string;
+  total_fleet: number;
+  normal_run_fleet: number;
+  normal_rest_fleet: number;
+  repair_fleet: number;
+  no_driver_fleet: number;
+  other_fleet: number;
+  truck_turn_normal?: number | string | null;
+  truck_turn_peak?: number | string | null;
+};
 type DashboardWeekly = {
   date: string;
   day_name: string;
@@ -110,6 +121,13 @@ type FleetDashboardData = {
   vendors: Record<string, string>;
   matrix_type: DashboardMatrix;
   matrix_vendor: DashboardMatrix;
+  fleet_summary_table?: FleetSummaryRow[];
+};
+type FleetCapacityData = {
+  success: boolean;
+  message?: string;
+  categories: string[];
+  series: Array<{ name: string; data: number[] }>;
 };
 
 interface CheckDCProps {
@@ -132,6 +150,9 @@ const FLEET_CHECK_API =
 
 const FLEET_DASHBOARD_API =
   "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_dashboard_by_dc.php";
+
+const FLEET_CAPACITY_API =
+  "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_daily_workload.php";
 
 const EMPTY_FLEET_STATS: FleetCheckStats = {
   total: 0,
@@ -437,79 +458,19 @@ function dashboardThaiDate(value: string): string {
 }
 
 function DashboardStat({ title, value, active = false }: { title: string; value: number; active?: boolean }) {
-  return <div className={`flex h-[88px] flex-col justify-between rounded-xl bg-white p-3 shadow-sm ${active ? "border-2 border-blue-500" : "border border-slate-200"}`}>
-    <p className={`text-lg font-black ${active ? "text-blue-600" : "text-slate-400"}`}>{title}</p>
-    <p className={`text-right text-xl font-black ${active ? "text-blue-600" : "text-slate-900"}`}>{formatNumber(value)}</p>
+  return <div className={`flex min-h-[80px] flex-col justify-between rounded-xl bg-white p-3 shadow-sm transition ${active ? "border-2 border-blue-500" : "border border-slate-200"}`}>
+    <p className={`text-xs font-black sm:text-sm ${active ? "text-blue-600" : "text-slate-400"}`}>{title}</p>
+    <p className={`text-right text-lg font-black sm:text-xl ${active ? "text-blue-600" : "text-slate-900"}`}>{formatNumber(value)}</p>
   </div>;
 }
 
-function DashboardMatrix({ mode, matrix, statuses, date, warehouse, labels }: { mode: "fleet" | "vendor"; matrix: DashboardMatrix; statuses: DashboardStatus[]; date: string; warehouse: string; labels?: Record<string, string> }) {
-  const allStatuses = statuses.filter((status) => Object.values(matrix).some((row) => {
-    const item = row[String(status.id)];
-    return item && (item.actual || item.planned);
-  }));
-  const shownStatuses = mode === "vendor" ? allStatuses.filter((status) => status.id !== 2 && !/วิ่ง.*ปกติ/i.test(status.name)) : allStatuses;
-  const rows = Object.entries(matrix);
-  const valueOf = (row: Record<string, DashboardPair>, status: DashboardStatus) => Number(row[String(status.id)]?.actual || 0);
-  const totalOf = (row: Record<string, DashboardPair>) => allStatuses.reduce((sum, status) => sum + valueOf(row, status), 0);
-  const absentOf = (row: Record<string, DashboardPair>) => shownStatuses.reduce((sum, status) => sum + valueOf(row, status), 0);
-  const tone = (name: string) => {
-    if (/ปกติ/.test(name)) return "bg-blue-50 text-blue-700";
-    if (/หยุด/.test(name)) return "bg-emerald-50 text-emerald-700";
-    if (/เสีย|ซ่อม/.test(name)) return "bg-rose-50 text-rose-600";
-    if (/พขร/.test(name)) return "bg-amber-50 text-amber-700";
-    return "bg-violet-50 text-violet-700";
-  };
-  const title = mode === "fleet" ? "ตารางสรุปกองรถประจำวัน (Daily Fleet Summary Table)" : "ตารางสรุปสถานะรถที่ไม่ได้มาวิ่งงาน แยกรายบริษัทขนส่ง (Vendor Summary Table)";
-  const subtitle = mode === "fleet" ? `กองรถประจำวันที่ ${dashboardThaiDate(date)} ${warehouse}` : `สถานะรถไม่ได้มาวิ่งงาน แยกรายซัพพลายเออร์ ประจำวันที่ ${dashboardThaiDate(date)} ${warehouse}`;
-
-  return <section>
-    <h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▦</span>{title}</h3>
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-4 py-3 text-center text-xs font-black text-blue-600">{subtitle}</div>
-      <div className="overflow-x-auto"><table className="min-w-full text-xs">
-        <thead className="bg-slate-50 text-slate-400"><tr>
-          <th className="min-w-48 border-r border-slate-100 px-4 py-3 text-left font-black">{mode === "fleet" ? "ประเภทรถ" : "บริษัทขนส่ง (VENDOR)"}</th>
-          {mode === "vendor" && (
-            <th className="min-w-28 border-r border-blue-100 bg-blue-100 px-3 py-3 text-center font-black text-blue-800">
-              รถทั้งหมด
-            </th>
-          )}
-          {shownStatuses.map((status) => <th key={status.id} className={`min-w-28 border-r border-slate-100 px-3 py-3 text-center font-black ${tone(status.name)}`}>{status.name}</th>)}
-          {mode === "vendor" && <th className="min-w-32 bg-red-50 px-3 py-3 text-center font-black text-red-600">ไม่ได้มาวิ่งงาน</th>}
-        </tr></thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.map(([key, row]) => <tr key={key}>
-            <td className="border-r border-slate-100 px-4 py-3 font-black text-slate-900">{key}{labels?.[key] ? ` - ${labels[key]}` : ""}</td>
-            {mode === "vendor" && (
-              <td className="border-r border-blue-100 bg-blue-50 px-3 py-3 text-center text-sm font-black text-blue-900">
-                {formatNumber(totalOf(row))}
-              </td>
-            )}
-            {shownStatuses.map((status) => { const value = valueOf(row, status); return <td key={status.id} className={`border-r border-slate-100 px-3 py-3 text-center font-black underline decoration-dotted ${tone(status.name)}`}>{value ? formatNumber(value) : "–"}</td>; })}
-            {mode === "vendor" && <td className="bg-red-50 px-3 py-3 text-center font-black text-red-600 underline decoration-dotted">{formatNumber(absentOf(row))}</td>}
-          </tr>)}
-        </tbody>
-        <tfoot><tr className="bg-slate-100 font-black">
-          <td className="border-r border-slate-200 px-4 py-3 text-black">{mode === "fleet" ? "รวมทั้งหมด" : "รวมทั้งหมดทุกซัพพลายเออร์"}</td>
-          {mode === "vendor" && (
-            <td className="border-r border-blue-200 bg-blue-200 px-3 py-3 text-center text-sm font-black text-blue-950">
-              {formatNumber(
-                rows.reduce((sum, [, row]) => sum + totalOf(row), 0)
-              )}
-            </td>
-          )}
-          {shownStatuses.map((status) => <td key={status.id} className={`border-r border-slate-200 px-3 py-3 text-center underline decoration-dotted ${tone(status.name)}`}>{formatNumber(rows.reduce((sum, [, row]) => sum + valueOf(row, status), 0))}</td>)}
-          {mode === "vendor" && <td className="bg-red-50 px-3 py-3 text-center text-red-600 underline decoration-dotted">{formatNumber(rows.reduce((sum, [, row]) => sum + absentOf(row), 0))}</td>}
-        </tr></tfoot>
-      </table></div>
-    </div>
-  </section>;
-}
-
-function FleetDashboard({ warehouse }: { warehouse: string }) {
+function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads: WorkloadItem[] }) {
   const [selectedDate, setSelectedDate] = useState(getTodayKey);
   const [dashboard, setDashboard] = useState<FleetDashboardData | null>(null);
+  const [capacity, setCapacity] = useState<FleetCapacityData | null>(null);
+  const [hoveredCapacity, setHoveredCapacity] = useState<{ dataIndex: number } | null>(null);
+  const [capacityLoading, setCapacityLoading] = useState(false);
+  const [capacityError, setCapacityError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -532,8 +493,74 @@ function FleetDashboard({ warehouse }: { warehouse: string }) {
 
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
 
+  useEffect(() => {
+    if (!warehouse || !selectedDate) return;
+    let cancelled = false;
+    const loadCapacity = async () => {
+      try {
+        setCapacityLoading(true);
+        setCapacityError("");
+        const params = new URLSearchParams({ action: "summary", warehouse, date: selectedDate });
+        const response = await fetch(`${FLEET_CAPACITY_API}?${params.toString().replace(/\+/g, "%20")}`, { headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
+        const text = await response.text();
+        if (!response.ok) throw new Error(`โหลด Fleet Capacity ไม่สำเร็จ HTTP ${response.status}`);
+        const result = JSON.parse(text) as FleetCapacityData;
+        if (!result.success) throw new Error(result.message || "ไม่สามารถโหลด Fleet Capacity ได้");
+        if (!cancelled) setCapacity(result);
+      } catch (loadError) {
+        if (!cancelled) {
+          setCapacity(null);
+          setCapacityError(loadError instanceof Error ? loadError.message : "ไม่สามารถโหลด Fleet Capacity ได้");
+        }
+      } finally {
+        if (!cancelled) setCapacityLoading(false);
+      }
+    };
+    void loadCapacity();
+    return () => { cancelled = true; };
+  }, [selectedDate, warehouse]);
+
+  const capacityColors = ["#2878c8", "#4d8dca", "#9ec7df", "#8db8d5", "#7440a8", "#3f007d", "#b91c1c", "#f0523b"];
+  const capacityChartData = useMemo(() => {
+    if (!capacity) return { categories: [] as string[], series: [] as Array<{ name: string; data: number[] }> };
+    return { categories: capacity.categories, series: capacity.series };
+  }, [capacity]);
+  const capacityValues = capacityChartData.series.flatMap((series) => series.data.map(Number)).filter(Number.isFinite);
+  const capacityMin = capacityValues.length ? Math.floor(Math.min(...capacityValues) / 10000) * 10000 : 0;
+  const capacityMax = capacityValues.length ? Math.ceil(Math.max(...capacityValues) / 10000) * 10000 : 1;
+  const capacityWidth = Math.max(760, capacityChartData.categories.length * 28);
+  const capacityHeight = 270;
+  const capacityLeft = 64;
+  const capacityTop = 18;
+  const capacityRight = 20;
+  const capacityBottom = 48;
+  const capacityX = (index: number) => capacityLeft + (index / Math.max(capacityChartData.categories.length - 1, 1)) * (capacityWidth - capacityLeft - capacityRight);
+  const capacityY = (value: number) => capacityTop + (capacityMax - value) / Math.max(capacityMax - capacityMin, 1) * (capacityHeight - capacityTop - capacityBottom);
+
   const fleetCount = (name: string) => dashboard?.fleet_types.find((item) => normalizeText(item.fleet_type) === normalizeText(name))?.count || 0;
   const all = fleetCount("รถทั้งหมด") || Object.values(dashboard?.matrix_type || {}).reduce((total, row) => total + Object.values(row).reduce((sum, item) => sum + Number(item.actual || 0), 0), 0);
+  const workloadByDate = (date: string) => workloads.find((item) => {
+    const record = item as Record<string, unknown>;
+    const itemDc = getValueIgnoreCase(record, "DC_CODE") || getValueIgnoreCase(record, "dc_code");
+    const itemDate = getValueIgnoreCase(record, "DATE") || getValueIgnoreCase(record, "date");
+    return normalizeText(itemDc) === normalizeText(warehouse) && normalizeDateKey(String(itemDate || "")) === date;
+  });
+  const workloadMetric = (item: WorkloadItem | undefined, keys: string[]): number | null => {
+    if (!item) return null;
+    const record = item as Record<string, unknown>;
+    for (const key of keys) {
+      const raw = getValueIgnoreCase(record, key);
+      if (raw !== "" && raw !== null && raw !== undefined && !Number.isNaN(Number(raw))) return Number(raw);
+    }
+    return null;
+  };
+  const vendorRows = Object.entries(dashboard?.matrix_vendor || {});
+  const fleetSummaryRows = dashboard?.fleet_summary_table || [];
+  const restStatusIds = (dashboard?.statuses || []).filter((status) => /หยุดพักปกติ/.test(status.name)).map((status) => status.id);
+  const repairStatusIds = (dashboard?.statuses || []).filter((status) => /อุบัติเหตุ|เสีย|ซ่อม/.test(status.name)).map((status) => status.id);
+  const noDriverStatusIds = (dashboard?.statuses || []).filter((status) => /ไม่มีคนขับ|พขร/.test(status.name)).map((status) => status.id);
+  const excludedVendorStatusIds = new Set([2, ...restStatusIds, ...repairStatusIds, ...noDriverStatusIds]);
+  const otherStatusIds = (dashboard?.statuses || []).filter((status) => !excludedVendorStatusIds.has(status.id)).map((status) => status.id);
 
   return <div className="space-y-5 rounded-xl border border-blue-100 bg-slate-50/70 p-3.5">
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -544,24 +571,148 @@ function FleetDashboard({ warehouse }: { warehouse: string }) {
       </div>
     </div>
     {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">{error}</div>}
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="px-4 pb-2 pt-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-black text-slate-900">Fleet Capacity Dashboard</h3><span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[9px] font-black text-blue-600">? คำอธิบายกราฟแต่ละเส้น</span></div>
+          <p className="mt-1 text-[10px] font-bold text-slate-400">แนวโน้มปริมาณงานและความสามารถในการรองรับรถ</p>
+        </div>
+      </div>
+      {capacityError && <div className="mx-4 mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">{capacityError}</div>}
+      {capacityLoading ? <div className="flex h-[330px] items-center justify-center gap-2 text-xs font-bold text-slate-500"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />กำลังโหลด Fleet Capacity...</div> : capacityChartData.categories.length === 0 ? <div className="flex h-[330px] items-center justify-center text-xs font-bold text-slate-400">ไม่พบข้อมูล Fleet Capacity</div> : <>
+        <div className="relative overflow-x-auto px-2">
+          {hoveredCapacity && <div className="pointer-events-none sticky left-20 top-3 z-20 mb-[-292px] w-fit min-w-[370px] overflow-hidden rounded-lg border border-slate-300 bg-white/95 shadow-2xl backdrop-blur-sm">
+            <div className="border-b border-slate-300 bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">{formatThaiDate(capacityChartData.categories[hoveredCapacity.dataIndex])}</div>
+            <div className="space-y-2 px-4 py-3">{capacityChartData.series.map((series, seriesIndex) => <div key={series.name} className="flex items-center justify-between gap-4"><div className="flex min-w-0 items-center gap-2"><span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: capacityColors[seriesIndex % capacityColors.length] }} /><span className="truncate text-[11px] font-bold text-slate-700">{series.name}:</span></div><span className="shrink-0 text-sm font-black text-slate-900">{formatNumber(Math.round(Number(series.data[hoveredCapacity.dataIndex] || 0)))} <span className="text-[10px] text-slate-500">USC</span></span></div>)}</div>
+          </div>}
+          <svg width={capacityWidth} height={capacityHeight} viewBox={`0 0 ${capacityWidth} ${capacityHeight}`} className="block h-[300px] min-w-[760px] w-full" onMouseLeave={() => setHoveredCapacity(null)}>
+          {Array.from({ length: 6 }, (_, index) => capacityMax - ((capacityMax - capacityMin) / 5) * index).map((value, index) => { const y = capacityY(value); return <g key={`capacity-grid-${index}`}><line x1={capacityLeft} y1={y} x2={capacityWidth - capacityRight} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" /><text x={capacityLeft - 8} y={y + 3} textAnchor="end" fontSize="9" fontWeight="700" fill="#64748b">{formatNumber(Math.round(value))}</text></g>; })}
+          {capacityChartData.categories.map((date, index) => <g key={date}><line x1={capacityX(index)} y1={capacityTop} x2={capacityX(index)} y2={capacityHeight - capacityBottom} stroke={hoveredCapacity?.dataIndex === index ? "#94a3b8" : "#f1f5f9"} strokeWidth={hoveredCapacity?.dataIndex === index ? 1.5 : 1} strokeDasharray="3 3" /><rect x={capacityX(index) - 12} y={capacityTop} width="24" height={capacityHeight - capacityTop - capacityBottom} fill="transparent" className="cursor-crosshair" onMouseEnter={() => setHoveredCapacity({ dataIndex: index })} /><text x={capacityX(index)} y={capacityHeight - capacityBottom + 18} textAnchor="end" transform={`rotate(-45 ${capacityX(index)} ${capacityHeight - capacityBottom + 18})`} fontSize="8" fontWeight="700" fill="#64748b">{`${date.slice(8, 10)}/${date.slice(5, 7)}`}</text></g>)}
+          {capacityChartData.series.map((series, seriesIndex) => <g key={series.name}><polyline points={series.data.map((value, index) => `${capacityX(index)},${capacityY(Number(value || 0))}`).join(" ")} fill="none" stroke={capacityColors[seriesIndex % capacityColors.length]} strokeWidth={seriesIndex < 2 ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />{hoveredCapacity && <circle cx={capacityX(hoveredCapacity.dataIndex)} cy={capacityY(Number(series.data[hoveredCapacity.dataIndex] || 0))} r="5" fill="white" stroke={capacityColors[seriesIndex % capacityColors.length]} strokeWidth="3" pointerEvents="none" />}</g>)}
+          <text x="18" y={capacityHeight / 2} transform={`rotate(-90 18 ${capacityHeight / 2})`} textAnchor="middle" fontSize="10" fontWeight="800" fill="#94a3b8">USC</text>
+        </svg></div>
+        <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 border-t border-slate-100 px-4 py-3">{capacityChartData.series.map((series, index) => <span key={series.name} className="flex items-center gap-1.5 text-[9px] font-black text-slate-600"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: capacityColors[index % capacityColors.length] }} />{series.name}</span>)}</div>
+      </>}
+    </section>
     {dashboard && <>
       <section><h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▣</span>ประเภทรถยนต์</h3>
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4 texy-gray-800">
-          <DashboardStat title="รถทั้งหมด" value={all} active /><DashboardStat title="รถในกอง" value={fleetCount("รถในกอง")} /><DashboardStat title="รถเสริม" value={fleetCount("รถเสริม")} /><DashboardStat title="รถโอนมาช่วย" value={fleetCount("รถโอนมาช่วย")} /><DashboardStat title="CROSS DOCK" value={fleetCount("CROSS DOCK")} /><DashboardStat title="โอนไปช่วยคลังอื่น" value={fleetCount("รถโอนไปช่วยคลังอื่น")} /><DashboardStat title="BACKHAUL" value={fleetCount("BACKHAUL")} />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <DashboardStat title="รถทั้งหมด" value={all} active />
+          <DashboardStat title="รถในกอง" value={fleetCount("รถในกอง")} />
+          <DashboardStat title="รถเสริม" value={fleetCount("รถเสริม")} />
+          <DashboardStat title="รถโอนมาช่วย" value={fleetCount("รถโอนมาช่วย")} />
+          <DashboardStat title="CROSS DOCK" value={fleetCount("CROSS DOCK")} />
+          <DashboardStat title="รถโอนไปช่วยคลังอื่น" value={fleetCount("รถโอนไปช่วยคลังอื่น")} />
+          <DashboardStat title="BACKHAUL" value={fleetCount("BACKHAUL")} />
+          <DashboardStat title="รถนำออกจากระบบ" value={fleetCount("รถนำออกจากระบบ")} />
         </div>
       </section>
       <section><h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▦</span>สรุปแผนและการวิ่งงานล่วงหน้า 7 วัน</h3>
-        <div className="overflow-x-auto pb-1"><div className="grid min-w-[1050px] grid-cols-7 gap-3">
-          {dashboard.weekly_performance.map((item) => <article key={item.date} className={`h-[188px] rounded-xl bg-white p-3 shadow-sm ${item.is_today ? "border-2 border-blue-400" : "border border-slate-200"}`}>
-            <div className="flex h-[42px] justify-between border-b border-slate-100"><div><p className={`text-xs font-black ${item.is_today ? "text-blue-600" : "text-slate-900"}`}>{item.day_name}</p><p className="mt-1 text-[10px] font-bold text-slate-400">{item.date.slice(8, 10)}/{item.date.slice(5, 7)}</p></div>{item.is_today && <span className="h-fit rounded-full bg-violet-600 px-2 py-1 text-[10px] font-black text-white">วันนี้</span>}</div>
-            <div className="mt-2.5"><p className="text-[9px] font-black uppercase text-slate-400">ตามแผน (Plan)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-blue-700">● วิ่ง: {formatNumber(item.p_work)}</span><span className="text-orange-700">● หยุด: {formatNumber(item.p_down)}</span></div></div>
-            <div className="mt-3"><p className="text-[9px] font-black uppercase text-slate-400">วิ่งจริง (Actual)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-emerald-700">● วิ่ง: {formatNumber(item.a_work)}</span><span className="text-violet-700">● หยุด: {formatNumber(item.a_down)}</span></div></div>
-            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2"><span className="text-[9px] font-black text-slate-400">ความต่าง (%)</span><span className={`rounded-md px-2 py-1 text-[10px] font-black ${item.gap_pct === 0 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"}`}>{item.gap_pct}%</span></div>
-          </article>)}
-        </div></div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {dashboard.weekly_performance.map((item) => {
+            const dailyWorkload = workloadByDate(item.date);
+            const forecastFc = workloadMetric(dailyWorkload, ["FORECAST_FC", "forecast_fc"]);
+            const actualWorkloadFc = workloadMetric(dailyWorkload, ["WORKLOAD_FC", "workload_fc", "ACTUAL_WORKLOAD_FC"]);
+            const fleetCap = workloadMetric(dailyWorkload, ["FLEET_CAP_TT_NORMAL", "fleet_cap_tt_normal", "FLEET_CAP", "TT_NORMAL"]);
+
+            return <article key={item.date} className={`flex min-h-[278px] flex-col rounded-xl bg-white p-3 shadow-sm ${item.is_today ? "border-2 border-rose-500" : "border-2 border-orange-500"}`}>
+              <div className="flex min-h-[48px] items-start justify-between gap-2 border-b border-slate-200 pb-2">
+                <div><p className="text-sm font-black text-slate-900">{item.day_name}</p><p className="mt-0.5 text-[10px] font-bold text-slate-500">{item.date.slice(8, 10)}/{item.date.slice(5, 7)}</p></div>
+                <div className="flex flex-col items-end gap-1">
+                  {item.is_today ? <><span className="rounded-full bg-violet-600 px-2 py-1 text-[9px] font-black text-white">วันนี้</span><span className="rounded-md bg-rose-600 px-2 py-1 text-[8px] font-black text-white">เรียกรถหยุด / ขอรถเสริม</span></> : <span className="rounded-md bg-orange-500 px-2 py-1 text-[9px] font-black text-slate-900">ลดการใช้รถ</span>}
+                </div>
+              </div>
+              <div className="mt-3"><p className="text-[9px] font-black uppercase tracking-wide text-slate-400">ตามแผน (Plan)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-blue-700">● วิ่ง: {formatNumber(item.p_work)}</span><span className="text-orange-700">● หยุด: {formatNumber(item.p_down)}</span></div></div>
+              <div className="mt-3"><p className="text-[9px] font-black uppercase tracking-wide text-slate-400">วิ่งจริง (Actual)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-emerald-700">● วิ่ง: {formatNumber(item.a_work)}</span><span className="text-violet-700">● หยุด: {formatNumber(item.a_down)}</span></div></div>
+              <div className="mt-3 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2 text-[10px] font-black">
+                <div className="flex justify-between gap-2"><span className="text-slate-400">Forecast Workload FC:</span><span className="text-violet-600">{formatNumber(forecastFc)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-400">Actual Workload FC:</span><span className="text-blue-600">{formatNumber(actualWorkloadFc)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-400">Fleet Cap. (TT Normal):</span><span className="text-emerald-600">{formatNumber(fleetCap)}</span></div>
+              </div>
+              <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3"><span className="text-[9px] font-black text-slate-400">ความต่าง (%)</span><span className="rounded-md bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-200">{item.gap_pct}%</span></div>
+            </article>;
+          })}
+        </div>
       </section>
-      <DashboardMatrix mode="fleet" matrix={dashboard.matrix_type} statuses={dashboard.statuses} date={dashboard.date} warehouse={dashboard.warehouse || warehouse} />
-      <DashboardMatrix mode="vendor" matrix={dashboard.matrix_vendor} statuses={dashboard.statuses} date={dashboard.date} warehouse={dashboard.warehouse || warehouse} labels={dashboard.vendors} />
+      <section>
+        <h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▦</span>ตารางสรุปกองรถประจำวัน (Daily Fleet Summary Table)</h3>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-4 py-3 text-center text-xs font-black text-blue-600">กองรถประจำวันที่ {dashboardThaiDate(dashboard.date)} {dashboard.warehouse || warehouse}</div>
+          <div className="overflow-x-auto"><table className="min-w-[980px] w-full text-xs">
+            <thead className="bg-slate-50"><tr>
+              <th className="min-w-32 border-r border-slate-100 px-3 py-3 text-center font-black text-slate-400">ประเภทกองรถ</th>
+              <th className="min-w-28 border-r border-slate-100 px-3 py-3 text-left font-black text-slate-400">ประเภทรถ</th>
+              <th className="min-w-32 border-r border-slate-100 px-3 py-3 text-center font-black text-violet-700">TRUCK TURN<span className="mt-0.5 block text-[8px]">(NORMAL / PEAK)</span></th>
+              <th className="min-w-24 border-r border-blue-100 bg-blue-50 px-3 py-3 text-center font-black text-blue-700">วิ่งงานปกติ</th>
+              <th className="min-w-24 border-r border-emerald-100 bg-emerald-50 px-3 py-3 text-center font-black text-emerald-700">หยุดพักปกติ</th>
+              <th className="min-w-32 border-r border-rose-100 bg-rose-50 px-3 py-3 text-center font-black text-rose-600">อุบัติเหตุ/เสียซ่อม</th>
+              <th className="min-w-28 border-r border-amber-100 bg-amber-50 px-3 py-3 text-center font-black text-amber-700">ไม่มีคนขับรถ</th>
+              <th className="min-w-20 border-r border-violet-100 bg-violet-50 px-3 py-3 text-center font-black text-violet-700">อื่น ๆ</th>
+              <th className="min-w-24 px-3 py-3 text-center font-black text-slate-700">รวมทั้งหมด</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {fleetSummaryRows.map((row, index) => <tr key={row.truck_type}>
+                {index === 0 && <td rowSpan={fleetSummaryRows.length} className="border-r border-slate-100 px-3 py-3 text-center align-middle"><span className="rounded-full bg-blue-100 px-3 py-1 font-black text-blue-700">รถในกอง</span></td>}
+                <td className="border-r border-slate-100 px-3 py-3 font-black text-slate-900">{row.truck_type}</td>
+                <td className="border-r border-slate-100 px-3 py-3 text-center font-black text-violet-700">{row.truck_turn_normal != null || row.truck_turn_peak != null ? `${row.truck_turn_normal ?? "–"} / ${row.truck_turn_peak ?? "–"}` : "–"}</td>
+                <td className="border-r border-blue-100 bg-blue-50 px-3 py-3 text-center font-black text-blue-700 underline decoration-dotted">{row.normal_run_fleet ? formatNumber(row.normal_run_fleet) : "–"}</td>
+                <td className="border-r border-emerald-100 bg-emerald-50 px-3 py-3 text-center font-black text-emerald-700 underline decoration-dotted">{row.normal_rest_fleet ? formatNumber(row.normal_rest_fleet) : "–"}</td>
+                <td className="border-r border-rose-100 bg-rose-50 px-3 py-3 text-center font-black text-rose-600 underline decoration-dotted">{row.repair_fleet ? formatNumber(row.repair_fleet) : "–"}</td>
+                <td className="border-r border-amber-100 bg-amber-50 px-3 py-3 text-center font-black text-amber-700 underline decoration-dotted">{row.no_driver_fleet ? formatNumber(row.no_driver_fleet) : "–"}</td>
+                <td className="border-r border-violet-100 bg-violet-50 px-3 py-3 text-center font-black text-violet-700 underline decoration-dotted">{row.other_fleet ? formatNumber(row.other_fleet) : "–"}</td>
+                <td className="px-3 py-3 text-center font-black text-slate-900">{formatNumber(row.total_fleet)}</td>
+              </tr>)}
+            </tbody>
+            <tfoot><tr className="bg-slate-100 font-black">
+              <td className="border-r border-slate-200 px-3 py-3 text-left text-black">รวมทั้งหมด</td><td className="border-r border-slate-200 px-3 py-3 text-center text-slate-400">–</td><td className="border-r border-slate-200 px-3 py-3 text-center text-slate-400">–</td>
+              <td className="border-r border-blue-200 bg-blue-100 px-3 py-3 text-center text-blue-700 underline decoration-dotted">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.normal_run_fleet || 0), 0))}</td>
+              <td className="border-r border-emerald-200 bg-emerald-100 px-3 py-3 text-center text-emerald-700 underline decoration-dotted">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.normal_rest_fleet || 0), 0))}</td>
+              <td className="border-r border-rose-200 bg-rose-100 px-3 py-3 text-center text-rose-600 underline decoration-dotted">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.repair_fleet || 0), 0))}</td>
+              <td className="border-r border-amber-200 bg-amber-100 px-3 py-3 text-center text-amber-700 underline decoration-dotted">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.no_driver_fleet || 0), 0))}</td>
+              <td className="border-r border-violet-200 bg-violet-100 px-3 py-3 text-center text-violet-700 underline decoration-dotted">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.other_fleet || 0), 0))}</td>
+              <td className="bg-slate-200 px-3 py-3 text-center text-slate-900">{formatNumber(fleetSummaryRows.reduce((sum, row) => sum + Number(row.total_fleet || 0), 0))}</td>
+            </tr></tfoot>
+          </table></div>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▤</span>ตารางสรุปสถานะรถที่ไม่ได้มาวิ่งงาน แยกรายบริษัทขนส่ง (Vendor Summary Table)</h3>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-4 py-3 text-center text-xs font-black text-blue-600">สถานะรถไม่ได้มาวิ่งงาน แยกรายซัพพลายเออร์ ประจำวันที่ {dashboardThaiDate(dashboard.date)} {dashboard.warehouse || warehouse}</div>
+          <div className="overflow-x-auto"><table className="min-w-full text-xs">
+            <thead className="bg-slate-50 text-slate-400"><tr>
+              <th className="min-w-64 border-r border-slate-100 px-4 py-3 text-left font-black">บริษัทขนส่ง (VENDOR)</th>
+              <th className="min-w-28 border-r border-blue-100 bg-blue-50 px-3 py-3 text-center font-black text-blue-800">รถทั้งหมด</th>
+              <th className="min-w-28 border-r border-emerald-100 bg-emerald-50 px-3 py-3 text-center font-black text-emerald-700">หยุดพักปกติ</th>
+              <th className="min-w-28 border-r border-rose-100 bg-rose-50 px-3 py-3 text-center font-black text-rose-600">เสีย/ซ่อม</th>
+              <th className="min-w-32 border-r border-amber-100 bg-amber-50 px-3 py-3 text-center font-black text-amber-700">ไม่มีคนขับรถ</th>
+              <th className="min-w-20 border-r border-violet-100 bg-violet-50 px-3 py-3 text-center font-black text-violet-700">อื่น ๆ</th>
+              <th className="min-w-32 bg-red-50 px-3 py-3 text-center font-black text-red-600">ไม่ได้มาวิ่งงาน</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {vendorRows.map(([vendorCode, row]) => <tr key={vendorCode}>
+                <td className="border-r border-slate-100 px-4 py-3 font-black text-slate-900">{vendorCode}{dashboard.vendors[vendorCode] ? ` - ${dashboard.vendors[vendorCode]}` : ""}</td>
+                <td className="border-r border-blue-100 bg-blue-50 px-3 py-3 text-center font-black text-blue-900">{formatNumber(dashboard.statuses.reduce((sum, status) => sum + Number(row[String(status.id)]?.actual || 0), 0))}</td>
+                <td className="border-r border-emerald-100 bg-emerald-50 px-3 py-3 text-center font-black text-emerald-700 underline decoration-dotted">{formatNumber(restStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0)) || "–"}</td>
+                <td className="border-r border-rose-100 bg-rose-50 px-3 py-3 text-center font-black text-rose-600 underline decoration-dotted">{formatNumber(repairStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0)) || "–"}</td>
+                <td className="border-r border-amber-100 bg-amber-50 px-3 py-3 text-center font-black text-amber-700 underline decoration-dotted">{formatNumber(noDriverStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0)) || "–"}</td>
+                <td className="border-r border-violet-100 bg-violet-50 px-3 py-3 text-center font-black text-violet-700 underline decoration-dotted">{formatNumber(otherStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0)) || "–"}</td>
+                <td className="bg-red-50 px-3 py-3 text-center font-black text-red-600 underline decoration-dotted">{formatNumber([...restStatusIds, ...repairStatusIds, ...noDriverStatusIds, ...otherStatusIds].reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0))}</td>
+              </tr>)}
+            </tbody>
+            <tfoot><tr className="bg-slate-100 font-black">
+              <td className="border-r border-slate-200 px-4 py-3 text-black">รวมทั้งหมดทุกซัพพลายเออร์</td>
+              <td className="border-r border-blue-200 bg-blue-100 px-3 py-3 text-center text-blue-950">{formatNumber(vendorRows.reduce((total, [, row]) => total + dashboard.statuses.reduce((sum, status) => sum + Number(row[String(status.id)]?.actual || 0), 0), 0))}</td>
+              <td className="border-r border-emerald-200 bg-emerald-100 px-3 py-3 text-center text-emerald-700 underline decoration-dotted">{formatNumber(vendorRows.reduce((total, [, row]) => total + restStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0), 0))}</td>
+              <td className="border-r border-rose-200 bg-rose-100 px-3 py-3 text-center text-rose-600 underline decoration-dotted">{formatNumber(vendorRows.reduce((total, [, row]) => total + repairStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0), 0))}</td>
+              <td className="border-r border-amber-200 bg-amber-100 px-3 py-3 text-center text-amber-700 underline decoration-dotted">{formatNumber(vendorRows.reduce((total, [, row]) => total + noDriverStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0), 0))}</td>
+              <td className="border-r border-violet-200 bg-violet-100 px-3 py-3 text-center text-violet-700 underline decoration-dotted">{formatNumber(vendorRows.reduce((total, [, row]) => total + otherStatusIds.reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0), 0))}</td>
+              <td className="bg-red-100 px-3 py-3 text-center text-red-600 underline decoration-dotted">{formatNumber(vendorRows.reduce((total, [, row]) => total + [...restStatusIds, ...repairStatusIds, ...noDriverStatusIds, ...otherStatusIds].reduce((sum, id) => sum + Number(row[String(id)]?.actual || 0), 0), 0))}</td>
+            </tr></tfoot>
+          </table></div>
+        </div>
+      </section>
     </>}
   </div>;
 }
@@ -703,6 +854,37 @@ export default function CheckDC({
     setSelectedIssueTruckType(resolvedData.fleet_truck_type || "");
     setSelectedWorkloadMonth(currentMonthKey);
   }, [currentMonthKey, resolvedData?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchWorkloads = async () => {
+      try {
+        setLoadingWorkload(true);
+        setWorkloadError("");
+        const response = await fetch(WORKLOAD_API, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          credentials: "omit",
+        });
+        const text = await response.text();
+        if (!response.ok) throw new Error(`โหลดข้อมูล Workload ไม่สำเร็จ HTTP ${response.status}`);
+        const result: unknown = text ? JSON.parse(text) : null;
+        if (!cancelled) setWorkloads(getArrayFromResponse<WorkloadItem>(result));
+      } catch (loadError) {
+        if (!cancelled) {
+          setWorkloads([]);
+          setWorkloadError(loadError instanceof Error ? loadError.message : "ไม่สามารถโหลดข้อมูล Workload ได้");
+        }
+      } finally {
+        if (!cancelled) setLoadingWorkload(false);
+      }
+    };
+
+    void fetchWorkloads();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!resolvedData?.dc_code) {
@@ -1901,7 +2083,7 @@ export default function CheckDC({
               </div>
             </section>
 
-            <FleetDashboard warehouse={resolvedData.dc_code} />
+            <FleetDashboard warehouse={resolvedData.dc_code} workloads={workloads} />
 
             <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
               <div className="flex flex-col justify-between gap-3 border-b border-amber-200 bg-gradient-to-r from-amber-50 to-slate-50 px-3.5 py-3 sm:flex-row sm:items-end">
