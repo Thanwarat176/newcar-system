@@ -946,14 +946,14 @@ export default function AddFleetPage() {
               0,
             ),
 
-            approved_qty: Math.max(
-              Number(
+            approved_qty: (() => {
+              const rawVal = Number(
                 flowSummaryItem?.approved_qty ??
                 requestItem?.approved_qty ??
                 0,
-              ) || 0,
-              0,
-            ),
+              );
+              return Number.isFinite(rawVal) && rawVal > 0 && rawVal <= 100 ? Math.floor(rawVal) : 0;
+            })(),
 
             usage_date:
               flowSummaryItem?.usage_date ||
@@ -1898,11 +1898,12 @@ export default function AddFleetPage() {
     const status = normalizeStatus(item.status);
 
     const requestQty = Number(item.qty || 0);
-    const approvedQty = Number(item.approved_qty || 0);
+    const rawApprovedQty = Number(item.approved_qty || 0);
+    const approvedQty = (rawApprovedQty > 0 && rawApprovedQty <= 100) ? rawApprovedQty : 0;
 
     if (status === "process") {
-      // ใช้ approved_qty เมื่อมีค่ามากกว่า 0
-      // ถ้ายังเป็น 0 ให้ใช้ qty ของคำขอแทน
+      // ใช้ approved_qty เมื่อมีค่ามากกว่า 0 และไม่เกิน 100 (ไม่ใช่รหัสผู้ขาย/ผู้อนุมัติ)
+      // ถ้ายังเป็น 0 หรือเป็นรหัส ให้ใช้ qty ของคำขอแทน
       const quantity = approvedQty > 0 ? approvedQty : requestQty;
 
       return Number.isFinite(quantity) ? Math.max(Math.floor(quantity), 0) : 0;
@@ -2958,7 +2959,8 @@ export default function AddFleetPage() {
                               : 0;
 
                             // จำนวนที่อนุมัติ
-                            const approvedQtyValue = Number(item.approved_qty);
+                            const rawApprovedQtyValue = Number(item.approved_qty);
+                            const approvedQtyValue = (rawApprovedQtyValue > 0 && rawApprovedQtyValue <= 100) ? rawApprovedQtyValue : 0;
                             const approvedQty = Number.isFinite(
                               approvedQtyValue,
                             )

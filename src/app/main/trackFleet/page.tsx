@@ -102,7 +102,7 @@ const normalizeStatus = (status?: string) => {
     value === "confirm_request" ||
     value === "confirm request" ||
     value === "in_progress" ||
-    value === "คำขอรอพิจารณา (TCAS)"
+    value === "คำขอรอพิจารณา (tcas)"
   ) {
     return "progress";
   }
@@ -139,14 +139,6 @@ const formatVehicleValue = (value?: string | null) => {
   return value;
 };
 
-const getVehicleValues = (item: RequestItem) => [
-  item.vehicle_info?.car_chassis,
-  item.vehicle_info?.car_model,
-  item.vehicle_info?.car_brand,
-  item.vehicle_info?.car_engine,
-  item.vehicle_info?.car_license,
-];
-
 export default function TrackFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -164,11 +156,46 @@ export default function TrackFleetPage() {
 
   const [searchText, setSearchText] = useState("");
   const [vehicleSearchText, setVehicleSearchText] = useState("");
+  const [debouncedSearchText, setDebouncedSearchText] = useState("");
+  const [debouncedVehicleSearchText, setDebouncedVehicleSearchText] = useState("");
+
   const [fleetTypeFilter, setFleetTypeFilter] = useState("all");
   const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [currentProcessFilter, setCurrentProcessFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const [summary, setSummary] = useState({
+    all: { qty: 0, items: 0 },
+    progress: { qty: 0, items: 0 },
+    rejected: { qty: 0, items: 0 },
+    approved: { qty: 0, items: 0 },
+  });
+
+  const [filterOptions, setFilterOptions] = useState<{
+    fleet_types: string[];
+    truck_types: string[];
+    dc_types: string[];
+    dc_codes: string[];
+    process_options: { value: string; label: string }[];
+  }>({
+    fleet_types: [],
+    truck_types: [],
+    dc_types: [],
+    dc_codes: [],
+    process_options: [],
+  });
+
+  const [pagination, setPagination] = useState({
+    total_vehicles: 0,
+    total_records: 0,
+    page: 1,
+    limit: 20,
+    total_pages: 1,
+  });
 
   const [requestDateRange, setRequestDateRange] = useState([
     {
@@ -189,281 +216,20 @@ export default function TrackFleetPage() {
     left: 0,
   });
 
-  const fetchRequests = async () => {
-    try {
-      setLoading(true);
-      setError("");
-
-
-      const [requestResponse, flowSummaryResponse] = await Promise.all([
-        fetch(
-          "http://192.168.158.210/api_new_truck/api/request_get.php",
-          {
-            method: "GET",
-            headers: { Accept: "application/json" },
-            cache: "no-store",
-          }
-        ),
-        fetch(
-          "http://192.168.158.210/api_new_truck/api/flow_data_get.php",
-          {
-            method: "GET",
-            headers: { Accept: "application/json" },
-            cache: "no-store",
-          }
-        ),
-      ]);
-
-      if (!requestResponse.ok) {
-        throw new Error(
-          `ไม่สามารถดึงข้อมูลคำขอได้ (${requestResponse.status})`
-        );
-      }
-
-      if (!flowSummaryResponse.ok) {
-        throw new Error(
-          `ไม่สามารถดึงข้อมูลขั้นตอนล่าสุดได้ (${flowSummaryResponse.status})`
-        );
-      }
-
-      const requestJson = await requestResponse.json();
-      const flowSummaryJson = await flowSummaryResponse.json();
-
-      const requestList: RequestItem[] = Array.isArray(requestJson)
-        ? requestJson
-        : Array.isArray(requestJson?.data)
-          ? requestJson.data
-          : Array.isArray(requestJson?.result)
-            ? requestJson.result
-            : Array.isArray(requestJson?.requests)
-              ? requestJson.requests
-              : [];
-
-      const flowSummaryList: RequestItem[] = Array.isArray(flowSummaryJson)
-        ? flowSummaryJson
-        : Array.isArray(flowSummaryJson?.data)
-          ? flowSummaryJson.data
-          : Array.isArray(flowSummaryJson?.result)
-            ? flowSummaryJson.result
-            : Array.isArray(flowSummaryJson?.requests)
-              ? flowSummaryJson.requests
-              : [];
-
-      const requestMap = new Map(
-        requestList.map((item) => [String(item.id), item])
-      );
-
-      const list: RequestItem[] = flowSummaryList.map((flowItem) => {
-        const requestItem = requestMap.get(String(flowItem.id));
-        const latestProcessLevel = Number(flowItem.latest_process_level);
-        const flowStatus =
-          latestProcessLevel === 8
-            ? "approved"
-            : latestProcessLevel === 9 || latestProcessLevel === 10
-              ? "reject_by_center"
-              : "progress";
-
-        return {
-          ...(requestItem || {}),
-          ...flowItem,
-          status: flowStatus,
-          details: requestItem?.details || flowItem.details || [],
-          approved_qty:
-            requestItem?.approved_qty ?? flowItem.approved_qty ?? flowItem.qty,
-          usage_date:
-            requestItem?.usage_date || flowItem.usage_date || "",
-          dc_type:
-            requestItem?.dc_type || flowItem.dc_type || "",
-          request_by:
-            requestItem?.request_by || flowItem.request_by || "",
-          license_replace:
-            requestItem?.license_replace || flowItem.license_replace || "",
-          fleet_truck_type:
-            requestItem?.fleet_truck_type || flowItem.fleet_truck_type || "",
-          workload:
-            requestItem?.workload ?? flowItem.workload ?? 0,
-          truckturn:
-            requestItem?.truckturn ?? flowItem.truckturn ?? 0,
-          remark:
-            requestItem?.remark || flowItem.remark || "",
-        };
-      });
-
-      const progressList = list.filter((item) => {
-        const fleetType = String(
-          item.fleet_type || ""
-        ).trim();
-
-        const approvedQtyFromApi = Math.max(
-          0,
-          Math.floor(
-            Number(item.approved_qty ?? 0)
-          )
-        );
-
-        const detailCount = Array.isArray(item.details)
-          ? item.details.length
-          : 0;
-
-        const approvedQty =
-          approvedQtyFromApi > 0
-            ? approvedQtyFromApi
-            : detailCount > 0
-              ? detailCount
-              : Math.max(
-                0,
-                Math.floor(Number(item.qty ?? 0))
-              );
-
-        return (
-          fleetType !== "รถเสริม" &&
-          approvedQty > 0
-        );
-      });
-
-
-      const requestRows = progressList.map(
-        (item): RequestItem[] => {
-          const approvedQtyFromApi = Math.max(
-            0,
-            Math.floor(
-              Number(item.approved_qty ?? 0)
-            )
-          );
-
-          const detailCount = Array.isArray(item.details)
-            ? item.details.length
-            : 0;
-
-          const approvedQty =
-            approvedQtyFromApi > 0
-              ? approvedQtyFromApi
-              : detailCount > 0
-                ? detailCount
-                : Math.max(
-                  0,
-                  Math.floor(Number(item.qty ?? 0))
-                );
-
-          if (approvedQty <= 0) {
-            return [];
-          }
-
-          return Array.from(
-            { length: approvedQty },
-            (_, index) => {
-              const vehicleNo = index + 1;
-              const vehicleDetail = item.details?.[index];
-              const vehicleInfo =
-                vehicleDetail?.warehouse_info ||
-                item.vehicle_warehouse_info?.find(
-                  (info) => String(info.vehicle_no) === String(vehicleNo)
-                ) ||
-                item.vehicle_warehouse_info?.[index] ||
-                null;
-              const hasLatestProcess =
-                item.latest_process_level !== null &&
-                item.latest_process_level !== undefined &&
-                item.latest_process_level !== "";
-
-              return {
-                ...item,
-                approved_qty: approvedQty,
-                running_doc_vehicle_no: `${item.running_doc}_${vehicleNo}`,
-                vehicle_no: vehicleNo,
-                vehicle_license:
-                  vehicleDetail?.license_replace ||
-                  vehicleDetail?.license ||
-                  "",
-                vehicle_info: vehicleInfo,
-                current_step: hasLatestProcess
-                  ? Number(item.latest_process_level)
-                  : 0,
-                total_steps: 8,
-                current_process:
-                  item.latest_process_name ||
-                  "ยังไม่พบข้อมูลขั้นตอน",
-                qty: 1,
-              };
-            }
-          );
-        }
-      );
-
-      const listWithProgress =
-        requestRows.flat();
-
-      setRequests(listWithProgress);
-    } catch (err) {
-      console.error(
-        "fetchRequests error:",
-        err
-      );
-
-      setRequests([]);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "เกิดข้อผิดพลาดในการดึงข้อมูลจาก API"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Debounce การค้นหาตัวอักษร 250ms เพื่อให้พิมพ์พิมพ์ได้อย่างลื่นไหล
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchText(searchText);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [searchText]);
 
   useEffect(() => {
-    fetchRequests();
-  }, []);
-
-  useEffect(() => {
-    const loadSelectedDC = () => {
-      const savedSelectedDC = localStorage.getItem("selected_dc");
-
-      if (!savedSelectedDC) {
-        setSelectedDC(null);
-        return;
-      }
-
-      try {
-        const parsedDC = JSON.parse(savedSelectedDC);
-        setSelectedDC(parsedDC);
-      } catch (error) {
-        console.error("อ่าน selected_dc ไม่ได้:", error);
-        localStorage.removeItem("selected_dc");
-        setSelectedDC(null);
-      }
-    };
-
-    loadSelectedDC();
-
-    window.addEventListener("selectedDCChanged", loadSelectedDC);
-
-    return () => {
-      window.removeEventListener("selectedDCChanged", loadSelectedDC);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!showRequestDatePicker) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-
-      const clickedButton = requestDateButtonRef.current?.contains(target);
-      const clickedPicker = requestDatePickerRef.current?.contains(target);
-
-      if (!clickedButton && !clickedPicker) {
-        setShowRequestDatePicker(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [showRequestDatePicker]);
+    const handler = setTimeout(() => {
+      setDebouncedVehicleSearchText(vehicleSearchText);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [vehicleSearchText]);
 
   useEffect(() => {
     const savedUser =
@@ -478,10 +244,38 @@ export default function TrackFleetPage() {
 
     try {
       setUserInfo(JSON.parse(savedUser));
-    } catch (error) {
-      console.error("อ่าน user info ไม่ได้:", error);
+    } catch (err) {
+      console.error("อ่าน user info ไม่ได้:", err);
       setUserInfo(null);
     }
+  }, []);
+
+  useEffect(() => {
+    const loadSelectedDC = () => {
+      const savedSelectedDC = localStorage.getItem("selected_dc");
+
+      if (!savedSelectedDC) {
+        setSelectedDC(null);
+        return;
+      }
+
+      try {
+        const parsedDC = JSON.parse(savedSelectedDC);
+        setSelectedDC(parsedDC);
+      } catch (err) {
+        console.error("อ่าน selected_dc ไม่ได้:", err);
+        localStorage.removeItem("selected_dc");
+        setSelectedDC(null);
+      }
+    };
+
+    loadSelectedDC();
+
+    window.addEventListener("selectedDCChanged", loadSelectedDC);
+
+    return () => {
+      window.removeEventListener("selectedDCChanged", loadSelectedDC);
+    };
   }, []);
 
   const selectedDcFromSidebar = useMemo(() => {
@@ -525,33 +319,150 @@ export default function TrackFleetPage() {
   const isCenterUser =
     userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
 
-  const sidebarFilteredRequests = useMemo(() => {
-    if (isCenterUser) {
-      return requests;
-    }
+  const formatDateToKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
 
-    if (selectedDcFromSidebar) {
-      return requests.filter((item) => {
-        const itemDcCode = String(item.dc_code || "")
-          .trim()
-          .toUpperCase();
+    return `${year}-${month}-${day}`;
+  };
 
-        return itemDcCode === selectedDcFromSidebar;
+  const fetchRequests = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "192.168.158.210";
+      const apiBase = `http://${host}/api_new_truck/api/request_track_fleet.php`;
+
+      const params = new URLSearchParams();
+
+      const activeWarehouse = selectedDcFromSidebar || userWarehouse;
+      if (activeWarehouse && activeWarehouse !== "CENTER") {
+        params.set("warehouse", activeWarehouse);
+      }
+
+      if (userInfo?.team || userInfo?.TEAM) {
+        params.set("user_type", String(userInfo?.team || userInfo?.TEAM));
+      }
+
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (dcTypeFilter !== "all") params.set("dc_type", dcTypeFilter);
+      if (dcFilter !== "all") params.set("dc_code", dcFilter);
+      if (fleetTypeFilter !== "all") params.set("fleet_type", fleetTypeFilter);
+      if (truckTypeFilter !== "all") params.set("truck_type", truckTypeFilter);
+      if (currentProcessFilter !== "all") params.set("process", currentProcessFilter);
+
+      if (debouncedSearchText.trim()) params.set("search", debouncedSearchText.trim());
+      if (debouncedVehicleSearchText.trim()) params.set("vehicle_search", debouncedVehicleSearchText.trim());
+
+      if (hasRequestDateRange) {
+        const startDateKey = formatDateToKey(requestDateRange[0].startDate);
+        const endDateKey = formatDateToKey(requestDateRange[0].endDate);
+        params.set("start_date", startDateKey);
+        params.set("end_date", endDateKey);
+      }
+
+      params.set("page", String(currentPage));
+      params.set("limit", String(pageSize));
+
+      const response = await fetch(`${apiBase}?${params.toString()}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`ไม่สามารถดึงข้อมูลได้ (${response.status})`);
+      }
+
+      const json = await response.json();
+
+      if (json.status === "success") {
+        setRequests(json.data || []);
+        setSummary({
+          all: json.summary?.all || { qty: 0, items: 0 },
+          progress: json.summary?.progress || { qty: 0, items: 0 },
+          rejected: json.summary?.reject_by_center || { qty: 0, items: 0 },
+          approved: json.summary?.approved || { qty: 0, items: 0 },
+        });
+        setFilterOptions({
+          fleet_types: json.filters?.fleet_types || [],
+          truck_types: json.filters?.truck_types || [],
+          dc_types: json.filters?.dc_types || [],
+          dc_codes: json.filters?.dc_codes || [],
+          process_options: json.filters?.process_options || [],
+        });
+        setPagination({
+          total_vehicles: json.pagination?.total_vehicles || 0,
+          total_records: json.pagination?.total_records || 0,
+          page: json.pagination?.page || 1,
+          limit: json.pagination?.limit || 20,
+          total_pages: json.pagination?.total_pages || 1,
+        });
+      } else {
+        throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
+      }
+    } catch (err) {
+      console.error("fetchRequests error:", err);
+      if ((err as Error).name !== "AbortError") {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "เกิดข้อผิดพลาดในการดึงข้อมูลจาก API"
+        );
+        setRequests([]);
+      }
+    } finally {
+      setLoading(false);
     }
+  };
 
-    if (userWarehouse) {
-      return requests.filter((item) => {
-        const itemDcCode = String(item.dc_code || "")
-          .trim()
-          .toUpperCase();
+  useEffect(() => {
+    fetchRequests();
+  }, [
+    selectedDcFromSidebar,
+    userWarehouse,
+    statusFilter,
+    dcTypeFilter,
+    dcFilter,
+    fleetTypeFilter,
+    truckTypeFilter,
+    currentProcessFilter,
+    debouncedSearchText,
+    debouncedVehicleSearchText,
+    hasRequestDateRange,
+    requestDateRange,
+    currentPage,
+    pageSize,
+  ]);
 
-        return itemDcCode === userWarehouse;
-      });
-    }
+  useEffect(() => {
+    if (!showRequestDatePicker) return;
 
-    return [];
-  }, [requests, selectedDcFromSidebar, isCenterUser, userWarehouse]);
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+
+      const clickedButton = requestDateButtonRef.current?.contains(target);
+      const clickedPicker = requestDatePickerRef.current?.contains(target);
+
+      if (!clickedButton && !clickedPicker) {
+        setShowRequestDatePicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showRequestDatePicker]);
 
   const normalizeDateKey = (value?: string) => {
     if (!value) return "ไม่ระบุวันที่";
@@ -601,14 +512,6 @@ export default function TrackFleetPage() {
     if (!year || !month || !day) return value;
 
     return `${day}/${month}/${year}`;
-  };
-
-  const formatDateToKey = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-
-    return `${year}-${month}-${day}`;
   };
 
   const getRemainingUsageDaysClass = (usageDate?: string) => {
@@ -677,26 +580,6 @@ export default function TrackFleetPage() {
     return `เกินกำหนด ${Math.abs(remainingDays)} วัน`;
   };
 
-  const getRequestDateKey = (item: RequestItem) => {
-    const rawDate = item.request_date || item.date || "";
-
-    let dateKey = normalizeDateKey(rawDate);
-
-    if (dateKey === "ไม่ระบุวันที่") return dateKey;
-
-    const [year, month, day] = dateKey.split("-");
-
-    if (!year || !month || !day) return dateKey;
-
-    let fixedYear = Number(year);
-
-    if (fixedYear > 2400) {
-      fixedYear = fixedYear - 543;
-    }
-
-    return `${fixedYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  };
-
   const formatThaiDateRange = () => {
     if (!hasRequestDateRange) return "เลือกช่วงวันที่ขอ";
 
@@ -719,327 +602,6 @@ export default function TrackFleetPage() {
 
     return numberValue.toLocaleString("en-US");
   };
-
-  const isAllowedCardStatus = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    return (
-      value === "progress" ||
-      value === "reject_by_center" ||
-      value === "approved"
-    );
-  };
-
-  const statusCounts = useMemo(() => {
-    const getRequestQty = (item: RequestItem) => {
-      const qty = Number(item.qty || 0);
-      return Number.isFinite(qty) ? Math.max(qty, 0) : 0;
-    };
-
-    const allItems = sidebarFilteredRequests.filter((item) =>
-      isAllowedCardStatus(item.status),
-    );
-    const progressItems = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "progress",
-    );
-    const rejectedItems = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "reject_by_center",
-    );
-    const approvedItems = sidebarFilteredRequests.filter(
-      (item) => normalizeStatus(item.status) === "approved",
-    );
-
-    const sumQty = (items: RequestItem[]) =>
-      items.reduce((sum, item) => sum + getRequestQty(item), 0);
-
-    return {
-      all: {
-        qty: sumQty(allItems),
-        items: allItems.length,
-      },
-      progress: {
-        qty: sumQty(progressItems),
-        items: progressItems.length,
-      },
-      rejected: {
-        qty: sumQty(rejectedItems),
-        items: rejectedItems.length,
-      },
-      approved: {
-        qty: sumQty(approvedItems),
-        items: approvedItems.length,
-      },
-    };
-  }, [sidebarFilteredRequests]);
-
-
-  const fleetTypeOptions = useMemo(() => {
-    const values = new Set<string>();
-
-    sidebarFilteredRequests.forEach((item) => {
-      const value = String(item.fleet_type || "").trim();
-      if (value) values.add(value);
-    });
-
-    return Array.from(values).sort();
-  }, [sidebarFilteredRequests]);
-
-  const truckTypeOptions = useMemo(() => {
-    const values = new Set<string>();
-
-    sidebarFilteredRequests.forEach((item) => {
-      const value = String(item.fleet_truck_type || "").trim();
-      if (value) values.add(value);
-    });
-
-    return Array.from(values).sort();
-  }, [sidebarFilteredRequests]);
-
-  const statusOptions = [
-    { value: "all", label: "ทุกสถานะ" },
-    { value: "progress", label: "กำลังดำเนินการ" },
-    { value: "reject_by_center", label: "ไม่ผ่านการประเมิน" },
-    { value: "approved", label: "เสร็จสิ้นกระบวนการ" },
-  ] as const;
-  
-
-  const processFilterSource = useMemo(() => {
-    let list = sidebarFilteredRequests;
-  
-    if (statusFilter !== "all") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === statusFilter
-      );
-    }
-  
-    if (fleetTypeFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          String(item.fleet_type || "").trim() === fleetTypeFilter
-      );
-    }
-  
-    if (truckTypeFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          String(item.fleet_truck_type || "").trim() === truckTypeFilter
-      );
-    }
-  
-    if (dcTypeFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          String(item.dc_type || "").trim().toUpperCase() ===
-          dcTypeFilter.trim().toUpperCase()
-      );
-    }
-  
-    if (dcFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          String(item.dc_code || "").trim().toUpperCase() ===
-          dcFilter.trim().toUpperCase()
-      );
-    }
-  
-    return list;
-  }, [
-    sidebarFilteredRequests,
-    statusFilter,
-    fleetTypeFilter,
-    truckTypeFilter,
-    dcTypeFilter,
-    dcFilter,
-  ]);
-
-  const currentProcessOptions = useMemo(() => {
-    const options = new Map<string, string>();
-
-    processFilterSource.forEach((item) => {
-      const status = getProcessStatus(item);
-      options.set(status.value, status.label);
-    });
-
-    return Array.from(options, ([value, label]) => ({
-      value,
-      label,
-    })).sort(
-      (a, b) =>
-        Number(a.value.split("|")[0]) -
-        Number(b.value.split("|")[0])
-    );
-  }, [processFilterSource]);
-  
-  const dcTypeOptions = useMemo(() => {
-    const uniqueTypes = new Set<string>();
-
-    sidebarFilteredRequests.forEach((item) => {
-      const type = String(item.dc_type || "").trim();
-      if (type) uniqueTypes.add(type);
-    });
-
-    return Array.from(uniqueTypes).sort();
-  }, [sidebarFilteredRequests]);
-
-  const dcOptions = useMemo(() => {
-    const uniqueDC = new Set<string>();
-
-    sidebarFilteredRequests.forEach((item) => {
-      const itemDCType = String(item.dc_type || "").trim().toUpperCase();
-
-      const matchDCType =
-        dcTypeFilter === "all" ||
-        itemDCType === dcTypeFilter.trim().toUpperCase();
-
-      if (!matchDCType) return;
-
-      const dc = String(item.dc_code || "").trim();
-      if (dc) uniqueDC.add(dc);
-    });
-
-    return Array.from(uniqueDC).sort();
-  }, [sidebarFilteredRequests, dcTypeFilter]);
-
-  const filteredRequests = useMemo(() => {
-    let list = sidebarFilteredRequests;
-
-    if (statusFilter === "all") {
-      list = list.filter((item) => isAllowedCardStatus(item.status));
-    }
-
-    if (statusFilter === "progress") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === "progress"
-      );
-    }
-
-    if (statusFilter === "reject_by_center") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === "reject_by_center"
-      );
-    }
-
-    if (statusFilter === "approved") {
-      list = list.filter(
-        (item) => normalizeStatus(item.status) === "approved"
-      );
-    }
-
-    if (fleetTypeFilter !== "all") {
-      list = list.filter(
-        (item) => String(item.fleet_type || "").trim() === fleetTypeFilter
-      );
-    }
-
-    if (truckTypeFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          String(item.fleet_truck_type || "").trim() === truckTypeFilter
-      );
-    }
-
-    if (currentProcessFilter !== "all") {
-      list = list.filter(
-        (item) =>
-          getProcessStatus(item).value === currentProcessFilter
-      );
-    }
-
-    if (dcTypeFilter !== "all") {
-      list = list.filter((item) => {
-        const itemDCType = String(item.dc_type || "").trim().toUpperCase();
-        return itemDCType === dcTypeFilter.trim().toUpperCase();
-      });
-    }
-
-    if (dcFilter !== "all") {
-      list = list.filter((item) => {
-        const itemDCCode = String(item.dc_code || "").trim().toUpperCase();
-        return itemDCCode === dcFilter.trim().toUpperCase();
-      });
-    }
-
-    const keyword = searchText.trim().toLowerCase();
-
-    if (keyword) {
-      list = list.filter((item) => {
-        const licenseText = getLicenseText(item.license_replace);
-
-        return [
-          item.running_doc,
-          item.running_doc_vehicle_no,
-          item.vehicle_license,
-          item.dc_type,
-          item.dc_code,
-          item.fleet_type,
-          item.fleet_truck_type,
-          item.request_by,
-          item.remark,
-          licenseText,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword);
-      });
-    }
-
-    const vehicleKeyword = vehicleSearchText.trim().toLowerCase();
-
-    if (vehicleKeyword) {
-      const emptyKeywords = new Set([
-        "ว่าง",
-        "ข้อมูลว่าง",
-        "ไม่มีข้อมูล",
-        "null",
-        "ไม่มีข้อมูล ❌",
-      ]);
-
-      list = list.filter((item) => {
-        const vehicleValues = getVehicleValues(item);
-
-        if (emptyKeywords.has(vehicleKeyword)) {
-          return vehicleValues.some(
-            (value) =>
-              value === null ||
-              value === undefined ||
-              String(value).trim() === ""
-          );
-        }
-
-        return vehicleValues
-          .filter((value): value is string => Boolean(value?.trim()))
-          .join(" ")
-          .toLowerCase()
-          .includes(vehicleKeyword);
-      });
-    }
-
-    if (hasRequestDateRange) {
-      const startDateKey = formatDateToKey(requestDateRange[0].startDate);
-      const endDateKey = formatDateToKey(requestDateRange[0].endDate);
-
-      list = list.filter((item) => {
-        const itemRequestDateKey = getRequestDateKey(item);
-        return itemRequestDateKey >= startDateKey && itemRequestDateKey <= endDateKey;
-      });
-    }
-
-    return list;
-  }, [
-    sidebarFilteredRequests,
-    statusFilter,
-    fleetTypeFilter,
-    truckTypeFilter,
-    currentProcessFilter,
-    dcTypeFilter,
-    dcFilter,
-    searchText,
-    vehicleSearchText,
-    hasRequestDateRange,
-    requestDateRange,
-  ]);
-
-  const filteredVehicleCount = filteredRequests.length;
 
   const pageTitle = useMemo(() => {
     const dcSuffix =
@@ -1070,7 +632,7 @@ export default function TrackFleetPage() {
   ]);
 
   const groupedByRequestDate = useMemo(() => {
-    return filteredRequests.reduce<Record<string, RequestItem[]>>(
+    return requests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = normalizeDateKey(item.request_date || item.date);
 
@@ -1081,14 +643,20 @@ export default function TrackFleetPage() {
       },
       {}
     );
-  }, [filteredRequests]);
+  }, [requests]);
 
   const sortedDates = useMemo(() => {
     return Object.keys(groupedByRequestDate).sort((a, b) => {
       if (a === "ไม่ระบุวันที่") return 1;
       if (b === "ไม่ระบุวันที่") return -1;
 
-      return new Date(b).getTime() - new Date(a).getTime();
+      const timeA = new Date(a).getTime();
+      const timeB = new Date(b).getTime();
+
+      if (Number.isNaN(timeA)) return 1;
+      if (Number.isNaN(timeB)) return -1;
+
+      return timeB - timeA;
     });
   }, [groupedByRequestDate]);
 
@@ -1222,8 +790,8 @@ export default function TrackFleetPage() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: statusCounts.all.qty,
-                itemCount: statusCounts.all.items,
+                count: summary.all.qty,
+                itemCount: summary.all.items,
                 sub: "รวมจำนวนรถทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
@@ -1239,8 +807,8 @@ export default function TrackFleetPage() {
               {
                 key: "progress",
                 label: "คำขอรอพิจารณา (TCAS)",
-                count: statusCounts.progress.qty,
-                itemCount: statusCounts.progress.items,
+                count: summary.progress.qty,
+                itemCount: summary.progress.items,
                 sub: "จำนวนรถที่รอการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
@@ -1256,8 +824,8 @@ export default function TrackFleetPage() {
               {
                 key: "reject_by_center",
                 label: "ไม่ผ่านการประเมิน (TCAS)",
-                count: statusCounts.rejected.qty,
-                itemCount: statusCounts.rejected.items,
+                count: summary.rejected.qty,
+                itemCount: summary.rejected.items,
                 sub: "จำนวนรถที่ไม่ผ่านการประเมิน",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
@@ -1273,8 +841,8 @@ export default function TrackFleetPage() {
               {
                 key: "approved",
                 label: "เสร็จสิ้นกระบวนการ ",
-                count: statusCounts.approved.qty,
-                itemCount: statusCounts.approved.items,
+                count: summary.approved.qty,
+                itemCount: summary.approved.items,
                 sub: "จำนวนรถที่เสร็จสิ้นกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
@@ -1313,6 +881,7 @@ export default function TrackFleetPage() {
                   onClick={() => {
                     setStatusFilter(key);
                     setCurrentProcessFilter("all");
+                    setCurrentPage(1);
                   }}
                   className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
                     }`}
@@ -1395,7 +964,7 @@ export default function TrackFleetPage() {
             </div>
 
             <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
-              พบ {formatNumber(filteredVehicleCount)} คัน
+              พบ {formatNumber(pagination.total_vehicles)} คัน
             </span>
           </div>
 
@@ -1413,7 +982,10 @@ export default function TrackFleetPage() {
                 <input
                   type="text"
                   value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
+                  onChange={(e) => {
+                    setSearchText(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..."
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 />
@@ -1421,7 +993,10 @@ export default function TrackFleetPage() {
                 {searchText && (
                   <button
                     type="button"
-                    onClick={() => setSearchText("")}
+                    onClick={() => {
+                      setSearchText("");
+                      setCurrentPage(1);
+                    }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"
                   >
                     <X size={13} />
@@ -1443,7 +1018,10 @@ export default function TrackFleetPage() {
                 <input
                   type="text"
                   value={vehicleSearchText}
-                  onChange={(e) => setVehicleSearchText(e.target.value)}
+                  onChange={(e) => {
+                    setVehicleSearchText(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   placeholder="เลขตัวถัง, รุ่น, ยี่ห้อ, เครื่อง, ทะเบียน หรือ ว่าง"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 />
@@ -1451,7 +1029,10 @@ export default function TrackFleetPage() {
                 {vehicleSearchText && (
                   <button
                     type="button"
-                    onClick={() => setVehicleSearchText("")}
+                    onClick={() => {
+                      setVehicleSearchText("");
+                      setCurrentPage(1);
+                    }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"
                     aria-label="ล้างการค้นหาข้อมูลรถ"
                   >
@@ -1473,11 +1054,14 @@ export default function TrackFleetPage() {
                 />
                 <select
                   value={fleetTypeFilter}
-                  onChange={(e) => setFleetTypeFilter(e.target.value)}
+                  onChange={(e) => {
+                    setFleetTypeFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 >
                   <option value="all">ทุกประเภทคำขอ</option>
-                  {fleetTypeOptions.map((fleetType) => (
+                  {filterOptions.fleet_types.map((fleetType) => (
                     <option key={fleetType} value={fleetType}>
                       {fleetType}
                     </option>
@@ -1503,14 +1087,15 @@ export default function TrackFleetPage() {
                   type="text"
                   list="truck-type-filter-options"
                   value={truckTypeFilter === "all" ? "" : truckTypeFilter}
-                  onChange={(e) =>
-                    setTruckTypeFilter(e.target.value || "all")
-                  }
+                  onChange={(e) => {
+                    setTruckTypeFilter(e.target.value || "all");
+                    setCurrentPage(1);
+                  }}
                   placeholder="พิมพ์ค้นหาประเภทรถ"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 />
                 <datalist id="truck-type-filter-options">
-                  {truckTypeOptions.map((truckType) => (
+                  {filterOptions.truck_types.map((truckType) => (
                     <option key={truckType} value={truckType} />
                   ))}
                 </datalist>
@@ -1532,11 +1117,12 @@ export default function TrackFleetPage() {
                   onChange={(e) => {
                     setDcTypeFilter(e.target.value);
                     setDcFilter("all");
+                    setCurrentPage(1);
                   }}
                   className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 >
                   <option value="all">ทุก DC Type</option>
-                  {dcTypeOptions.map((type) => (
+                  {filterOptions.dc_types.map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
@@ -1561,12 +1147,15 @@ export default function TrackFleetPage() {
                   type="text"
                   list="dc-filter-options"
                   value={dcFilter === "all" ? "" : dcFilter}
-                  onChange={(e) => setDcFilter(e.target.value || "all")}
+                  onChange={(e) => {
+                    setDcFilter(e.target.value || "all");
+                    setCurrentPage(1);
+                  }}
                   placeholder="พิมพ์ค้นหา DC"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                 />
                 <datalist id="dc-filter-options">
-                  {dcOptions.map((dc) => (
+                  {filterOptions.dc_codes.map((dc) => (
                     <option key={dc} value={dc} />
                   ))}
                 </datalist>
@@ -1600,6 +1189,7 @@ export default function TrackFleetPage() {
                     type="button"
                     onClick={() => {
                       setHasRequestDateRange(false);
+                      setCurrentPage(1);
                       setRequestDateRange([
                         {
                           startDate: new Date(),
@@ -1639,6 +1229,7 @@ export default function TrackFleetPage() {
                         type="button"
                         onClick={() => {
                           setHasRequestDateRange(false);
+                          setCurrentPage(1);
                           setRequestDateRange([
                             {
                               startDate: new Date(),
@@ -1675,6 +1266,7 @@ export default function TrackFleetPage() {
 
                       if (selection.startDate && selection.endDate) {
                         setHasRequestDateRange(true);
+                        setCurrentPage(1);
                       }
                     }}
                     showDateDisplay={false}
@@ -1714,6 +1306,7 @@ export default function TrackFleetPage() {
                   setStatusFilter("all");
                   setCurrentProcessFilter("all");
                   setHasRequestDateRange(false);
+                  setCurrentPage(1);
                   setRequestDateRange([
                     {
                       startDate: new Date(),
@@ -1740,7 +1333,7 @@ export default function TrackFleetPage() {
             <div>
               <h2 className="text-sm font-black text-slate-800">{pageTitle}</h2>
               <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-                แสดง {filteredRequests.length} จากทั้งหมด {sidebarFilteredRequests.length} รายการ
+                แสดง {requests.length} จากทั้งหมด {pagination.total_vehicles} รายการ
               </p>
             </div>
 
@@ -1795,7 +1388,7 @@ export default function TrackFleetPage() {
                         </p>
                       </td>
                     </tr>
-                  ) : filteredRequests.length === 0 ? (
+                  ) : requests.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="py-12 text-center">
                         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
@@ -1831,8 +1424,10 @@ export default function TrackFleetPage() {
                           const rowKey =
                             item.running_doc_vehicle_no ||
                             (item.id !== null && item.id !== undefined
-                              ? `${item.id}-${item.vehicle_no ?? index}`
-                              : item.running_doc || `${date}-${index}`);
+                              ? `${item.id}-${item.vehicle_no ?? index}-${index}`
+                              : item.running_doc
+                                ? `${item.running_doc}-${item.vehicle_no ?? index}-${index}`
+                                : `${date}-${index}`);
 
                           return (
                             <tr
@@ -1841,7 +1436,7 @@ export default function TrackFleetPage() {
                             >
                               <td className="sticky left-0 z-10 bg-white px-3 py-3 text-center group-hover:bg-blue-50/30">
                                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-black text-slate-500">
-                                  {index + 1}
+                                  {(currentPage - 1) * pageSize + index + 1}
                                 </span>
                               </td>
 
@@ -1920,7 +1515,7 @@ export default function TrackFleetPage() {
                                 )}
                               </td>
 
-                              <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700">
+                              <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700 text-center">
                                 {item.request_by || "-"}
                               </td>
 
@@ -1993,6 +1588,101 @@ export default function TrackFleetPage() {
               </table>
             </div>
           </div>
+
+          {pagination.total_vehicles > 0 && (
+            <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-xs font-semibold text-slate-500">
+                  แสดง{" "}
+                  <span className="font-black text-slate-800">
+                    {formatNumber((currentPage - 1) * pageSize + 1)}
+                  </span>{" "}
+                  ถึง{" "}
+                  <span className="font-black text-slate-800">
+                    {formatNumber(Math.min(currentPage * pageSize, pagination.total_vehicles))}
+                  </span>{" "}
+                  จากทั้งหมด{" "}
+                  <span className="font-black text-slate-800">
+                    {formatNumber(pagination.total_vehicles)}
+                  </span>{" "}
+                  คัน
+                </p>
+
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                  <span>แสดงหน้าละ:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="h-8 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white"
+                  >
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              {pagination.total_pages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    ‹ ก่อนหน้า
+                  </button>
+
+                  {Array.from({ length: pagination.total_pages }, (_, i) => i + 1)
+                    .filter(
+                      (page) =>
+                        page === 1 ||
+                        page === pagination.total_pages ||
+                        Math.abs(page - currentPage) <= 2
+                    )
+                    .reduce<(number | string)[]>((acc, page, idx, arr) => {
+                      if (idx > 0 && page - (arr[idx - 1] as number) > 1) {
+                        acc.push("...");
+                      }
+                      acc.push(page);
+                      return acc;
+                    }, [])
+                    .map((item, idx) =>
+                      typeof item === "number" ? (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setCurrentPage(item)}
+                          className={`h-8 min-w-[32px] rounded-xl px-2 text-xs font-black transition ${
+                            currentPage === item
+                              ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      ) : (
+                        <span key={`ellipsis-${idx}`} className="px-1 text-xs font-bold text-slate-400">
+                          ...
+                        </span>
+                      )
+                    )}
+
+                  <button
+                    type="button"
+                    disabled={currentPage === pagination.total_pages}
+                    onClick={() => setCurrentPage((p) => Math.min(pagination.total_pages, p + 1))}
+                    className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    ถัดไป ›
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
       </main>
@@ -2009,22 +1699,27 @@ export default function TrackFleetPage() {
 }
 
 function getLicenseText(licenseReplace: string[] | string | null | undefined) {
+  if (!licenseReplace) return "-";
   if (Array.isArray(licenseReplace)) {
     return licenseReplace.length > 0 ? licenseReplace.join(", ") : "-";
   }
 
   if (typeof licenseReplace === "string") {
-    try {
-      const parsed = JSON.parse(licenseReplace);
+    const trimmed = licenseReplace.trim();
+    if (!trimmed) return "-";
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
 
-      if (Array.isArray(parsed)) {
-        return parsed.length > 0 ? parsed.join(", ") : "-";
+        if (Array.isArray(parsed)) {
+          return parsed.length > 0 ? parsed.join(", ") : "-";
+        }
+      } catch {
+        // ใช้ข้อความเดิม
       }
-    } catch {
-      // ใช้ข้อความเดิม
     }
 
-    return licenseReplace.trim() || "-";
+    return trimmed;
   }
 
   return "-";
