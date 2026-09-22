@@ -245,6 +245,8 @@ export default function AddFleetPage() {
   const [openCreateModal, setOpenCreateModal] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+const [pageSize, setPageSize] = useState(25);
 
   // Filter ขั้นตอนปัจจุบันของรถใน TCAS
   // value จะผูกกับ current_process + current_step + total_steps
@@ -1641,8 +1643,11 @@ export default function AddFleetPage() {
       }
     >();
 
+    const optionStatus =
+      statusFilter === "rejected" ? "rejected" : "process";
+
     warehouseFilteredProcessRows
-      .filter((item) => normalizeStatus(item.status) === "process")
+      .filter((item) => normalizeStatus(item.status) === optionStatus)
       .forEach((item) => {
         const processText =
           String(item.current_process || "").trim() || "ยังไม่เริ่ม";
@@ -1671,7 +1676,7 @@ export default function AddFleetPage() {
 
       return a.label.localeCompare(b.label, "th");
     });
-  }, [warehouseFilteredProcessRows]);
+  }, [warehouseFilteredProcessRows, statusFilter]);
 
   const truckTypeOptions = useMemo(() => {
     const uniqueTruckTypes = new Set<string>();
@@ -1717,9 +1722,12 @@ export default function AddFleetPage() {
 
       const itemCurrentProcessValue = `${itemCurrentStep}|${itemTotalSteps}|${itemProcessText}`;
 
-      // ใช้ Filter ขั้นตอนเฉพาะตอนดูรายการ TCAS
+      // ใช้ Filter ขั้นตอนตอนดูรายการกำลังดำเนินการหรือไม่อนุมัติ
+      const canFilterCurrentProcess =
+        statusFilter === "process" || statusFilter === "rejected";
+
       const matchCurrentProcess =
-        statusFilter !== "process" ||
+        !canFilterCurrentProcess ||
         currentProcessFilter === "all" ||
         itemCurrentProcessValue === currentProcessFilter;
 
@@ -1858,8 +1866,22 @@ export default function AddFleetPage() {
     });
   }, [filteredRequests, sortConfig]);
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(sortedRequests.length / pageSize),
+  );
+  
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+  
+    return sortedRequests.slice(
+      startIndex,
+      startIndex + pageSize,
+    );
+  }, [sortedRequests, currentPage, pageSize]);
+
   const groupedFilteredByRequestDate = useMemo(() => {
-    return sortedRequests.reduce<Record<string, RequestItem[]>>(
+    return paginatedRequests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = getRequestDateKey(item);
 
@@ -1873,7 +1895,7 @@ export default function AddFleetPage() {
       },
       {},
     );
-  }, [sortedRequests]);
+  }, [paginatedRequests]);
 
   const sortedFilteredDates = useMemo(() => {
     return Object.keys(groupedFilteredByRequestDate).sort((a, b) => {
@@ -2331,9 +2353,8 @@ export default function AddFleetPage() {
                   type="button"
                   onClick={() => {
                     setStatusFilter(key);
-                    if (key !== "process") {
-                      setCurrentProcessFilter("all");
-                    }
+                    setCurrentProcessFilter("all");
+                    setCurrentPage(1);
                   }}
                   className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
                     }`}
@@ -2593,7 +2614,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* CURRENT PROCESS / TCAS STEP */}
-              {statusFilter === "process" && (
+              {(statusFilter === "process" || statusFilter === "rejected") && (
                 <div className="lg:col-span-3">
                   <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     สถานะ / ขั้นตอน
@@ -3666,6 +3687,62 @@ export default function AddFleetPage() {
                   )}
                 </tbody>
               </table>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
+  <div className="flex items-center gap-2">
+    <span className="text-xs font-semibold text-slate-500">
+      แสดง
+    </span>
+
+    <select
+      value={pageSize}
+      onChange={(event) => {
+        setPageSize(Number(event.target.value));
+        setCurrentPage(1);
+      }}
+      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold"
+    >
+      <option value={20}>20 รายการ</option>
+      <option value={25}>25 รายการ</option>
+      <option value={50}>50 รายการ</option>
+      <option value={100}>100 รายการ</option>
+    </select>
+
+    <span className="text-xs text-slate-400">
+      จากทั้งหมด {sortedRequests.length.toLocaleString("th-TH")} รายการ
+    </span>
+  </div>
+
+  <div className="flex items-center gap-2">
+    <button
+      type="button"
+      disabled={currentPage === 1}
+      onClick={() =>
+        setCurrentPage((page) => Math.max(page - 1, 1))
+      }
+      className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
+    >
+      ก่อนหน้า
+    </button>
+
+    <span className="min-w-[90px] text-center text-xs font-bold text-slate-600">
+      หน้า {currentPage} / {totalPages}
+    </span>
+
+    <button
+      type="button"
+      disabled={currentPage >= totalPages}
+      onClick={() =>
+        setCurrentPage((page) =>
+          Math.min(page + 1, totalPages),
+        )
+      }
+      className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+    >
+      ถัดไป
+    </button>
+  </div>
+</div>
             </div>
           </div>
         </div>

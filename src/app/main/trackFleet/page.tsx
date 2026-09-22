@@ -117,8 +117,8 @@ const getProcessStatus = (item: RequestItem) => {
   const totalSteps = Number(item.total_steps || 8);
   const process = String(
     item.current_process ||
-      item.latest_process_name ||
-      "ยังไม่พบข้อมูลขั้นตอน"
+    item.latest_process_name ||
+    "ยังไม่พบข้อมูลขั้นตอน"
   ).trim();
   const isRejected =
     normalizeStatus(item.status) === "reject_by_center";
@@ -155,9 +155,9 @@ export default function TrackFleetPage() {
   const [openDetailModal, setOpenDetailModal] = useState(false);
 
   const [searchText, setSearchText] = useState("");
-  const [vehicleSearchText, setVehicleSearchText] = useState("");
+  const [vehicleSearchInput, setVehicleSearchInput] = useState("");
+  const [vehicleSearchItems, setVehicleSearchItems] = useState<string[]>([]);
   const [debouncedSearchText, setDebouncedSearchText] = useState("");
-  const [debouncedVehicleSearchText, setDebouncedVehicleSearchText] = useState("");
 
   const [fleetTypeFilter, setFleetTypeFilter] = useState("all");
   const [truckTypeFilter, setTruckTypeFilter] = useState("all");
@@ -223,13 +223,6 @@ export default function TrackFleetPage() {
     }, 250);
     return () => clearTimeout(handler);
   }, [searchText]);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedVehicleSearchText(vehicleSearchText);
-    }, 250);
-    return () => clearTimeout(handler);
-  }, [vehicleSearchText]);
 
   useEffect(() => {
     const savedUser =
@@ -335,8 +328,7 @@ export default function TrackFleetPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "192.168.158.210";
-      const apiBase = `http://${host}/api_new_truck/api/request_track_fleet.php`;
+      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php";
 
       const params = new URLSearchParams();
 
@@ -357,8 +349,12 @@ export default function TrackFleetPage() {
       if (currentProcessFilter !== "all") params.set("process", currentProcessFilter);
 
       if (debouncedSearchText.trim()) params.set("search", debouncedSearchText.trim());
-      if (debouncedVehicleSearchText.trim()) params.set("vehicle_search", debouncedVehicleSearchText.trim());
-
+      if (vehicleSearchItems.length > 0) {
+        params.set(
+          "vehicle_search",
+          vehicleSearchItems.join(",")
+        );
+      }
       if (hasRequestDateRange) {
         const startDateKey = formatDateToKey(requestDateRange[0].startDate);
         const endDateKey = formatDateToKey(requestDateRange[0].endDate);
@@ -369,17 +365,26 @@ export default function TrackFleetPage() {
       params.set("page", String(currentPage));
       params.set("limit", String(pageSize));
 
-      const response = await fetch(`${apiBase}?${params.toString()}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `${apiBase}?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        }
+      );
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`ไม่สามารถดึงข้อมูลได้ (${response.status})`);
+        const errorText = await response.text();
+
+        throw new Error(
+          `ไม่สามารถดึงข้อมูลได้ (${response.status}): ${errorText}`
+        );
       }
 
       const json = await response.json();
@@ -436,7 +441,7 @@ export default function TrackFleetPage() {
     truckTypeFilter,
     currentProcessFilter,
     debouncedSearchText,
-    debouncedVehicleSearchText,
+    vehicleSearchItems,
     hasRequestDateRange,
     requestDateRange,
     currentPage,
@@ -631,19 +636,47 @@ export default function TrackFleetPage() {
     selectedDcFromSidebar,
   ]);
 
+  // Backend กรองข้อมูลทั้งหมดก่อนแบ่งหน้าแล้ว
+  // ไม่กรองซ้ำใน Frontend เพราะ requests มีเฉพาะข้อมูลของหน้าปัจจุบัน
+  const filteredRequests = requests;
+
+  // แสดงตัวเลือกขั้นตอนให้สัมพันธ์กับ Card ที่เลือก
+  const visibleProcessOptions = useMemo(() => {
+    if (statusFilter === "all") {
+      return filterOptions.process_options;
+    }
+
+    return filterOptions.process_options.filter((option) => {
+      const step = Number(String(option.value).split("|")[0]);
+
+      if (statusFilter === "approved") {
+        return step === 8;
+      }
+
+      if (statusFilter === "reject_by_center") {
+        return step === 9 || step === 10;
+      }
+
+      return step >= 0 && step < 8;
+    });
+  }, [filterOptions.process_options, statusFilter]);
+
   const groupedByRequestDate = useMemo(() => {
-    return requests.reduce<Record<string, RequestItem[]>>(
+    return filteredRequests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = normalizeDateKey(item.request_date || item.date);
 
-        if (!groups[dateKey]) groups[dateKey] = [];
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+
         groups[dateKey].push(item);
 
         return groups;
       },
       {}
     );
-  }, [requests]);
+  }, [filteredRequests]);
 
   const sortedDates = useMemo(() => {
     return Object.keys(groupedByRequestDate).sort((a, b) => {
@@ -721,6 +754,61 @@ export default function TrackFleetPage() {
 
     setRequestDatePickerPosition({ top, left });
     setShowRequestDatePicker((prev) => !prev);
+  };
+
+  const addVehicleSearchItems = (value: string) => {
+    const newItems = value
+      .split(/[,;\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (newItems.length === 0) return;
+
+    setVehicleSearchItems((previousItems) => {
+      const combinedItems = [...previousItems, ...newItems];
+
+      return combinedItems.filter(
+        (item, index, array) =>
+          array.findIndex(
+            (currentItem) =>
+              currentItem.toLowerCase() === item.toLowerCase()
+          ) === index
+      );
+    });
+
+    setVehicleSearchInput("");
+    setCurrentPage(1);
+  };
+
+  const removeVehicleSearchItem = (itemToRemove: string) => {
+    setVehicleSearchItems((previousItems) =>
+      previousItems.filter(
+        (item) => item !== itemToRemove
+      )
+    );
+  
+    setCurrentPage(1);
+  };
+
+  const handleVehicleSearchKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      addVehicleSearchItems(vehicleSearchInput);
+    }
+
+    if (
+      event.key === "Backspace" &&
+      !vehicleSearchInput &&
+      vehicleSearchItems.length > 0
+    ) {
+      setVehicleSearchItems((previousItems) =>
+        previousItems.slice(0, -1)
+      );
+    
+      setCurrentPage(1);
+    }
   };
 
   return (
@@ -946,8 +1034,8 @@ export default function TrackFleetPage() {
           )}
         </div>
 
-        <div className="relative z-30 mb-4 overflow-visible rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 shadow-[0_10px_30px_rgba(15,23,42,0.07)] sm:px-5">
-          <div className="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="relative z-30 mb-4 w-full min-w-0 overflow-visible rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-50/90 to-white px-3 py-4 shadow-[0_10px_30px_rgba(15,23,42,0.07)] sm:px-4 lg:px-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
                 <SlidersHorizontal size={16} />
@@ -957,19 +1045,19 @@ export default function TrackFleetPage() {
                 <p className="text-sm font-black text-slate-800">
                   ค้นหาและตัวกรอง
                 </p>
-                <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400">
+                <p className="mt-0.5 text-[10px] font-medium leading-relaxed text-slate-400 sm:truncate">
                   เลือกเงื่อนไขเพื่อค้นหารายการติดตามกองรถออกใหม่/ทดแทน
                 </p>
               </div>
             </div>
 
-            <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
+            <span className="w-fit shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
               พบ {formatNumber(pagination.total_vehicles)} คัน
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-10">
-            <div className="sm:col-span-2">
+          <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12">
+            <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
@@ -1005,44 +1093,76 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div className="sm:col-span-2">
+            <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                ค้นหาข้อมูลรถ
+                ค้นหาข้อมูลรถหลายรายการ
               </label>
 
-              <div className="relative">
-                <Truck
-                  size={14}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
-                />
+              <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition hover:border-blue-200 focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100/70">
+                <Truck size={14} className="shrink-0 text-blue-400" />
+
+                {vehicleSearchItems.map((item) => (
+                  <span
+                    key={item}
+                    className="flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700"
+                  >
+                    {item}
+
+                    <button
+                      type="button"
+                      onClick={() => removeVehicleSearchItem(item)}
+                      className="text-blue-400 transition hover:text-rose-500"
+                      aria-label={`ลบ ${item}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+
                 <input
                   type="text"
-                  value={vehicleSearchText}
-                  onChange={(e) => {
-                    setVehicleSearchText(e.target.value);
-                    setCurrentPage(1);
+                  value={vehicleSearchInput}
+                  onChange={(event) => setVehicleSearchInput(event.target.value)}
+                  onKeyDown={handleVehicleSearchKeyDown}
+                  onBlur={() => addVehicleSearchItems(vehicleSearchInput)}
+                  onPaste={(event) => {
+                    const pastedText = event.clipboardData.getData("text");
+
+                    if (/[,;\n]/.test(pastedText)) {
+                      event.preventDefault();
+                      addVehicleSearchItems(pastedText);
+                    }
                   }}
-                  placeholder="เลขตัวถัง, รุ่น, ยี่ห้อ, เครื่อง, ทะเบียน หรือ ว่าง"
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  placeholder={
+                    vehicleSearchItems.length === 0
+                      ? "พิมพ์ทะเบียน รหัสรถ รุ่น หรือยี่ห้อ"
+                      : "เพิ่มรายการ..."
+                  }
+                  className="min-w-[140px] flex-1 bg-transparent py-1 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-300 sm:min-w-[180px]"
                 />
 
-                {vehicleSearchText && (
+                {vehicleSearchItems.length > 0 && (
                   <button
                     type="button"
                     onClick={() => {
-                      setVehicleSearchText("");
+                      setVehicleSearchItems([]);
+                      setVehicleSearchInput("");
                       setCurrentPage(1);
                     }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"
-                    aria-label="ล้างการค้นหาข้อมูลรถ"
+                    className="shrink-0 text-slate-300 transition hover:text-rose-500"
+                    aria-label="ล้างข้อมูลรถทั้งหมด"
                   >
-                    <X size={13} />
+                    <X size={14} />
                   </button>
                 )}
               </div>
+
+              <p className="mt-1 text-[10px] text-slate-400">
+                กด Enter หรือลูกน้ำเพื่อเพิ่มรายการ
+              </p>
             </div>
 
-            <div>
+            <div className="min-w-0 lg:col-span-3 xl:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทคำขอ
               </label>
@@ -1073,7 +1193,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0 lg:col-span-3 xl:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทรถ
               </label>
@@ -1102,7 +1222,7 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0 lg:col-span-3 xl:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
@@ -1133,7 +1253,7 @@ export default function TrackFleetPage() {
                 </span>
               </div>
             </div>
-            <div>
+            <div className="min-w-0 lg:col-span-3 xl:col-span-2">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
@@ -1162,7 +1282,41 @@ export default function TrackFleetPage() {
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                ขั้นตอนปัจจุบัน
+              </label>
+
+              <div className="relative">
+                <Filter
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                />
+
+                <select
+                  value={currentProcessFilter}
+                  onChange={(event) => {
+                    setCurrentProcessFilter(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700"
+                >
+                  <option value="all">ทุกขั้นตอน</option>
+
+                  {visibleProcessOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  ▼
+                </span>
+              </div>
+            </div>
+
+            <div className="min-w-0 lg:col-span-4 xl:col-span-3">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
@@ -1208,7 +1362,7 @@ export default function TrackFleetPage() {
               {showRequestDatePicker && (
                 <div
                   ref={requestDatePickerRef}
-                  className="fixed z-[99999] w-[calc(100vw-2rem)] max-w-[330px] overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
+                  className="fixed z-[99999] w-[calc(100vw-2rem)] max-w-[330px] overflow-x-auto overflow-y-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)] [&_.rdrCalendarWrapper]:w-full [&_.rdrMonth]:w-full [&_.rdrMonth]:px-2 sm:[&_.rdrMonth]:px-3"
                   style={{
                     top: requestDatePickerPosition.top,
                     left: requestDatePickerPosition.left,
@@ -1293,12 +1447,13 @@ export default function TrackFleetPage() {
               )}
             </div>
 
-            <div className="flex items-end">
+            <div className="flex min-w-0 items-end md:col-span-2 lg:col-span-2 xl:col-span-1">
               <button
                 type="button"
                 onClick={() => {
                   setSearchText("");
-                  setVehicleSearchText("");
+                  setVehicleSearchInput("");
+                  setVehicleSearchItems([]);
                   setFleetTypeFilter("all");
                   setTruckTypeFilter("all");
                   setDcTypeFilter("all");
@@ -1322,7 +1477,7 @@ export default function TrackFleetPage() {
                   size={13}
                   className="transition group-hover:-rotate-6"
                 />
-                <span className="hidden xl:inline">ล้าง</span>
+                <span>ล้าง</span>
               </button>
             </div>
           </div>
@@ -1388,7 +1543,7 @@ export default function TrackFleetPage() {
                         </p>
                       </td>
                     </tr>
-                  ) : requests.length === 0 ? (
+                  ) : filteredRequests.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="py-12 text-center">
                         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
@@ -1656,11 +1811,10 @@ export default function TrackFleetPage() {
                           key={item}
                           type="button"
                           onClick={() => setCurrentPage(item)}
-                          className={`h-8 min-w-[32px] rounded-xl px-2 text-xs font-black transition ${
-                            currentPage === item
-                              ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
-                              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                          }`}
+                          className={`h-8 min-w-[32px] rounded-xl px-2 text-xs font-black transition ${currentPage === item
+                            ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                            : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
                         >
                           {item}
                         </button>
@@ -1696,31 +1850,4 @@ export default function TrackFleetPage() {
 
     </div>
   );
-}
-
-function getLicenseText(licenseReplace: string[] | string | null | undefined) {
-  if (!licenseReplace) return "-";
-  if (Array.isArray(licenseReplace)) {
-    return licenseReplace.length > 0 ? licenseReplace.join(", ") : "-";
-  }
-
-  if (typeof licenseReplace === "string") {
-    const trimmed = licenseReplace.trim();
-    if (!trimmed) return "-";
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-
-        if (Array.isArray(parsed)) {
-          return parsed.length > 0 ? parsed.join(", ") : "-";
-        }
-      } catch {
-        // ใช้ข้อความเดิม
-      }
-    }
-
-    return trimmed;
-  }
-
-  return "-";
 }

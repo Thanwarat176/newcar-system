@@ -120,6 +120,17 @@ export default function NewVehicleRequestModal({
 
     const warehouseDropdownRef = useRef<HTMLDivElement | null>(null);
 
+    // ซ่อนข้อความแจ้งเตือนอัตโนมัติหลังแสดงครบ 5 วินาที
+    useEffect(() => {
+        if (!error) return;
+
+        const timer = window.setTimeout(() => {
+            setError("");
+        }, 5000);
+
+        return () => window.clearTimeout(timer);
+    }, [error]);
+
     const [licenseDuplicateStatus, setLicenseDuplicateStatus] = useState<
         Record<number, boolean | null>
     >({});
@@ -949,6 +960,24 @@ export default function NewVehicleRequestModal({
         return requiresReplacementLicense(formData.fleet_type);
     }, [formData.fleet_type]);
 
+    // ปิดปุ่มบันทึกจนกว่าทะเบียนทุกคันจะตรวจสอบแล้วและใช้งานได้
+    const isLicenseSubmitBlocked = useMemo(() => {
+        if (!needLicenseList) return false;
+
+        const qty = Number(formData.qty || 0);
+
+        if (qty <= 0 || licenseReplaceList.length < qty) return true;
+
+        return Array.from({ length: qty }).some(
+            (_, index) => licenseDuplicateStatus[index] !== false
+        );
+    }, [
+        needLicenseList,
+        formData.qty,
+        licenseReplaceList.length,
+        licenseDuplicateStatus,
+    ]);
+
     useEffect(() => {
         const qtyNumber = Number(formData.qty || 0);
 
@@ -1375,6 +1404,12 @@ export default function NewVehicleRequestModal({
 
         const requiredLicenses = licenseReplaceList.slice(0, qty);
 
+        // ระหว่างกำลังตรวจสอบทะเบียน ห้ามส่งข้อมูลไปยัง API บันทึก
+        if (checkingLicenseIndex !== null) {
+            setError("ระบบกำลังตรวจสอบทะเบียน กรุณารอให้ตรวจสอบเสร็จก่อนบันทึก");
+            return false;
+        }
+
         const hasEmptyLicense = requiredLicenses.some((license) => !license.trim());
 
         if (hasEmptyLicense || requiredLicenses.length < qty) {
@@ -1570,7 +1605,40 @@ export default function NewVehicleRequestModal({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 text-black">
+        <>
+            {error && (
+                <div
+                    className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center px-4"
+                    role="alert"
+                    aria-live="assertive"
+                >
+                    <div className="flex w-full max-w-md items-start rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-2xl sm:items-center">
+                        <svg
+                            className="me-2 mt-0.5 h-5 w-5 shrink-0 sm:mt-0"
+                            aria-hidden="true"
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="M10 11h2v5m-2 0h4m-2.592-8.5h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                            />
+                        </svg>
+                        <p>
+                            <span className="me-1 font-bold">แจ้งเตือน!</span>
+                            {error}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 text-black">
             <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
                 <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
                     <div>
@@ -1593,12 +1661,6 @@ export default function NewVehicleRequestModal({
 
                 <form onSubmit={handleSubmit}>
                     <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
-                        {error && (
-                            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
-                                {error}
-                            </div>
-                        )}
-
                         <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs md:grid-cols-4">
                             {canSelectWarehouse && (
                                 <div className="md:col-span-4" ref={warehouseDropdownRef}>
@@ -2225,14 +2287,26 @@ export default function NewVehicleRequestModal({
 
                         <button
                             type="submit"
-                            disabled={saving}
+                            disabled={saving || isLicenseSubmitBlocked}
+                            title={
+                                isLicenseSubmitBlocked
+                                    ? "ทะเบียนต้องขึ้นสถานะใช้งานได้ครบทุกคันก่อนบันทึก"
+                                    : undefined
+                            }
                             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            {saving ? "กำลังบันทึก..." : "บันทึกคำขอ"}
+                            {saving
+                                ? "กำลังบันทึก..."
+                                : checkingLicenseIndex !== null
+                                    ? "กำลังตรวจสอบทะเบียน..."
+                                    : isLicenseSubmitBlocked
+                                        ? "รอตรวจสอบทะเบียน"
+                                        : "บันทึกคำขอ"}
                         </button>
                     </div>
                 </form>
             </div>
-        </div>
+            </div>
+        </>
     );
 }

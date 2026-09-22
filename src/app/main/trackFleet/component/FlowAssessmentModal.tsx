@@ -90,6 +90,7 @@ interface RequestVehicleDetail {
   status?: string | null;
   warehouse_info?: VehicleWarehouseInfoData | null;
   warehouse_plan_date?: string | null;
+  remark?: string | null;
   car_model?: string | null;
   car_brand?: string | null;
   car_chassis?: string | null;
@@ -147,6 +148,7 @@ interface CarItem {
   date_number_thaiolix?: string | null;
 
   warehouse_plan_date?: string | null;
+  remark?: string | null;
   car_model?: string | null;
   car_brand?: string | null;
   car_chassis?: string | null;
@@ -227,6 +229,7 @@ interface VehicleWarehouseInfoData {
   request_id?: string | number;
   vehicle_no?: string | number;
   warehouse_plan_date?: string | null;
+  remark?: string | null;
   car_model?: string | null;
   car_brand?: string | null;
   car_chassis?: string | null;
@@ -295,6 +298,7 @@ interface VehicleExtraForm {
   number_thaiolix: string;
   date_number_thaiolix: string;
   warehouse_plan_date: string;
+  remark: string;
   car_model: string;
   car_brand: string;
   car_chassis: string;
@@ -319,6 +323,7 @@ const emptyVehicleExtraForm: VehicleExtraForm = {
   number_thaiolix: "",
   date_number_thaiolix: "",
   warehouse_plan_date: "",
+  remark: "",
   car_model: "",
   car_brand: "",
   car_chassis: "",
@@ -468,6 +473,11 @@ function normalizeApiData(result: ApiResponse): FlowResponseData | null {
         warehouseInfo?.warehouse_plan_date ??
         detail?.warehouse_plan_date ??
         car.warehouse_plan_date ??
+        null,
+      remark:
+        warehouseInfo?.remark ??
+        detail?.remark ??
+        car.remark ??
         null,
       car_model:
         warehouseInfo?.car_model ?? detail?.car_model ?? car.car_model ?? null,
@@ -677,6 +687,7 @@ function toVehicleExtraForm(
     car_engine: info.car_engine || "",
     car_license: info.car_license || "",
     car_province: info.car_province || "",
+    remark: info.remark || "",
     number_fbp: info.number_fbp || info.number_feb || "",
     date_number_fbp: toDateInputValue(
       info.date_number_fbp || info.date_number_feb
@@ -848,7 +859,6 @@ function normalizeProcessName(value?: string | null) {
     .toLowerCase();
 }
 
-const FINANCE_APPROVAL_PROCESS = normalizeProcessName("รอไฟแนนซ์อนุมัติ");
 const CANCEL_DOCUMENT_PROCESS = normalizeProcessName("ยกเลิกหนังสือ");
 const EXPIRED_DOCUMENT_PROCESS = normalizeProcessName("หนังสือหมดอายุ");
 
@@ -1066,22 +1076,16 @@ export default function FlowAssessmentModal({
 
       const name =
         user?.name ||
-        user?.full_name ||
-        user?.FULL_NAME ||
-        user?.employee_name ||
-        user?.EMPLOYEE_NAME ||
         "";
 
-      const employeeId =
-        user?.employee_id ||
-        user?.EMPLOYEE_ID ||
-        user?.user_id ||
-        user?.USER_ID ||
-        user?.id ||
+      const surname =
+        user?.surname ||
         "";
 
-      if (name && employeeId) return `${name} (${employeeId})`;
-      return String(name || employeeId || "").trim();
+      return [name, surname]
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+        .join(" ");
     } catch {
       return "";
     }
@@ -1162,16 +1166,17 @@ export default function FlowAssessmentModal({
         action: "warehouse_info",
         request_id: String(requestId),
         vehicle_no: String(vehicleNo),
-      
+
         warehouse_plan_date:
           vehicleExtraForm.warehouse_plan_date || null,
+        remark: vehicleExtraForm.remark.trim(),
         car_model: vehicleExtraForm.car_model.trim(),
         car_brand: vehicleExtraForm.car_brand.trim(),
         car_chassis: vehicleExtraForm.car_chassis.trim(),
         car_engine: vehicleExtraForm.car_engine.trim(),
         car_license: vehicleExtraForm.car_license.trim(),
         car_province: vehicleExtraForm.car_province.trim(),
-      
+
         user,
       };
 
@@ -2234,29 +2239,6 @@ export default function FlowAssessmentModal({
                           ข้อมูลแผนเข้าคลังและรายละเอียดตัวรถ
                         </p>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={handleSaveWarehouseInfo}
-                        disabled={
-                          savingWarehouseInfo ||
-                          loading ||
-                          vehicleNo === null ||
-                          vehicleNo === undefined ||
-                          vehicleNo === ""
-                        }
-                        className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-black text-white shadow-md shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {savingWarehouseInfo ? (
-                          <LoaderCircle size={14} className="animate-spin" />
-                        ) : (
-                          <Save size={14} />
-                        )}
-
-                        {savingWarehouseInfo
-                          ? "กำลังบันทึก..."
-                          : "บันทึกรายละเอียดรถ"}
-                      </button>
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
@@ -2271,9 +2253,7 @@ export default function FlowAssessmentModal({
                               type="button"
                               onClick={(event) =>
                                 setOpenWarehouseDatePicker(
-                                  getCalendarPopoverPosition(
-                                    event.currentTarget
-                                  )
+                                  getCalendarPopoverPosition(event.currentTarget)
                                 )
                               }
                               disabled={savingWarehouseInfo}
@@ -2283,11 +2263,10 @@ export default function FlowAssessmentModal({
                                 size={14}
                                 className="shrink-0 text-blue-500"
                               />
+
                               <span className="truncate">
                                 {vehicleExtraForm.warehouse_plan_date
-                                  ? formatDate(
-                                    vehicleExtraForm.warehouse_plan_date
-                                  )
+                                  ? formatDate(vehicleExtraForm.warehouse_plan_date)
                                   : "เลือกวันที่จะเข้าคลัง"}
                               </span>
                             </button>
@@ -2325,7 +2304,57 @@ export default function FlowAssessmentModal({
                           )}
                         </div>
                       ))}
+
+                      {/* หมายเหตุ */}
+                      <div className="sm:col-span-2 xl:col-span-1 2xl:col-span-2">
+                        <label
+                          htmlFor={`vehicle-remark-${vehicleNo}`}
+                          className="mb-1.5 block text-[10px] font-black text-slate-500"
+                        >
+                          หมายเหตุ
+                        </label>
+
+                        <textarea
+                          id={`vehicle-remark-${vehicleNo}`}
+                          rows={3}
+                          value={vehicleExtraForm.remark || ""}
+                          onChange={(event) =>
+                            handleVehicleExtraChange("remark", event.target.value)
+                          }
+                          placeholder="กรอกหมายเหตุเพิ่มเติม"
+                          disabled={savingWarehouseInfo}
+                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                        />
+                      </div>
+
+                      {/* ปุ่มบันทึกด้านล่าง */}
+                      <div className="mt-4 flex justify-end border-t border-slate-200 pt-4">
+                        <button
+                          type="button"
+                          onClick={handleSaveWarehouseInfo}
+                          disabled={
+                            savingWarehouseInfo ||
+                            loading ||
+                            vehicleNo === null ||
+                            vehicleNo === undefined ||
+                            vehicleNo === ""
+                          }
+                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-xs font-black text-white shadow-md shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        >
+                          {savingWarehouseInfo ? (
+                            <LoaderCircle size={14} className="animate-spin" />
+                          ) : (
+                            <Save size={14} />
+                          )}
+
+                          {savingWarehouseInfo
+                            ? "กำลังบันทึก..."
+                            : "บันทึกรายละเอียดรถ"}
+                        </button>
+                      </div>
                     </div>
+
+
                   </section>
 
                   <section className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
@@ -2657,7 +2686,7 @@ export default function FlowAssessmentModal({
                               การดำเนินการหนังสือ
                             </p>
                             <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
-                              ปุ่มยกเลิกอยู่ด้านหน้าก่อนเริ่มดู Process
+                              เลือกยกเลิกหนังสือหรือกำหนดให้หนังสือหมดอายุได้ทันที
                             </p>
                           </div>
 
@@ -2677,33 +2706,56 @@ export default function FlowAssessmentModal({
                               <Ban size={15} />
                               ยกเลิกหนังสือแล้ว
                             </span>
-                          ) : vehicle.cancelDocumentFlow ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleSpecialProcessAction(
-                                  vehicle.cancelDocumentFlow,
-                                  "ยกเลิกหนังสือ"
-                                )
-                              }
-                              disabled={savingFlowId !== null}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 text-[11px] font-black text-white shadow-lg shadow-rose-600/25 transition hover:-translate-y-0.5 hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {savingFlowId ===
-                                String(vehicle.cancelDocumentFlow.id) ? (
-                                <LoaderCircle
-                                  size={14}
-                                  className="animate-spin"
-                                />
-                              ) : (
-                                <Ban size={15} />
-                              )}
-                              ยกเลิกหนังสือ
-                            </button>
                           ) : (
-                            <span className="text-[10px] font-bold text-slate-400">
-                              ไม่พบ Process ยกเลิกหนังสือ
-                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {vehicle.cancelDocumentFlow && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSpecialProcessAction(
+                                      vehicle.cancelDocumentFlow,
+                                      "ยกเลิกหนังสือ"
+                                    )
+                                  }
+                                  disabled={savingFlowId !== null}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 text-[11px] font-black text-white shadow-lg shadow-rose-600/25 transition hover:-translate-y-0.5 hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {savingFlowId === String(vehicle.cancelDocumentFlow.id) ? (
+                                    <LoaderCircle size={14} className="animate-spin" />
+                                  ) : (
+                                    <Ban size={15} />
+                                  )}
+                                  ยกเลิกหนังสือ
+                                </button>
+                              )}
+
+                              {vehicle.expiredDocumentFlow && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSpecialProcessAction(
+                                      vehicle.expiredDocumentFlow,
+                                      "หนังสือหมดอายุ"
+                                    )
+                                  }
+                                  disabled={savingFlowId !== null}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 text-[11px] font-black text-white shadow-lg shadow-amber-500/25 transition hover:-translate-y-0.5 hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {savingFlowId === String(vehicle.expiredDocumentFlow.id) ? (
+                                    <LoaderCircle size={14} className="animate-spin" />
+                                  ) : (
+                                    <FileWarning size={15} />
+                                  )}
+                                  หนังสือหมดอายุ
+                                </button>
+                              )}
+
+                              {!vehicle.cancelDocumentFlow && !vehicle.expiredDocumentFlow && (
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  ไม่พบ Process ดำเนินการหนังสือ
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
 
@@ -2825,10 +2877,6 @@ export default function FlowAssessmentModal({
                                 remainingToDueDate !== null &&
                                 remainingToDueDate < 0;
 
-                              const isFinanceApprovalProcess =
-                                normalizeProcessName(flow.process) ===
-                                FINANCE_APPROVAL_PROCESS;
-
                               const cancelDocumentFlow =
                                 vehicle.cancelDocumentFlow;
                               const expiredDocumentFlow =
@@ -2847,18 +2895,15 @@ export default function FlowAssessmentModal({
                               const hasDocumentFinalStatus =
                                 isDocumentCancelled || isDocumentExpired;
 
+                              // เมนูหนังสือหมดอายุถูกย้ายไปอยู่ข้างปุ่มยกเลิกหนังสือแล้ว
+                              const isFinanceApprovalProcess = false;
+                              const shouldShowExpiredAction = false;
+
                               const documentLockedMessage = isDocumentCancelled
                                 ? "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารถูกยกเลิก"
                                 : isDocumentExpired
                                   ? "ไม่สามารถแก้ไขได้แล้ว เนื่องจากเอกสารหมดอายุ"
                                   : "";
-
-                              const shouldShowExpiredAction =
-                                isFinanceApprovalProcess &&
-                                !hasCompleted &&
-                                hasTargetSla &&
-                                remainingToDueDate !== null &&
-                                remainingToDueDate <= 0;
 
                               // ล็อกเฉพาะวันที่ที่บันทึกและโหลดกลับมาจากฐานข้อมูลแล้ว
                               const isStartSaved = Boolean(
