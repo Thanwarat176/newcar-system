@@ -47,7 +47,7 @@ interface RequestItem {
   request_by: string;
   remark: string;
 
-  approved_qty?: number | string | null;
+  success_qty?: number | string | null;
   details?: RequestDetailItem[];
   latest_process_name?: string | null;
   latest_process_level?: string | number | null;
@@ -95,7 +95,7 @@ interface UserInfo {
   TEAM?: string;
 }
 
-type StatusFilter = "all" | "progress" | "reject_by_center" | "approved";
+type StatusFilter = "all" | "progress" | "reject_by_center" | "success";
 
 const normalizeStatus = (status?: string) => {
   const value = String(status || "").trim().toLowerCase();
@@ -176,7 +176,7 @@ export default function TrackFleetPage() {
     all: { qty: 0, items: 0 },
     progress: { qty: 0, items: 0 },
     rejected: { qty: 0, items: 0 },
-    approved: { qty: 0, items: 0 },
+    success: { qty: 0, items: 0 },
   });
 
   const [filterOptions, setFilterOptions] = useState<{
@@ -399,7 +399,7 @@ export default function TrackFleetPage() {
           all: json.summary?.all || { qty: 0, items: 0 },
           progress: json.summary?.progress || { qty: 0, items: 0 },
           rejected: json.summary?.reject_by_center || { qty: 0, items: 0 },
-          approved: json.summary?.approved || { qty: 0, items: 0 },
+          success: json.summary?.success || { qty: 0, items: 0 },
         });
         setFilterOptions({
           fleet_types: json.filters?.fleet_types || [],
@@ -628,7 +628,7 @@ export default function TrackFleetPage() {
       return `รายการไม่ผ่านการประเมิน (TCAS)${dcSuffix}`;
     }
 
-    if (statusFilter === "approved") {
+    if (statusFilter === "success") {
       return `รายการTCAS ${dcSuffix}`;
     }
 
@@ -653,7 +653,7 @@ export default function TrackFleetPage() {
     return filterOptions.process_options.filter((option) => {
       const step = Number(String(option.value).split("|")[0]);
 
-      if (statusFilter === "approved") {
+      if (statusFilter === "success") {
         return step === 8;
       }
 
@@ -956,10 +956,10 @@ export default function TrackFleetPage() {
                 shortLabel: "RJ",
               },
               {
-                key: "approved",
+                key: "success",
                 label: "เสร็จสิ้นกระบวนการ ",
-                count: summary.approved.qty,
-                itemCount: summary.approved.items,
+                count: summary.success.qty,
+                itemCount: summary.success.items,
                 sub: "จำนวนรถที่เสร็จสิ้นกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
