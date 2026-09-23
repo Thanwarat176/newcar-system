@@ -25,16 +25,16 @@ import {
 } from "lucide-react";
 import ProvinceDatalist from "../../component/thaiProvinces";
 
-const FLOW_API_URL =
+const FLOW_API_URL = 
   "http://192.168.158.210/api_new_truck/api/flow_data_get.php";
 
 const FLOW_INITIALIZE_API_URL =
   "http://192.168.158.210/api_new_truck/api/flow_data_initialize.php";
 
-const FLOW_UPDATE_API_URL =
+  const FLOW_UPDATE_API_URL =
   "http://192.168.158.210/api_new_truck/api/flow_data_update.php";
 
-const VEHICLE_WAREHOUSE_INFO_API_URL =
+const VEHICLE_WAREHOUSE_INFO_API_URL = 
   "http://192.168.158.210/api_new_truck/api/vehicle_warehouse_info.php";
 
 const MASTER_FILE_API_URL =
@@ -1500,9 +1500,16 @@ export default function FlowAssessmentModal({
       let result: UpdateFlowResponse = {};
 
       try {
-        result = await response.json();
-      } catch {
-        throw new Error("API ไม่ได้ส่งข้อมูล JSON กลับมา");
+        const text = await response.text();
+      
+        console.log("FLOW UPDATE RESPONSE:", text);
+      
+        result = JSON.parse(text);
+      
+      } catch (error) {
+        throw new Error(
+          "API RESPONSE ไม่ใช่ JSON: " + error
+        );
       }
 
       if (!response.ok || result.status !== "success") {
@@ -1590,9 +1597,21 @@ export default function FlowAssessmentModal({
       let result: UpdateFlowResponse = {};
 
       try {
-        result = await response.json();
-      } catch {
-        throw new Error("API ไม่ได้ส่งข้อมูล JSON กลับมา");
+        const responseText = await response.text();
+      
+        console.log("STATUS:", response.status);
+        console.log("CONTENT TYPE:", response.headers.get("content-type"));
+        console.log("BODY FROM PHP:", responseText);
+      
+        result = JSON.parse(responseText);
+      
+      } catch (error) {
+      
+        console.log("JSON ERROR:", error);
+      
+        throw new Error(
+          "PHP ส่งกลับมา: " + error
+        );
       }
 
       if (!response.ok || result.status !== "success") {
@@ -1937,8 +1956,47 @@ export default function FlowAssessmentModal({
           vehicle_no: flow.vehicle_no,
           license: flow.license,
           rows: [],
-          cancelDocumentFlow: null,
-          expiredDocumentFlow: null,
+        
+          // สร้างไว้ก่อน ให้ปุ่มขึ้นทันที
+          cancelDocumentFlow: {
+            id: `cancel_${vehicleKey}`,
+            request_id: flow.request_id,
+            process_id: "cancel_document",
+            vehicle_no: flow.vehicle_no,
+            license: flow.license,
+            str_date: null,
+            end_date: null,
+            sla: "1",
+            created_by: null,
+            created_at: null,
+            updated_by: null,
+            updated_at: null,
+            request_truck_detail_id: null,
+            process: "ยกเลิกหนังสือ",
+            detail: "ยกเลิกหนังสือ",
+            process_level: "99",
+            target_sla: "1",
+          },
+        
+          expiredDocumentFlow: {
+            id: `expired_${vehicleKey}`,
+            request_id: flow.request_id,
+            process_id: "expired_document",
+            vehicle_no: flow.vehicle_no,
+            license: flow.license,
+            str_date: null,
+            end_date: null,
+            sla: "1",
+            created_by: null,
+            created_at: null,
+            updated_by: null,
+            updated_at: null,
+            request_truck_detail_id: null,
+            process: "หนังสือหมดอายุ",
+            detail: "หนังสือหมดอายุ",
+            process_level: "100",
+            target_sla: "1",
+          },
         });
       }
 

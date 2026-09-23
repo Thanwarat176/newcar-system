@@ -6,6 +6,9 @@ import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CalendarDays,
   Eraser,
   Filter,
@@ -167,6 +170,7 @@ export default function TrackFleetPage() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
 
   const [summary, setSummary] = useState({
     all: { qty: 0, items: 0 },
@@ -662,7 +666,7 @@ export default function TrackFleetPage() {
   }, [filterOptions.process_options, statusFilter]);
 
   const groupedByRequestDate = useMemo(() => {
-    return filteredRequests.reduce<Record<string, RequestItem[]>>(
+    const groups = filteredRequests.reduce<Record<string, RequestItem[]>>(
       (groups, item) => {
         const dateKey = normalizeDateKey(item.request_date || item.date);
 
@@ -676,7 +680,32 @@ export default function TrackFleetPage() {
       },
       {}
     );
-  }, [filteredRequests]);
+
+    if (documentSort) {
+      const collator = new Intl.Collator("th", {
+        numeric: true,
+        sensitivity: "base",
+      });
+
+      Object.values(groups).forEach((items) => {
+        items.sort((a, b) => {
+          const documentA = String(
+            a.running_doc_vehicle_no ||
+            `${a.running_doc}_${a.vehicle_no ?? ""}`
+          );
+          const documentB = String(
+            b.running_doc_vehicle_no ||
+            `${b.running_doc}_${b.vehicle_no ?? ""}`
+          );
+          const result = collator.compare(documentA, documentB);
+
+          return documentSort === "asc" ? result : -result;
+        });
+      });
+    }
+
+    return groups;
+  }, [filteredRequests, documentSort]);
 
   const sortedDates = useMemo(() => {
     return Object.keys(groupedByRequestDate).sort((a, b) => {
@@ -1527,7 +1556,33 @@ export default function TrackFleetPage() {
                           } ${index === 7 ? "text-center" : ""} ${index === 9 ? "text-right" : ""
                           }`}
                       >
-                        {col}
+                        {index === 1 ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDocumentSort((current) =>
+                                current === "asc" ? "desc" : "asc"
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40"
+                            title={
+                              documentSort === "asc"
+                                ? "เรียงเลขที่เอกสารจากหลังไปหน้า"
+                                : "เรียงเลขที่เอกสารจากหน้าไปหลัง"
+                            }
+                          >
+                            <span>{col}</span>
+                            {documentSort === "asc" ? (
+                              <ArrowUp size={13} />
+                            ) : documentSort === "desc" ? (
+                              <ArrowDown size={13} />
+                            ) : (
+                              <ArrowUpDown size={13} className="opacity-70" />
+                            )}
+                          </button>
+                        ) : (
+                          col
+                        )}
                       </th>
                     ))}
                   </tr>
