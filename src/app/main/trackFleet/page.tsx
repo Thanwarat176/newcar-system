@@ -95,22 +95,10 @@ interface UserInfo {
   TEAM?: string;
 }
 
-type StatusFilter = "all" | "progress" | "reject_by_center" | "success";
+type StatusFilter = "all" | "progress" | "cancel" | "success";
 
 const normalizeStatus = (status?: string) => {
-  const value = String(status || "").trim().toLowerCase();
-
-  if (
-    value === "progress" ||
-    value === "confirm_request" ||
-    value === "confirm request" ||
-    value === "in_progress" ||
-    value === "คำขอรอพิจารณา (tcas)"
-  ) {
-    return "progress";
-  }
-
-  return value;
+  return String(status || "").trim().toLowerCase();
 };
 
 const getProcessStatus = (item: RequestItem) => {
@@ -123,8 +111,7 @@ const getProcessStatus = (item: RequestItem) => {
     item.latest_process_name ||
     "ยังไม่พบข้อมูลขั้นตอน"
   ).trim();
-  const isRejected =
-    normalizeStatus(item.status) === "reject_by_center";
+  const isRejected = normalizeStatus(item.status) === "cancel";
 
   return {
     value: `${step}|${process}`,
@@ -175,7 +162,7 @@ export default function TrackFleetPage() {
   const [summary, setSummary] = useState({
     all: { qty: 0, items: 0 },
     progress: { qty: 0, items: 0 },
-    rejected: { qty: 0, items: 0 },
+    cancel: { qty: 0, items: 0 },
     success: { qty: 0, items: 0 },
   });
 
@@ -395,11 +382,17 @@ export default function TrackFleetPage() {
 
       if (json.status === "success") {
         setRequests(json.data || []);
+        const progressSummary = json.summary?.progress || { qty: 0, items: 0 };
+        const cancelSummary = json.summary?.cancel || { qty: 0, items: 0 };
+        const successSummary = json.summary?.success || { qty: 0, items: 0 };
         setSummary({
-          all: json.summary?.all || { qty: 0, items: 0 },
-          progress: json.summary?.progress || { qty: 0, items: 0 },
-          rejected: json.summary?.reject_by_center || { qty: 0, items: 0 },
-          success: json.summary?.success || { qty: 0, items: 0 },
+          all: {
+            qty: Number(progressSummary.qty) + Number(cancelSummary.qty) + Number(successSummary.qty),
+            items: Number(progressSummary.items) + Number(cancelSummary.items) + Number(successSummary.items),
+          },
+          progress: progressSummary,
+          cancel: cancelSummary,
+          success: successSummary,
         });
         setFilterOptions({
           fleet_types: json.filters?.fleet_types || [],
@@ -624,8 +617,8 @@ export default function TrackFleetPage() {
       return `รายการคำขอรอพิจารณา (TCAS)${dcSuffix}`;
     }
 
-    if (statusFilter === "reject_by_center") {
-      return `รายการไม่ผ่านการประเมิน (TCAS)${dcSuffix}`;
+    if (statusFilter === "cancel") {
+      return `รายการไม่ผ่านกระบวนการ${dcSuffix}`;
     }
 
     if (statusFilter === "success") {
@@ -657,7 +650,7 @@ export default function TrackFleetPage() {
         return step === 8;
       }
 
-      if (statusFilter === "reject_by_center") {
+      if (statusFilter === "cancel") {
         return step === 9 || step === 10;
       }
 
@@ -877,8 +870,8 @@ export default function TrackFleetPage() {
                   ? "ดูทั้งหมด"
                   : statusFilter === "progress"
                     ? "TCAS คำขอรอพิจารณา (TCAS)"
-                    : statusFilter === "reject_by_center"
-                      ? "ไม่ผ่านการประเมิน (TCAS) TCAS"
+                    : statusFilter === "cancel"
+                      ? "ไม่ผ่านกระบวนการ"
                       : "TCAS อนุมัติแล้ว"}
               </span>
             </div>
@@ -939,11 +932,11 @@ export default function TrackFleetPage() {
                 shortLabel: "CT",
               },
               {
-                key: "reject_by_center",
-                label: "ไม่ผ่านการประเมิน (TCAS)",
-                count: summary.rejected.qty,
-                itemCount: summary.rejected.items,
-                sub: "จำนวนรถที่ไม่ผ่านการประเมิน",
+                key: "cancel",
+                label: "ไม่ผ่านกระบวนการ",
+                count: summary.cancel.qty,
+                itemCount: summary.cancel.items,
+                sub: "จำนวนรถที่ไม่ผ่านกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1630,7 +1623,7 @@ export default function TrackFleetPage() {
                         {groupedByRequestDate[date].map((item, index) => {
                           const status = item.status || "progress";
                           const isRejected =
-                            normalizeStatus(status) === "reject_by_center";
+                            normalizeStatus(status) === "cancel";
                           const rowKey =
                             item.running_doc_vehicle_no ||
                             (item.id !== null && item.id !== undefined

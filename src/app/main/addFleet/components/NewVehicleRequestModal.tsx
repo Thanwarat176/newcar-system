@@ -162,7 +162,7 @@ export default function NewVehicleRequestModal({
         "รถทดแทน",
         "รถทดแทน 7 ปี",
         "รถหมดอายุ",
-        "ทดแทนรถลาออก",
+        "รถทดแทนรถลาออก",
     ];
 
     const requiresReplacementLicense = (fleetType: string) => {
@@ -174,7 +174,7 @@ export default function NewVehicleRequestModal({
         "รถทดแทน",
         "รถทดแทน 7 ปี",
         "รถหมดอายุ",
-        "ทดแทนรถลาออก",
+        "รถทดแทนรถลาออก",
     ];
 
     const requires126Days = (fleetType: string) => {
@@ -267,7 +267,7 @@ export default function NewVehicleRequestModal({
 
         return (
             isCenterUser &&
-            (fleetType === "รถทดแทน 7 ปี" || fleetType === "ทดแทนรถลาออก")
+            (fleetType === "รถทดแทน 7 ปี" || fleetType === "รถทดแทนรถลาออก")
         );
     }, [isCenterUser, formData.fleet_type]);
 
@@ -2039,7 +2039,7 @@ export default function NewVehicleRequestModal({
 
                                 <div className="mt-2 mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
                                     <span className="font-bold">เงื่อนไขวันที่ใช้งาน:</span>{" "}
-                                    รถออกใหม่/รถทดแทน (รถทดแทน 7 ปี, รถหมดอายุ และทดแทนรถลาออก)
+                                    รถออกใหม่/รถทดแทน (รถทดแทน 7 ปี, รถหมดอายุ และรถทดแทนรถลาออก)
                                     ต้องรอทำการอย่างน้อย 126 วัน • รถเสริมต้องรอทำการอย่างน้อย 30 วัน
                                     {formData.fleet_type && (
                                         <span className="ml-1 font-bold">

@@ -238,7 +238,7 @@ const normalizeFleetTypeKey = (value: unknown) =>
 const STANDARD_REPLACEMENT_FLEET_TYPES = new Set([
     normalizeFleetTypeKey("รถทดแทน"),
     normalizeFleetTypeKey("รถทดแทน 7 ปี"),
-    normalizeFleetTypeKey("ทดแทนรถลาออก"),
+    normalizeFleetTypeKey("รถทดแทนรถลาออก"),
     normalizeFleetTypeKey("ทดแทนรถหมดอายุ"),
     normalizeFleetTypeKey("รถทดแทนหมดอายุ"),
     normalizeFleetTypeKey("รถหมดอายุ"),
