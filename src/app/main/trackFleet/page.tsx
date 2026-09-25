@@ -10,6 +10,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   CalendarDays,
+  Download,
   Eraser,
   Filter,
   Search,
@@ -19,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import FlowAssessmentModal from "./component/FlowAssessmentModal";
+import ExportTrackFleet from "./component/ExportTrackFleet";
 
 interface SelectedDC {
   DC_CODE?: string;
@@ -158,6 +160,7 @@ export default function TrackFleetPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
+  const [openExportModal, setOpenExportModal] = useState(false);
 
   const [summary, setSummary] = useState({
     all: { qty: 0, items: 0 },
@@ -319,7 +322,7 @@ export default function TrackFleetPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php";
+      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php?group_mode=incoming&warehouse";
 
       const params = new URLSearchParams();
 
@@ -465,6 +468,38 @@ export default function TrackFleetPage() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showRequestDatePicker]);
+
+  const sidebarFilteredRequests = useMemo(() => {
+    // CENTER เห็นข้อมูลทั้งหมด
+    if (isCenterUser) {
+      return requests;
+    }
+
+    // คนที่ไม่ใช่ CENTER ถ้ามี DC จาก Sidebar ให้เห็นเฉพาะ DC นั้น
+    if (selectedDcFromSidebar) {
+      return requests.filter((item) => {
+        const itemDcCode = String(item.dc_code || "")
+          .trim()
+          .toUpperCase();
+
+        return itemDcCode === selectedDcFromSidebar;
+      });
+    }
+
+    // คนที่ไม่ใช่ CENTER และไม่มี selected_dc ให้เห็นเฉพาะ warehouse ตัวเอง
+    if (userWarehouse) {
+      return requests.filter((item) => {
+        const itemDcCode = String(item.dc_code || "")
+          .trim()
+          .toUpperCase();
+
+        return itemDcCode === userWarehouse;
+      });
+    }
+
+    return [];
+  }, [requests, selectedDcFromSidebar, isCenterUser, userWarehouse]);
+
 
   const normalizeDateKey = (value?: string) => {
     if (!value) return "ไม่ระบุวันที่";
@@ -808,7 +843,7 @@ export default function TrackFleetPage() {
         (item) => item !== itemToRemove
       )
     );
-  
+
     setCurrentPage(1);
   };
 
@@ -828,7 +863,7 @@ export default function TrackFleetPage() {
       setVehicleSearchItems((previousItems) =>
         previousItems.slice(0, -1)
       );
-    
+
       setCurrentPage(1);
     }
   };
@@ -877,15 +912,26 @@ export default function TrackFleetPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={fetchRequests}
-            disabled={loading}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <span className={loading ? "animate-spin" : ""}>↻</span>
-            {loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenExportModal(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-900 via-accent-900 to-green-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+            >
+              <Download size={16} />
+              ดึงรายงาน
+            </button>
+
+            <button
+              type="button"
+              onClick={fetchRequests}
+              disabled={loading}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className={loading ? "animate-spin" : ""}>↻</span>
+              {loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -1888,6 +1934,21 @@ export default function TrackFleetPage() {
         </div>
 
       </main>
+
+      <ExportTrackFleet
+        open={openExportModal}
+        onClose={() => setOpenExportModal(false)}
+        requests={sidebarFilteredRequests.map((item) => ({
+          ...item,
+          id:
+            item.id === null || item.id === ""
+              ? null
+              : Number.isSafeInteger(Number(item.id))
+                ? Number(item.id)
+                : null,
+        }))}
+        dcLabel={selectedDcLabel}
+      />
 
       <FlowAssessmentModal
         open={openDetailModal}

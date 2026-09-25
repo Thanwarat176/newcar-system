@@ -256,7 +256,10 @@ export default function ExportRequestModal({
     }, [open]);
 
     const safeRequests = useMemo<ExportRequestItem[]>(() => {
-        const sourceRequests = Array.isArray(requests) ? requests : [];
+        const sourceRequests =
+            Array.isArray(requests) && requests.length > 0
+                ? requests
+                : requestStatusRows;
 
         const statusById = new Map(
             requestStatusRows
@@ -360,25 +363,16 @@ export default function ExportRequestModal({
     ]);
 
     // วันที่เริ่มต้น
-    const [startDate, setStartDate] =
-        useState("");
+    const [startDate, setStartDate] =useState("");
 
     // วันที่สิ้นสุด
-    const [endDate, setEndDate] =
-        useState("");
+    const [endDate, setEndDate] =useState("");
 
     // เปิดปิด Calendar
-    const [
-        showDatePicker,
-        setShowDatePicker,
-    ] =
-        useState(false);
+    const [showDatePicker,setShowDatePicker] =useState(false);
 
     // ช่วงวันที่ใน Calendar
-    const [
-        calendarRange,
-        setCalendarRange,
-    ] =
+    const [calendarRange,setCalendarRange,] =
         useState([
             {
                 startDate: new Date(),
@@ -1450,11 +1444,24 @@ export default function ExportRequestModal({
                     ? endDate
                     : startDate;
 
+            const allowedStatuses = new Set([
+                "fbp_pending",
+                "reject_by_fbp",
+                "approved",
+                "process",
+                "progress",
+                "partial_approved",
+            ]);
+
             return safeRequests
                 .filter(
                     (
                         item
                     ) => {
+                        if (!allowedStatuses.has(String(item.status || "").trim().toLowerCase())) {
+                            return false;
+                        }
+
                         const date =
                             getRequestDateKey(
                                 item

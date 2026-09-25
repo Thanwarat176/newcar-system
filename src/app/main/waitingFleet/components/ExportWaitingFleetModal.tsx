@@ -256,7 +256,10 @@ export default function ExportRequestModal({
     }, [open]);
 
     const safeRequests = useMemo<ExportRequestItem[]>(() => {
-        const sourceRequests = Array.isArray(requests) ? requests : [];
+        const sourceRequests =
+            Array.isArray(requests) && requests.length > 0
+                ? requests
+                : requestStatusRows;
 
         const statusById = new Map(
             requestStatusRows
@@ -1450,11 +1453,24 @@ export default function ExportRequestModal({
                     ? endDate
                     : startDate;
 
+            const allowedStatuses = new Set([
+                "fbp_pending",
+                "reject_by_fbp",
+                "approved",
+                "process",
+                "progress",
+                "partial_approved",
+            ]);
+
             return safeRequests
                 .filter(
                     (
                         item
                     ) => {
+                        if (!allowedStatuses.has(String(item.status || "").trim().toLowerCase())) {
+                            return false;
+                        }
+
                         const date =
                             getRequestDateKey(
                                 item

@@ -436,6 +436,7 @@ export default function WaitingFleetPage() {
 
     if (
       value === "fbp_pending" ||
+      value === "partial_approved" ||
       value === "รอทีม FBP ประเมินข้อมูล"
     ) {
       return "fbp_pending";

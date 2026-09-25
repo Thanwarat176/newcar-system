@@ -55,6 +55,7 @@ interface RequestItem {
 
     approved_qty?: number | string | null;
     approved_suppliers?: ApprovedSupplierApiItem[] | string | null;
+    replacement_mappings?: ApprovedSupplierApiItem[] | string | null;
     approved_truck_type?: string | null;
 
     status_details?: string | null;
@@ -68,6 +69,7 @@ interface ApprovedSupplierApiItem {
     company_name?: string | null;
     truck_type?: string | null;
     qty?: number | string | null;
+    approved_qty?: number | string | null;
 
     Company_ID?: string | number | null;
     Company_Name?: string | null;
@@ -273,9 +275,13 @@ export default function FleetModalDetail({
     };
 
     const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
+    const [supplierRatings, setSupplierRatings] = useState<Record<string, string>>({});
+    const [ratingSavingRowId, setRatingSavingRowId] = useState<string | null>(null);
+    const [ratingMessages, setRatingMessages] = useState<Record<string, string>>({});
     const [approvedSuppliers, setApprovedSuppliers] = useState<ApprovedSupplierRow[]>([]);
     const [rejectedReplacementLicenses, setRejectedReplacementLicenses] = useState<string[]>([]);
     const [confirmedApprovedRowIds, setConfirmedApprovedRowIds] = useState<string[]>([]);
+    const [persistedRowIds, setPersistedRowIds] = useState<string[]>([]);
     const [workloads, setWorkloads] = useState<WorkloadItem[]>([]);
     const [issuePeriods, setIssuePeriods] = useState<IssuePeriodItem[]>([]);
     const [loadingIssuePeriods, setLoadingIssuePeriods] = useState(false);
@@ -562,17 +568,18 @@ export default function FleetModalDetail({
         setRejectReason("");
         setRejectedReplacementLicenses([]);
         setConfirmedApprovedRowIds([]);
+        setPersistedRowIds([]);
         setMessage(null);
         setConfirmDecision(null);
         setDecisionCompleted(false);
-        const savedSupplierRows =
-            parseApprovedSuppliers(
-                data.approved_suppliers
-            );
+        const savedSupplierRows = parseApprovedSuppliers(
+            STANDARD_REPLACEMENT_FLEET_TYPES.has(normalizeFleetTypeKey(data.fleet_type))
+                ? data.replacement_mappings || data.approved_suppliers
+                : data.approved_suppliers
+        );
 
         if (savedSupplierRows.length > 0) {
-            setApprovedSuppliers(
-                savedSupplierRows.map(
+            const savedRows = savedSupplierRows.map(
                     (supplier, index) => ({
                         rowId:
                             typeof crypto !==
@@ -602,9 +609,7 @@ export default function FleetModalDetail({
                             ""
                         ).trim(),
 
-                        qty: Number(
-                            supplier.qty || 0
-                        ),
+                        qty: Number(supplier.qty ?? supplier.approved_qty ?? 1),
 
                         replacementLicenses: (() => {
                             const raw =
@@ -638,8 +643,23 @@ export default function FleetModalDetail({
                                 .filter(Boolean);
                         })(),
                     })
-                )
-            );
+                );
+            if (normalizeFleetTypeKey(data.status) === "PARTIAL_APPROVED") {
+                const savedIds = savedRows.map((row) => row.rowId);
+                setPersistedRowIds(savedIds);
+                setConfirmedApprovedRowIds(savedIds);
+                setApprovedSuppliers([...savedRows, {
+                    rowId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                        ? crypto.randomUUID() : `${Date.now()}-new`,
+                    companyId: "",
+                    companyName: "",
+                    truckType: data.fleet_truck_type || "",
+                    qty: 1,
+                    replacementLicenses: [],
+                }]);
+            } else {
+                setApprovedSuppliers(savedRows);
+            }
         } else {
             setApprovedSuppliers([
                 {
@@ -674,6 +694,8 @@ export default function FleetModalDetail({
         data.fleet_type,
         data.fleet_truck_type,
         data.approved_suppliers,
+        data.replacement_mappings,
+        data.status,
     ]);
 
     useEffect(() => {
@@ -1723,6 +1745,7 @@ export default function FleetModalDetail({
 
     const getSupplierCompanyId = (item: any) => {
         return String(
+            getValueIgnoreCase(item, "id") ||
             getValueIgnoreCase(item, "company_id") ||
             getValueIgnoreCase(item, "Company_ID") ||
             getValueIgnoreCase(item, "COMPANY_ID") ||
@@ -1743,6 +1766,43 @@ export default function FleetModalDetail({
             ""
         ).trim();
     };
+
+    useEffect(() => {
+        if (!open || suppliers.length === 0) return;
+    
+        const controller = new AbortController();
+    
+        approvedSuppliers.forEach((row) => {
+            const supplier = suppliers.find(
+                (item) => getSupplierCompanyId(item) === row.companyId
+            );
+            if (!supplier) return;
+    
+            const id = getSupplierCompanyId(supplier);
+    
+            void (async () => {
+                try {
+                    const response = await fetch(
+                        `http://192.168.158.210/api_new_truck/api/rate_supplier.php?id=${encodeURIComponent(id)}`,
+                        { signal: controller.signal }
+                    );
+                    const result = await response.json();
+                    if (!response.ok || result.success !== true) return;
+    
+                    setSupplierRatings((current) => ({
+                        ...current,
+                        [row.rowId]: result.data?.rating ?? "",
+                    }));
+                } catch (error) {
+                    if (!controller.signal.aborted) {
+                        console.error("โหลดคะแนนไม่สำเร็จ", error);
+                    }
+                }
+            })();
+        });
+    
+        return () => controller.abort();
+    }, [open, suppliers, approvedSuppliers]);
 
     const replacementSupplierOptions = useMemo(() => {
         const supplierMap = new Map<
@@ -1815,6 +1875,7 @@ export default function FleetModalDetail({
     const removeApprovedSupplier = (
         rowId: string
     ) => {
+        if (persistedRowIds.includes(rowId)) return;
         setApprovedSuppliers((current) => {
             if (current.length <= 1) {
                 return current;
@@ -1842,6 +1903,7 @@ export default function FleetModalDetail({
         field: K,
         value: ApprovedSupplierRow[K]
     ) => {
+        if (persistedRowIds.includes(rowId)) return;
         setApprovedSuppliers((current) =>
             current.map((item) => {
                 if (item.rowId !== rowId) {
@@ -1866,6 +1928,7 @@ export default function FleetModalDetail({
         rowId: string,
         license: string
     ) => {
+        if (persistedRowIds.includes(rowId)) return;
         if (rejectedReplacementLicenses.includes(license)) {
             return;
         }
@@ -1942,6 +2005,87 @@ export default function FleetModalDetail({
         setMessage(null);
     };
 
+    const saveSupplierRating = async (row: ApprovedSupplierRow) => {
+        const rating = supplierRatings[row.rowId];
+    
+        const supplier = suppliers.find(
+            (item) =>
+                normalizeText(getSupplierCompanyName(item)) ===
+                normalizeText(row.companyName)
+        );
+    
+        const supplierId = supplier ? getSupplierCompanyId(supplier) : "";
+    
+        if (!supplierId || !rating) {
+            setRatingMessages((current) => ({
+                ...current,
+                [row.rowId]: "กรุณาเลือกผู้ให้บริการจากรายการและเลือกระดับคะแนน",
+            }));
+            return;
+        }
+    
+        setRatingSavingRowId(row.rowId);
+        setRatingMessages((current) => ({
+            ...current,
+            [row.rowId]: "",
+        }));
+    
+        try {
+            const response = await fetch(
+                "http://192.168.158.210/api_new_truck/api/rate_supplier.php",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
+                    body: JSON.stringify({
+                        id: supplierId,
+                        rating,
+                    }),
+                }
+            );
+    
+            const responseText = await response.text();
+            let result: { success?: boolean; message?: string } | null = null;
+    
+            try {
+                result = JSON.parse(responseText);
+            } catch {
+                const serverMessage = responseText
+                    .replace(/<[^>]*>/g, " ")
+                    .replace(/&nbsp;/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+            
+                throw new Error(
+                    `API ตอบกลับไม่ใช่ JSON (HTTP ${response.status}): ${
+                        serverMessage.slice(0, 500) || "ไม่มีข้อความตอบกลับ"
+                    }`
+                );
+            }
+    
+            if (!response.ok || result?.success !== true) {
+                throw new Error(
+                    result?.message || `บันทึกคะแนนไม่สำเร็จ (${response.status})`
+                );
+            }
+    
+            setRatingMessages((current) => ({
+                ...current,
+                [row.rowId]: "บันทึกคะแนนแล้ว",
+            }));
+        } catch (error) {
+            setRatingMessages((current) => ({
+                ...current,
+                [row.rowId]:
+                    error instanceof Error ? error.message : "บันทึกคะแนนไม่สำเร็จ",
+            }));
+        } finally {
+            setRatingSavingRowId(null);
+        }
+    };
+
     const parseApprovedSuppliers = (
         value: RequestItem["approved_suppliers"]
     ): ApprovedSupplierApiItem[] => {
@@ -1992,9 +2136,11 @@ export default function FleetModalDetail({
 
     const savedApprovedSuppliers = useMemo(() => {
         return parseApprovedSuppliers(
-            data.approved_suppliers
+            isStandardReplacementType
+                ? data.replacement_mappings || data.approved_suppliers
+                : data.approved_suppliers
         );
-    }, [data.approved_suppliers]);
+    }, [data.approved_suppliers, data.replacement_mappings, isStandardReplacementType]);
 
     const approvedQtyFromApi = Math.max(
         Number(data.approved_qty ?? 0),
@@ -2172,7 +2318,7 @@ export default function FleetModalDetail({
 
 
     const isFbpPending =
-        normalizeStatus(data.status) === "fbp_pending";
+        ["fbp_pending", "partial_approved"].includes(normalizeStatus(data.status));
 
     const isSupplierRowsValid = useMemo(() => {
         if (approvedSuppliers.length === 0) {
@@ -2192,6 +2338,7 @@ export default function FleetModalDetail({
     }, [approvedSuppliers, isStandardReplacementType]);
 
     const approveRequest = async (rowToSave?: ApprovedSupplierRow) => {
+        if (rowToSave && persistedRowIds.includes(rowToSave.rowId)) return;
         if (!canMakeDecision) {
             setMessage({
                 type: "error",
@@ -2208,7 +2355,9 @@ export default function FleetModalDetail({
             return;
         }
 
-        const rowsToSave = rowToSave ? [rowToSave] : approvedSuppliers;
+        const rowsToSave = rowToSave
+            ? [rowToSave]
+            : approvedSuppliers.filter((row) => !persistedRowIds.includes(row.rowId));
 
         const selectedRowIsValid = rowsToSave.every(
             (item) =>
@@ -2336,7 +2485,11 @@ export default function FleetModalDetail({
                 replacement_license_decisions: isStandardReplacementType
                     ? (rowToSave
                         ? rowToSave.replacementLicenses
-                        : replacementLicenseOptions
+                        : replacementLicenseOptions.filter((license) =>
+                            !approvedSuppliers.some((row) =>
+                                persistedRowIds.includes(row.rowId) && row.replacementLicenses.includes(license)
+                            )
+                        )
                     ).map((license) => {
                         const approvedRow = rowsToSave.find((row) =>
                             row.replacementLicenses.includes(license)
@@ -3664,6 +3817,7 @@ export default function FleetModalDetail({
 
         if (
             value === "fbp_pending" ||
+            value === "partial_approved" ||
             value === "pending_fbp"
         ) {
             return "รอจัดรถ";
@@ -5115,12 +5269,15 @@ export default function FleetModalDetail({
                                                                         1}
                                                                 </span>
 
+                                                                {persistedRowIds.includes(row.rowId) && (
+                                                                    <span className="text-[10px] font-bold text-emerald-700">บันทึกแล้ว</span>
+                                                                )}
                                                                 {approvedSuppliers.length >
                                                                     1 && (
                                                                         <button
                                                                             type="button"
                                                                             disabled={
-                                                                                saving
+                                                                                saving || persistedRowIds.includes(row.rowId)
                                                                             }
                                                                             onClick={() =>
                                                                                 removeApprovedSupplier(
@@ -5136,55 +5293,90 @@ export default function FleetModalDetail({
                                                             </div>
 
                                                             <div className="space-y-2">
-                                                                <label className="block">
-                                                                    <span className="mb-1 block text-[10px] font-bold text-slate-500">
-                                                                        ผู้ให้บริการ
-                                                                    </span>
+                                                            <div className="space-y-2">
+    <label className="block">
+        <span className="mb-1 block text-[10px] font-bold text-slate-500">
+            ผู้ให้บริการ
+        </span>
 
-                                                                    <div className="relative">
-                                                                        <input
-                                                                            type="text"
-                                                                            list={`supplier-options-${row.rowId}`}
-                                                                            value={row.companyName}
-                                                                            disabled={saving}
-                                                                            autoComplete="off"
-                                                                            placeholder={
-                                                                                loadingSuppliers
-                                                                                    ? "กำลังโหลดผู้ให้บริการ..."
-                                                                                    : "พิมพ์หรือเลือกผู้ให้บริการ"
-                                                                            }
-                                                                            onChange={(event) =>
-                                                                                handleSupplierChange(
-                                                                                    row.rowId,
-                                                                                    event.target.value
-                                                                                )
-                                                                            }
-                                                                            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 pr-9 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                                                        />
+        <div className="relative">
+            <input
+                type="text"
+                list={`supplier-options-${row.rowId}`}
+                value={row.companyName}
+                disabled={saving}
+                autoComplete="off"
+                placeholder={
+                    loadingSuppliers
+                        ? "กำลังโหลดผู้ให้บริการ..."
+                        : "พิมพ์หรือเลือกผู้ให้บริการ"
+                }
+                onChange={(event) =>
+                    handleSupplierChange(row.rowId, event.target.value)
+                }
+                className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 pr-9 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                ▼
+            </span>
+        </div>
 
-                                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
-                                                                            ▼
-                                                                        </span>
+        <datalist id={`supplier-options-${row.rowId}`}>
+            {supplierOptions.map((supplierName) => (
+                <option key={supplierName} value={supplierName} />
+            ))}
+        </datalist>
 
-                                                                        <datalist
-                                                                            id={`supplier-options-${row.rowId}`}
-                                                                        >
-                                                                            {supplierOptions.map(
-                                                                                (supplierName) => (
-                                                                                    <option
-                                                                                        key={supplierName}
-                                                                                        value={supplierName}
-                                                                                    />
-                                                                                )
-                                                                            )}
-                                                                        </datalist>
-                                                                    </div>
+        <span className="mt-1 block text-[9px] font-medium text-slate-400">
+            สามารถพิมพ์ค้นหา เลือกจากรายการ หรือระบุชื่อผู้ให้บริการใหม่ได้
+        </span>
+    </label>
 
-                                                                    <span className="mt-1 block text-[9px] font-medium text-slate-400">
-                                                                        สามารถพิมพ์ค้นหา เลือกจากรายการ
-                                                                        หรือระบุชื่อผู้ให้บริการใหม่ได้
-                                                                    </span>
-                                                                </label>
+    <div className="flex flex-wrap items-center gap-2">
+        <select
+            aria-label={`คะแนนผู้ให้บริการ รายการ ${index + 1}`}
+            value={supplierRatings[row.rowId] || ""}
+            disabled={ratingSavingRowId === row.rowId}
+            onChange={(event) => {
+                setSupplierRatings((current) => ({
+                    ...current,
+                    [row.rowId]: event.target.value,
+                }));
+                setRatingMessages((current) => ({
+                    ...current,
+                    [row.rowId]: "",
+                }));
+            }}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-[10px] font-bold text-slate-700"
+        >
+            <option value="">เลือกระดับ</option>
+            <option value="E">E (Excellent)</option>
+            <option value="G">G (Good)</option>
+            <option value="P">P (Pass)</option>
+            <option value="I">I (Improvement Required)</option>
+        </select>
+
+        <button
+            type="button"
+            disabled={
+                !supplierRatings[row.rowId] ||
+                ratingSavingRowId === row.rowId
+            }
+            onClick={() => void saveSupplierRating(row)}
+            className="h-9 shrink-0 rounded-lg bg-blue-700 px-3 text-[10px] font-bold text-white disabled:opacity-50"
+        >
+            {ratingSavingRowId === row.rowId
+                ? "กำลังบันทึก..."
+                : "บันทึกคะแนน"}
+        </button>
+    </div>
+
+    {ratingMessages[row.rowId] && (
+    <p role="status" className="text-[10px] font-medium text-red-600">
+        {ratingMessages[row.rowId]}
+    </p>
+)}
+</div>
 
                                                                 <div className="grid grid-cols-[minmax(0,1fr)_86px] gap-2">
                                                                     <label className="block">
@@ -5319,7 +5511,7 @@ export default function FleetModalDetail({
                                                                                         <button
                                                                                             key={license}
                                                                                             type="button"
-                                                                                            disabled={saving}
+                                                                                            disabled={saving || persistedRowIds.includes(row.rowId)}
                                                                                             onClick={() =>
                                                                                                 toggleReplacementLicense(
                                                                                                     row.rowId,
@@ -5382,6 +5574,7 @@ export default function FleetModalDetail({
                                                                                                     checked={isSelected}
                                                                                                     disabled={
                                                                                                         saving ||
+                                                                                                        persistedRowIds.includes(row.rowId) ||
                                                                                                         selectedByAnotherRow ||
                                                                                                         selectedForRejection
                                                                                                     }
