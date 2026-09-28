@@ -27,13 +27,24 @@ import {
 } from "lucide-react";
 
 interface ExportRequestItem {
-    id?: number | null;
+    id?: string | number | null;
 
     running_doc?: string;
     running_doc_vehicle_no?: string;
 
     vehicle_no?: string | number;
     vehicle_license?: string;
+    vehicle_info?: {
+        vehicle_no?: string | number | null;
+        car_chassis?: string | null;
+        car_model?: string | null;
+        car_brand?: string | null;
+        car_engine?: string | null;
+        car_license?: string | null;
+        warehouse_plan_date?: string | null;
+    } | null;
+    vehicle_warehouse_info?: ExportRequestItem["vehicle_info"][];
+    warehouse_plan_date?: string | null;
 
     current_process?: string;
     current_step?: number;
@@ -147,6 +158,7 @@ interface ExportRequestModalProps {
     onClose: () => void;
     requests?: ExportRequestItem[];
     dcLabel?: string;
+    exportApiUrl?: string;
 }
 
 export default function ExportRequestModal({
@@ -154,7 +166,60 @@ export default function ExportRequestModal({
     onClose,
     requests = [],
     dcLabel,
+    exportApiUrl,
 }: ExportRequestModalProps) {
+    const [trackRows, setTrackRows] = useState<ExportRequestItem[]>([]);
+    const [loadingTrackRows, setLoadingTrackRows] = useState(false);
+
+    // Read every page from the same filtered vehicle endpoint as the main table.
+    useEffect(() => {
+        if (!open || !exportApiUrl) return;
+        const controller = new AbortController();
+        setTrackRows([]);
+        setLoadingTrackRows(true);
+
+        const loadAllVehicles = async () => {
+            try {
+                const getPage = async (page: number) => {
+                    const url = new URL(exportApiUrl);
+                    url.searchParams.set("page", String(page));
+                    url.searchParams.set("limit", "100");
+                    const response = await fetch(url.toString(), {
+                        signal: controller.signal,
+                        cache: "no-store",
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const payload = await response.json();
+                    if (payload.status !== "success" || !Array.isArray(payload.data)) {
+                        throw new Error(payload.message || "โหลดรายการรถไม่สำเร็จ");
+                    }
+                    return payload;
+                };
+
+                const first = await getPage(1);
+                const totalPages = Number(first.pagination?.total_pages || 1);
+                const rows: ExportRequestItem[] = [...first.data];
+                for (let page = 2; page <= totalPages; page += 5) {
+                    const batch = await Promise.all(
+                        Array.from({ length: Math.min(5, totalPages - page + 1) },
+                            (_, index) => getPage(page + index))
+                    );
+                    batch.forEach((payload) => rows.push(...payload.data));
+                }
+                if (!controller.signal.aborted) setTrackRows(rows);
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    console.error("โหลดข้อมูล Export ไม่สำเร็จ:", error);
+                    setTrackRows([]);
+                }
+            } finally {
+                if (!controller.signal.aborted) setLoadingTrackRows(false);
+            }
+        };
+        void loadAllVehicles();
+        return () => controller.abort();
+    }, [open, exportApiUrl]);
+
     const [requestStatusRows, setRequestStatusRows] = useState<ExportRequestItem[]>([]);
     const [fbpRows, setFbpRows] = useState<FbpItem[]>([]);
     const [fbpApprovalByRequest, setFbpApprovalByRequest] = useState<
@@ -256,10 +321,7 @@ export default function ExportRequestModal({
     }, [open]);
 
     const safeRequests = useMemo<ExportRequestItem[]>(() => {
-        const sourceRequests =
-            Array.isArray(requests) && requests.length > 0
-                ? requests
-                : requestStatusRows;
+        const sourceRequests = exportApiUrl ? trackRows : requests;
 
         const statusById = new Map(
             requestStatusRows
@@ -357,6 +419,8 @@ export default function ExportRequestModal({
         });
     }, [
         requests,
+        trackRows,
+        exportApiUrl,
         requestStatusRows,
         fbpRows,
         fbpApprovalByRequest,
@@ -1444,24 +1508,11 @@ export default function ExportRequestModal({
                     ? endDate
                     : startDate;
 
-            const allowedStatuses = new Set([
-                "fbp_pending",
-                "reject_by_fbp",
-                "approved",
-                "process",
-                "progress",
-                "partial_approved",
-            ]);
-
             return safeRequests
                 .filter(
                     (
                         item
                     ) => {
-                        if (!allowedStatuses.has(String(item.status || "").trim().toLowerCase())) {
-                            return false;
-                        }
-
                         const date =
                             getRequestDateKey(
                                 item
@@ -1574,7 +1625,7 @@ export default function ExportRequestModal({
                             : [];
 
                         // ถ้า API มี details ให้แตกเป็นรถแต่ละคัน
-                        if (requestDetails.length > 0) {
+                        if (requestDetails.length > 0 && !isVehicleRow(item)) {
                             const baseRunningDoc = String(
                                 item.running_doc ||
                                 item.running_doc_vehicle_no ||
@@ -1887,130 +1938,121 @@ export default function ExportRequestModal({
             exportRows,
         ]);
 
+        // The export layout follows the requested column order. Missing API fields stay blank.
+        const field = (item: ExportRequestItem, ...names: string[]) => {
+            const data = item as unknown as Record<string, unknown>;
+            const vehicle = data.vehicle_info as Record<string, unknown> | undefined;
+            const vehicleList = data.vehicle_warehouse_info as Record<string, unknown>[] | undefined;
+            const matchingVehicle = vehicleList?.find(
+                (entry) => String(entry?.vehicle_no ?? "") === String(item.vehicle_no ?? "")
+            );
+            for (const name of names) {
+                const value = vehicle?.[name] ?? matchingVehicle?.[name] ?? data[name];
+                if (value !== null && value !== undefined && value !== "") {
+                    return typeof value === "string" || typeof value === "number"
+                        ? value : "";
+                }
+            }
+            return "";
+        };
+        const toExportRow = (item: ExportRequestItem, index: number) => ({
+            "ลำดับ": index + 1,
+            "วันที่สร้างคำขอ": formatShortDate(
+                item.request_date || item.date || item.created_at
+            ),
+            "ประเภทคำขอ": item.fleet_type || "-",
+            "สถานะปัจจุบัน": formatCurrentProcess(item),
+            "เลขที่เอกสาร": formatRunningDoc(item) || "-",
+            "ประเภทคลัง": item.dc_type || "-",
+            "ชื่อคลัง": item.dc_code || "-",
+            "ประเภทรถ": item.fleet_truck_type || "-",
+            "จำนวนรถที่ขอ (คัน) *": item.export_qty ?? item.qty ?? "-",
+            "รอรับ Workload":
+                item.workload !== null &&
+                item.workload !== undefined &&
+                item.workload !== ""
+                    ? formatNumberWithComma(item.workload)
+                    : "-",
+            "จำนวน truckturn": item.truckturn ?? "-",
+            "ทะเบียนทดแทน1(ระบุทะเบียน)": item.export_license || "-",
+            "หมายเหตุที่แจ้งขอ": item.remark || "-",
+            "วันที่ใช้งาน": item.usage_date
+                ? formatShortDate(item.usage_date)
+                : "-",
+            "ผู้แจ้งขอ": item.request_by || "-",
+            "สถานะอนุมัติจาก GM": getGmApprovalInfo(item).statusText || "",
+            "วันที่ GM อนุมัติ": getGmApprovalInfo(item).changedAt || "",
+            "ประเภทรถที่อนุมัติ":
+                formatApprovedTruckType(item.approved_truck_type) || "-",
+            "จำนวนรถที่อนุมัติ": item.approved_qty ?? "-",
+            "ชื่อบริษัทขนส่ง (ย่อ)2": item.approved_company_short_name || "-",
+            "VENDOR CODE": item.approved_company_id ?? "-",
+            "ชื่อบริษัทขนส่ง": item.approved_company_name || "-",
+            "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "-",
+            "บริษัทขนส่งที่ถูกทดแทน": item.company_name_replace || "-",
+            "หมายเหตุการประเมินกองรถ": item.fbp_remark || "-",
+            "สถานะการประเมินกองรถ": item.fbp_status || "-",
+            "วันที่ประเมินกองรถ": item.fbp_approved_date || "-",
+            "คาดการณ์วันเข้าคลัง": field(item, "warehouse_plan_date"),
+            "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
+            "จัดสรรผู้ผลิต": field(item, "allocated_manufacturer", "manufacturer"),
+            "จัดสรรรุ่นรถ": field(item, "car_model"),
+            "เลขเครื่อง": field(item, "car_engine"),
+            "เลข Chassis": field(item, "car_chassis"),
+            "ทะเบียน": field(item, "car_license", "vehicle_license"),
+            "เลขบันทึก FBP": field(item, "fbp_memo_no", "fbp_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึก FBP": field(item, "fbp_memo_date", "fbp_document_date"),
+            "เลขบันทึกแจ้ง TIS": field(item, "tis_memo_no", "tis_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": field(item, "tis_memo_date", "tis_document_date"),
+            "เลขบันทึกแจ้ง TIL": field(item, "til_memo_no", "til_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": field(item, "til_memo_date", "til_document_date"),
+            "เลขบันทึกแจ้ง ASK": field(item, "ask_memo_no", "ask_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": field(item, "ask_memo_date", "ask_document_date"),
+            "เลขบันทึกแจ้ง Kleasing": field(item, "kleasing_memo_no", "kleasing_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": field(item, "kleasing_memo_date", "kleasing_document_date"),
+            "เลขบันทึกแจ้ง TTB2": field(item, "ttb2_memo_no", "ttb2_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": field(item, "ttb2_memo_date", "ttb2_document_date"),
+            "เลขบันทึกแจ้ง THAIOLIX": field(item, "thaiolix_memo_no", "thaiolix_document_no"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": field(item, "thaiolix_memo_date", "thaiolix_document_date"),
+            "วันที่เริ่มรอจัดสรรตามโควต้า": field(item, "quota_wait_start_date"),
+            "วันที่สิ้นสุดรอจัดสรรตามโควต้า": field(item, "quota_wait_end_date"),
+            "วันที่เริ่มรอลงนามหนังสือจัดสรร": field(item, "allocation_sign_start_date"),
+            "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": field(item, "allocation_sign_end_date"),
+            "วันที่เริ่มรอไฟแนนซ์อนุมัติ": field(item, "finance_approval_start_date"),
+            "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": field(item, "finance_approval_end_date"),
+            "วันที่เริ่มรอส่งรถเข้าอู่": field(item, "garage_delivery_start_date"),
+            "วันที่สิ้นสุดรอส่งรถเข้าอู่": field(item, "garage_delivery_end_date"),
+            "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": field(item, "body_installation_start_date"),
+            "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": field(item, "body_installation_end_date"),
+            "วันที่เริ่มรอจดทะเบียนรถ": field(item, "registration_wait_start_date"),
+            "วันที่สิ้นสุดรอจดทะเบียนรถ": field(item, "registration_wait_end_date"),
+            "วันที่เริ่มส่งมอบคลังแล้ว": field(item, "warehouse_delivery_start_date"),
+            "วันที่สิ้นสุดส่งมอบคลังแล้ว": field(item, "warehouse_delivery_end_date"),
+            "วันที่สิ้นสุดหนังสือหมดอายุ": field(item, "document_expiry_end_date"),
+            "วันที่ยกเลิกหนังสือ": field(item, "document_cancel_date"),
+            "Remark": field(item, "remark"),
+        });
+
+        const previewColumns = Object.keys(toExportRow({} as ExportRequestItem, 0));
+
     // Export Excel
     const handleExport = () => {
         if (exportRows.length === 0) {
             return;
         }
 
-        const excelData = exportRows.map((item, index) => {
-            const qtyValue =
-                item.export_qty !== null &&
-                    item.export_qty !== undefined &&
-                    item.export_qty !== ""
-                    ? Number(item.export_qty)
-                    : item.qty !== null &&
-                        item.qty !== undefined &&
-                        item.qty !== ""
-                        ? Number(item.qty)
-                        : 0;
-
-            return {
-                "ลำดับ": index + 1,
-
-                "วันที่สร้างคำขอ":
-                    item.request_date || item.date || item.created_at
-                        ? formatThaiDate(
-                            item.request_date ||
-                            item.date ||
-                            item.created_at
-                        )
-                        : "",
-
-                "ประเภทคำขอ": item.fleet_type || "",
-
-                "สถานะปัจจุบัน": formatCurrentProcess(item),
-
-                "เลขที่เอกสาร": formatRunningDoc(item),
-
-                "ประเภทคลัง": item.dc_type || "",
-
-                "ชื่อคลัง": item.dc_code || "",
-
-                "ประเภทรถ": item.fleet_truck_type || "",
-
-                "จำนวนรถที่ขอ (คัน) *":
-                    Number.isFinite(qtyValue) ? qtyValue : 0,
-
-                "รอรับ Workload":
-                    formatNumberWithComma(item.workload),
-
-                "จำนวน truckturn": item.truckturn ?? "",
-
-                "ทะเบียนทดแทน1(ระบุทะเบียน)":
-                    item.export_license || "",
-
-                "หมายเหตุที่แจ้งขอ": item.remark || "",
-
-                "วันที่ใช้งาน": item.usage_date
-                    ? formatThaiDate(item.usage_date)
-                    : "",
-
-                "ผู้แจ้งขอ": item.request_by || "",
-
-                "ประเภทรถที่อนุมัติ":
-                    formatApprovedTruckType(
-                        item.approved_truck_type
-                    ),
-
-                "จำนวนรถที่อนุมัติ":
-                    item.approved_qty ?? "",
-
-                "ชื่อบริษัทขนส่ง (ย่อ)2":
-                    item.approved_company_short_name || "",
-
-                "VENDOR CODE":
-                    item.approved_company_id ?? "",
-
-                "ชื่อบริษัทขนส่ง":
-                    item.approved_company_name || "",
-
-                "ประเภทรถที่ถูกทดแทน":
-                    item.truck_type_replace || "",
-
-                "บริษัทขนส่งที่ถูกทดแทน":
-                    item.company_name_replace || "",
-
-                "หมายเหตุการประเมินกองรถ":
-                    item.fbp_remark || "",
-
-                "สถานะการประเมินกองรถ":
-                    item.fbp_status || "",
-
-                "วันที่ประเมินกองรถ":
-                    item.fbp_approved_date || "",
-            };
-        });
+        const excelData = exportRows.map(toExportRow);
 
         const worksheet = XLSX.utils.json_to_sheet(excelData);
 
-        worksheet["!cols"] = [
-            { wch: 8 },
-            { wch: 18 },
-            { wch: 22 },
-            { wch: 32 },
-            { wch: 30 },
-            { wch: 14 },
-            { wch: 18 },
-            { wch: 20 },
-            { wch: 22 },
-            { wch: 20 },
-            { wch: 18 },
-            { wch: 40 },
-            { wch: 40 },
-            { wch: 18 },
-            { wch: 25 },
-            { wch: 22 },
-            { wch: 20 },
-            { wch: 26 },
-            { wch: 18 },
-            { wch: 34 },
-            { wch: 24 },
-            { wch: 34 },
-            { wch: 36 },
-            { wch: 28 },
-            { wch: 22 },
-        ];
+        const excelHeaders = Object.keys(excelData[0]);
+        const columnWidths = excelHeaders.map((header, index) => {
+            if (index === 0) return 8;
+            const longestValue = excelData.reduce((max, row) =>
+                Math.max(max, String(row[header as keyof typeof row] ?? "").length), 0);
+            return Math.min(38, Math.max(14, Math.min(header.length + 2, 30), longestValue + 2));
+        });
+        worksheet["!cols"] = columnWidths.map((wch) => ({ wch }));
 
         const sheetRange = worksheet["!ref"];
 
@@ -2098,9 +2140,14 @@ export default function ExportRequestModal({
             }
 
             worksheet["!rows"] = [
-                {
-                    hpt: 30,
-                },
+                { hpt: 48 },
+                ...excelData.map((row) => {
+                    const lines = excelHeaders.reduce((max, header, index) => {
+                        const value = String(row[header as keyof typeof row] ?? "");
+                        return Math.max(max, Math.ceil(value.length / Math.max(1, columnWidths[index] - 2)));
+                    }, 1);
+                    return { hpt: Math.min(90, Math.max(22, lines * 16)) };
+                }),
             ];
 
             worksheet["!autofilter"] = {
@@ -2473,264 +2520,39 @@ export default function ExportRequestModal({
                                     touchAction: "pan-x pan-y",
                                 }}
                             >
-                                <table className="w-full min-w-[3400px] border-collapse text-left">
+                                <table className="w-max min-w-full table-fixed border-collapse text-left">
                                     <thead className="sticky top-0 z-10 bg-blue-800 text-[10px] font-black text-white">
                                         <tr>
-                                            <th className="px-3 py-3 text-center">
-                                                ลำดับ
-                                            </th>
-
-                                            <th className="w-[82px] whitespace-nowrap px-2 py-3">
-                                                วันที่สร้างคำขอ
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ประเภทคำขอ
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                สถานะปัจจุบัน
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                เลขที่เอกสาร
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ประเภทคลัง
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ชื่อคลัง
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ประเภทรถ
-                                            </th>
-
-                                            <th className="px-3 py-3 text-center">
-                                                จำนวนรถที่ขอ (คัน) *
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                รอรับ Workload
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                จำนวน truckturn
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ทะเบียนทดแทน1(ระบุทะเบียน)
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                หมายเหตุที่แจ้งขอ
-                                            </th>
-
-                                            <th className="w-[82px] whitespace-nowrap px-2 py-3">
-                                                วันที่ใช้งาน
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ผู้แจ้งขอ
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ประเภทรถที่อนุมัติ
-                                            </th>
-
-                                            <th className="px-3 py-3 text-center">
-                                                จำนวนรถที่อนุมัติ
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ชื่อบริษัทขนส่ง (ย่อ)2
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                VENDOR CODE
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ชื่อบริษัทขนส่ง
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                ประเภทรถที่ถูกทดแทน
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                บริษัทขนส่งที่ถูกทดแทน
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                หมายเหตุการประเมินกองรถ
-                                            </th>
-
-                                            <th className="px-3 py-3">
-                                                สถานะการประเมินกองรถ
-                                            </th>
-
-                                            <th className="whitespace-nowrap px-3 py-3">
-                                                วันที่ประเมินกองรถ
-                                            </th>
+                                            {previewColumns.map((column) => (
+                                                <th key={column} className={`border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                    {column}
+                                                </th>
+                                            ))}
                                         </tr>
                                     </thead>
-
                                     <tbody>
                                         {exportRows.length === 0 ? (
                                             <tr>
-                                                <td
-                                                    colSpan={25}
-                                                    className="py-20 text-center"
-                                                >
-                                                    <FileSpreadsheet
-                                                        size={36}
-                                                        className="mx-auto text-slate-200"
-                                                    />
-
-                                                    <p className="mt-3 text-sm font-black text-slate-400">
-                                                        ไม่พบข้อมูลในช่วงวันที่ที่เลือก
-                                                    </p>
+                                                <td colSpan={previewColumns.length} className="py-20 text-center text-slate-400">
+                                                    ไม่พบรายการตามเงื่อนไขที่เลือก
                                                 </td>
                                             </tr>
-                                        ) : (
-                                            paginatedRows.map(
-                                                (item, index) => (
-                                                    <tr
-                                                        key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? `license-${item.export_row_index ?? 0}`}`}
-                                                        className="border-b border-slate-100 text-[11px] transition hover:bg-blue-50/50"
-                                                    >
-                                                        <td className="px-3 py-2.5 text-center font-black text-slate-500">
-                                                            {(currentPage - 1) *
-                                                                ROWS_PER_PAGE +
-                                                                index +
-                                                                1}
+                                        ) : paginatedRows.map((item, index) => {
+                                            const row = toExportRow(
+                                                item,
+                                                (currentPage - 1) * ROWS_PER_PAGE + index
+                                            );
+                                            return (
+                                                <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
+                                                    className="border-b border-slate-100 text-[11px] hover:bg-blue-50/50">
+                                                    {previewColumns.map((column) => (
+                                                        <td key={column} className={`border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                            {row[column as keyof typeof row] ?? "-"}
                                                         </td>
-
-                                                        <td className="whitespace-nowrap px-2 py-2.5 text-[10px] font-bold text-slate-600">
-                                                            {formatShortDate(
-                                                                item.request_date ||
-                                                                item.date ||
-                                                                item.created_at
-                                                            )}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.fleet_type || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5">
-                                                            <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-600">
-                                                                {formatCurrentProcess(
-                                                                    item
-                                                                )}
-                                                            </span>
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-black text-blue-700">
-                                                            {formatRunningDoc(item) || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-black text-blue-700">
-                                                            {item.dc_type || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-black text-emerald-700">
-                                                            {item.dc_code || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.fleet_truck_type || "-"}
-                                                        </td>
-
-                                                        <td className="px-3 py-2.5 text-center font-black text-slate-700">
-                                                            {item.export_qty ??
-                                                                item.qty ??
-                                                                "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.workload !== null &&
-                                                                item.workload !== undefined &&
-                                                                item.workload !== ""
-                                                                ? formatNumberWithComma(
-                                                                    item.workload
-                                                                )
-                                                                : "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.truckturn ?? "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[320px] px-3 py-2.5 font-bold text-slate-600">
-                                                            {item.export_license ||
-                                                                "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[300px] px-3 py-2.5 font-medium text-slate-600">
-                                                            {item.remark || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-2 py-2.5 text-[10px] font-bold text-slate-600">
-                                                            {item.usage_date
-                                                                ? formatShortDate(
-                                                                    item.usage_date
-                                                                )
-                                                                : "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.request_by || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {formatApprovedTruckType(
-                                                                item.approved_truck_type
-                                                            ) || "-"}
-                                                        </td>
-
-                                                        <td className="px-3 py-2.5 text-center font-black text-slate-700">
-                                                            {item.approved_qty ?? "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.approved_company_short_name || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.approved_company_id ?? "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[300px] px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.approved_company_name || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.truck_type_replace || "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[300px] px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.company_name_replace || "-"}
-                                                        </td>
-
-                                                        <td className="max-w-[320px] px-3 py-2.5 font-medium text-slate-600">
-                                                            {item.fbp_remark || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 font-bold text-slate-700">
-                                                            {item.fbp_status || "-"}
-                                                        </td>
-
-                                                        <td className="whitespace-nowrap px-3 py-2.5 text-[10px] font-bold text-slate-600">
-                                                            {item.fbp_approved_date || "-"}
-                                                        </td>
-                                                    </tr>
-                                                )
-                                            )
-                                        )}
+                                                    ))}
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -2803,7 +2625,7 @@ export default function ExportRequestModal({
                         <button
                             type="button"
                             onClick={handleExport}
-                            disabled={exportRows.length === 0}
+                            disabled={loadingTrackRows || exportRows.length === 0}
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                         >
                             <Download size={15} />

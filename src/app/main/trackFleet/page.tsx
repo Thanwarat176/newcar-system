@@ -161,6 +161,7 @@ export default function TrackFleetPage() {
   const [pageSize, setPageSize] = useState(20);
   const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
   const [openExportModal, setOpenExportModal] = useState(false);
+  const [exportApiUrl, setExportApiUrl] = useState("");
 
   const [summary, setSummary] = useState({
     all: { qty: 0, items: 0 },
@@ -322,9 +323,10 @@ export default function TrackFleetPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php?group_mode=incoming&warehouse";
+      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php";
 
       const params = new URLSearchParams();
+      params.set("group_mode", "incoming");
 
       const activeWarehouse = selectedDcFromSidebar || userWarehouse;
       if (activeWarehouse && activeWarehouse !== "CENTER") {
@@ -359,8 +361,9 @@ export default function TrackFleetPage() {
       params.set("page", String(currentPage));
       params.set("limit", String(pageSize));
 
+      const requestUrl = `${apiBase}?${params.toString()}`;
       const response = await fetch(
-        `${apiBase}?${params.toString()}`,
+        requestUrl,
         {
           method: "GET",
           headers: {
@@ -384,6 +387,7 @@ export default function TrackFleetPage() {
       const json = await response.json();
 
       if (json.status === "success") {
+        setExportApiUrl(requestUrl);
         setRequests(json.data || []);
         const progressSummary = json.summary?.progress || { qty: 0, items: 0 };
         const cancelSummary = json.summary?.cancel || { qty: 0, items: 0 };
@@ -1948,6 +1952,7 @@ export default function TrackFleetPage() {
                 : null,
         }))}
         dcLabel={selectedDcLabel}
+        exportApiUrl={exportApiUrl}
       />
 
       <FlowAssessmentModal
