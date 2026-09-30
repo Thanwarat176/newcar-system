@@ -126,6 +126,7 @@ type ExistingMemoFiles = Partial<
 
 interface CarItem {
   vehicle_no: number | string;
+  unit_code?: string | null;
   license: string;
   province: string;
   truck_type: string;
@@ -170,6 +171,8 @@ interface StepItem {
 }
 
 interface FlowItem {
+  unit_code?: string | number | null; // เพิ่มบรรทัดนี้
+
   id: string;
   request_id: string;
   process_id: string;
@@ -184,7 +187,6 @@ interface FlowItem {
   license: string;
   request_truck_detail_id: string | null;
 }
-
 interface FlowResponseData {
   request: RequestInfo;
   steps: StepItem[];
@@ -905,8 +907,13 @@ export default function FlowAssessmentModal({
       setLoading(true);
       setError("");
 
+      let apiUrl = `${FLOW_API_URL}?request_id=${encodeURIComponent(String(requestId))}`;
+      if (vehicleNo !== null && vehicleNo !== undefined && vehicleNo !== "") {
+        apiUrl += `&vehicle_no=${encodeURIComponent(String(vehicleNo))}`;
+      }
+
       const response = await fetch(
-        `${FLOW_API_URL}?request_id=${encodeURIComponent(String(requestId))}`,
+        apiUrl,
         {
           method: "GET",
           headers: {
@@ -937,14 +944,31 @@ export default function FlowAssessmentModal({
         vehicleNo !== undefined &&
         vehicleNo !== "";
 
+      let matchVehicleNo = vehicleNo;
+
+      if (hasSelectedVehicle) {
+        const foundCar = normalizedData.cars.find(
+          (car) =>
+            String(car.vehicle_no) === String(vehicleNo) ||
+            String(car.unit_code) === String(vehicleNo)
+        );
+        if (foundCar) {
+          matchVehicleNo = foundCar.vehicle_no;
+        }
+      }
+
       const filteredData: FlowResponseData = hasSelectedVehicle
         ? {
           ...normalizedData,
           cars: normalizedData.cars.filter(
-            (car) => String(car.vehicle_no) === String(vehicleNo)
+            (car) => String(car.vehicle_no) === String(matchVehicleNo)
           ),
           flow_data: normalizedData.flow_data.filter(
-            (flow) => String(flow.vehicle_no) === String(vehicleNo)
+            (flow) =>
+              (flow.unit_code != null &&
+                String(flow.unit_code) === String(vehicleNo)) ||
+              String(flow.vehicle_no) === String(matchVehicleNo) ||
+              String(flow.vehicle_no) === String(vehicleNo)
           ),
         }
         : normalizedData;
@@ -974,6 +998,8 @@ export default function FlowAssessmentModal({
       }, {});
 
       setDateDrafts(initialDateDrafts);
+      
+      return selectedCar?.unit_code || undefined;
     } catch (fetchError) {
       console.error("fetchFlowData error:", fetchError);
       setData(emptyData);
@@ -983,12 +1009,13 @@ export default function FlowAssessmentModal({
           ? fetchError.message
           : "เกิดข้อผิดพลาดในการโหลดข้อมูล"
       );
+      return undefined;
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchVehicleWarehouseInfo = async () => {
+  const fetchVehicleWarehouseInfo = async (forceUnitCode?: string) => {
     if (
       requestId === null ||
       requestId === undefined ||
@@ -1001,10 +1028,12 @@ export default function FlowAssessmentModal({
       return;
     }
 
+    const targetVehicleNo = forceUnitCode || data.cars[0]?.unit_code || vehicleNo;
+
     const url =
       `${VEHICLE_WAREHOUSE_INFO_API_URL}` +
       `?request_id=${encodeURIComponent(String(requestId))}` +
-      `&vehicle_no=${encodeURIComponent(String(vehicleNo))}`;
+      `&vehicle_no=${encodeURIComponent(String(targetVehicleNo))}`;
 
     const response = await fetch(url, {
       method: "GET",
@@ -1049,8 +1078,8 @@ export default function FlowAssessmentModal({
   const handleRefreshData = async () => {
     try {
       setError("");
-      await fetchFlowData();
-      await fetchVehicleWarehouseInfo();
+      const unitCode = await fetchFlowData();
+      await fetchVehicleWarehouseInfo(unitCode);
     } catch (refreshError) {
       console.error("handleRefreshData error:", refreshError);
       setError(
@@ -1165,7 +1194,7 @@ export default function FlowAssessmentModal({
       const payload = {
         action: "warehouse_info",
         request_id: String(requestId),
-        vehicle_no: String(vehicleNo),
+        vehicle_no: String(data.cars[0]?.unit_code ?? vehicleNo),
 
         warehouse_plan_date:
           vehicleExtraForm.warehouse_plan_date || null,
@@ -1302,6 +1331,10 @@ export default function FlowAssessmentModal({
           ? String(requestId)
           : Number(requestId),
       };
+
+      if (vehicleNo) {
+        payload.unit_code = String(vehicleNo);
+      }
 
       if (createdBy) {
         payload.created_by = createdBy;
@@ -1694,7 +1727,7 @@ export default function FlowAssessmentModal({
       const memoPayload = {
         action: "memo",
         request_id: String(requestId),
-        vehicle_no: String(vehicleNo),
+        vehicle_no: String(data.cars[0]?.unit_code ?? vehicleNo),
         memo_type: field.key,
         memo_number: memoNumber,
         memo_date: memoDate,
@@ -1745,7 +1778,7 @@ export default function FlowAssessmentModal({
 
         const fileFormData = new FormData();
         fileFormData.append("request_id", String(requestId));
-        fileFormData.append("vehicle_no", String(vehicleNo));
+        fileFormData.append("vehicle_no", String(data.cars[0]?.unit_code ?? vehicleNo));
         fileFormData.append("file_type", field.label);
         fileFormData.append("memo_type", field.key);
         fileFormData.append("memo_number", memoNumber);
@@ -1851,8 +1884,8 @@ export default function FlowAssessmentModal({
 
     const loadModalData = async () => {
       try {
-        await fetchFlowData();
-        await fetchVehicleWarehouseInfo();
+        const unitCode = await fetchFlowData();
+        await fetchVehicleWarehouseInfo(unitCode);
       } catch (loadError) {
         console.error("loadModalData error:", loadError);
         setError(

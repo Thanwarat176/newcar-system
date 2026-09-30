@@ -1905,11 +1905,11 @@ export default function CheckDC({
                 <div className="overflow-hidden rounded-xl border border-amber-200 bg-white">
                   <div className="border-b border-amber-100 bg-amber-50 px-3.5 py-2.5">
                     <p className="text-[10px] font-black uppercase tracking-wide text-amber-700">
-                      Remark
+                      Remark from DC
                     </p>
 
                     <h4 className="mt-0.5 text-xs font-black text-amber-950">
-                      หมายเหตุคำขอ
+                      หมายเหตุคำขอจากคลังหรือส่วนกลาง
                     </h4>
                   </div>
 
@@ -1926,11 +1926,11 @@ export default function CheckDC({
                 <div className="overflow-hidden rounded-xl border border-blue-200 bg-white">
                   <div className="border-b border-blue-100 bg-blue-50 px-3.5 py-2.5">
                     <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">
-                      Status Details
+                      Remark from GM
                     </p>
 
                     <h4 className="mt-0.5 text-xs font-black text-blue-950">
-                      รายละเอียดสถานะ
+                    หมายเหตุจาก GM คลังหรือส่วนกลาง
                     </h4>
                   </div>
 

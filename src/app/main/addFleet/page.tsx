@@ -2919,7 +2919,7 @@ const [pageSize, setPageSize] = useState(25);
                       <Fragment key={date}>
                         <tr>
                           <td
-                            colSpan={statusFilter === "process" ? 10 : 11}
+                            colSpan={statusFilter === "process" ? 11 : 12}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">

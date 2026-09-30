@@ -38,6 +38,7 @@ interface RequestItem {
   dc_code: string;
   date: string;
   request_date?: string;
+  request_id?: number | string | null;
   fleet_type: string;
   fleet_truck_type: string;
   license_replace: string[] | string;
@@ -62,6 +63,17 @@ interface RequestItem {
   current_process?: string;
   vehicle_warehouse_info?: VehicleWarehouseInfo[];
   vehicle_info?: VehicleWarehouseInfo | null;
+  
+  // New fields from track_fleet_get.php
+  incoming_truck_id?: number;
+  new_truck_type?: string;
+  new_vendor_id?: string;
+  new_vendor_name?: string;
+  car_chassis?: string;
+  car_engine?: string;
+  car_license?: string;
+  unit_code?: string;
+  replaced_old_licenses?: string[];
 }
 
 interface VehicleWarehouseInfo {
@@ -1584,8 +1596,10 @@ export default function TrackFleetPage() {
                       "เลขที่เอกสาร",
                       "DC Type",
                       "DC",
-                      "ประเภทรถ",
-                      "ข้อมูลรถ",
+                      "ประเภทรถใหม่",
+                      "Vendor (ผู้ให้บริการ)",
+                      "ทดแทนทะเบียนเก่า",
+                      "ข้อมูลรถคันใหม่",
                       "วันที่ใช้งาน",
                       "ผู้ขอ",
                       "สถานะ",
@@ -1717,12 +1731,33 @@ export default function TrackFleetPage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-bold text-slate-700">
-                                  {item.fleet_type || "-"}
+                                  {item.new_truck_type || item.fleet_type || "-"}
+                                </p>
+                              </td>
+
+                              <td className="whitespace-nowrap px-3 py-3">
+                                <p className="font-bold text-slate-700">
+                                  {item.new_vendor_name || "-"}
                                 </p>
                               </td>
 
                               <td className="px-3 py-3">
-                                <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
+                                {item.replaced_old_licenses && item.replaced_old_licenses.length > 0 ? (
+                                  <ul className="space-y-1">
+                                    {item.replaced_old_licenses.map((lic, idx) => (
+                                      <li key={idx} className="text-[10px] text-slate-700 flex items-start gap-1">
+                                        <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400"></span>
+                                        <span className="font-bold">{lic}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">-</span>
+                                )}
+                              </td>
+
+                              <td className="px-3 py-3">
+                              <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
                                   <div className="grid grid-cols-[72px_1fr] gap-x-2">
                                     <span className="font-bold text-slate-400">เลขตัวถัง</span>
                                     <span className="break-all font-black text-slate-700">
@@ -1957,8 +1992,8 @@ export default function TrackFleetPage() {
 
       <FlowAssessmentModal
         open={openDetailModal}
-        requestId={selectedRequest?.id ?? null}
-        vehicleNo={selectedRequest?.vehicle_no ?? null}
+        requestId={selectedRequest?.request_id ?? selectedRequest?.id ?? null}
+        vehicleNo={selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null}
         onClose={handleCloseDetail}
       />
 

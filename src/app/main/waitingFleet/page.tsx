@@ -61,6 +61,22 @@ interface RequestItem {
   request_by: string;
   remark: string;
   details?: RequestDetailItem[];
+  
+  summary?: {
+    total_requested: number;
+    total_approved: number;
+    total_rejected: number;
+  };
+  approved_trucks?: {
+    old_license: string;
+    new_truck_type: string;
+    new_vendor_name: string;
+    new_vendor_id: string;
+  }[];
+  rejected_trucks?: {
+    old_license: string;
+    reason: string;
+  }[];
 }
 
 interface UserInfo {
@@ -129,7 +145,7 @@ export default function WaitingFleetPage() {
       setError("");
 
       const res = await fetch(
-        "http://192.168.158.210/api_new_truck/api/request_get.php",
+        "http://192.168.158.210/api_new_truck/api/waiting_fleet_get.php",
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },
@@ -467,6 +483,18 @@ export default function WaitingFleetPage() {
     String(detail.status || "").trim().toLowerCase();
 
   const getQtySummary = (item: RequestItem) => {
+    if (item.summary) {
+      const requestedQty = Math.max(Number(item.summary.total_requested || item.qty || 0), 0);
+      const approvedQty = Math.max(Number(item.summary.total_approved || 0), 0);
+      const notApprovedQty = Math.max(Number(item.summary.total_rejected || 0), 0);
+      return {
+        requestedQty,
+        approvedQty,
+        notApprovedQty,
+        pendingQty: normalizeStatus(item.status) === "fbp_pending" ? requestedQty : 0,
+      };
+    }
+
     const originalQty = Math.max(Number(item.qty || 0), 0);
     const gmApprovedQty = Math.max(
       Number(item.approve_qty_gm || 0),
@@ -494,7 +522,9 @@ export default function WaitingFleetPage() {
       };
     }
 
-    const approvedQty = Math.max(Number(item.approved_qty || 0), 0);
+    const rawApprVal = Number(item.approved_qty || 0);
+    const cleanApprQty = (rawApprVal > 0 && rawApprVal <= 100) ? rawApprVal : 0;
+    const approvedQty = Math.max(cleanApprQty, 0);
 
     return {
       requestedQty,
@@ -506,6 +536,11 @@ export default function WaitingFleetPage() {
   };
 
   const isFbpPendingItem = (item: RequestItem) => {
+    const { requestedQty, approvedQty } = getQtySummary(item);
+    if (requestedQty > 0 && approvedQty === requestedQty) {
+      return false;
+    }
+
     if (
       isReplacementRequest(item) &&
       Array.isArray(item.details) &&
@@ -520,6 +555,11 @@ export default function WaitingFleetPage() {
   };
 
   const isFbpRejectedItem = (item: RequestItem) => {
+    const { requestedQty, approvedQty } = getQtySummary(item);
+    if (requestedQty > 0 && approvedQty === requestedQty) {
+      return false;
+    }
+
     const normalizedStatus = normalizeStatus(item.status);
     const { notApprovedQty } = getQtySummary(item);
 
@@ -533,8 +573,13 @@ export default function WaitingFleetPage() {
     );
   };
 
-  const isApprovedItem = (item: RequestItem) =>
-    normalizeStatus(item.status) === "approved";
+  const isApprovedItem = (item: RequestItem) => {
+    const { requestedQty, approvedQty } = getQtySummary(item);
+    if (requestedQty > 0 && approvedQty === requestedQty) {
+      return true;
+    }
+    return normalizeStatus(item.status) === "approved";
+  };
 
   const formatStatusText = (status?: string) => {
     const value = normalizeStatus(status);
@@ -1657,7 +1702,7 @@ export default function WaitingFleetPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={12} className="py-12 text-center">
                         <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-4 border-blue-100 border-t-blue-500" />
                         <p className="text-xs font-medium text-slate-400">
                           กำลังโหลดข้อมูล...
@@ -1666,7 +1711,7 @@ export default function WaitingFleetPage() {
                     </tr>
                   ) : filteredRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={12} className="py-12 text-center">
                         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                           <Search size={20} />
                         </span>
@@ -1680,7 +1725,7 @@ export default function WaitingFleetPage() {
                       <Fragment key={date}>
                         <tr>
                           <td
-                            colSpan={11}
+                            colSpan={12}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
@@ -1695,9 +1740,12 @@ export default function WaitingFleetPage() {
 
                         {groupedByRequestDate[date].map((item, index) => {
                           const isPending = isFbpPendingItem(item);
-                          const status = isPending
-                            ? "fbp_pending"
-                            : item.status || "fbp_pending";
+                          const isApproved = isApprovedItem(item);
+                          const status = isApproved
+                            ? "progress"
+                            : isPending
+                              ? "fbp_pending"
+                              : item.status || "fbp_pending";
                           const statusText = formatStatusText(status);
                           const statusVisual = getStatusVisual(status);
                           const licenseList = getLicenseList(item.license_replace);
@@ -1779,44 +1827,66 @@ export default function WaitingFleetPage() {
                                 )}
                               </td>
 
-                              <td className="px-3 py-3">
-                                {statusFilter === "reject_by_fbp" ||
-                                (statusFilter === "approved" &&
-                                  getQtySummary(item).notApprovedQty > 0) ? (
-                                  <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                                    <div className="px-2 py-2 text-center">
-                                      <p className="text-[9px] font-bold text-slate-400">
-                                        จำนวนขอ
-                                      </p>
-                                      <p className="mt-0.5 text-xs font-black text-slate-700">
-                                        {formatNumber(getQtySummary(item).requestedQty)}
-                                      </p>
+                              <td className="px-3 py-3 min-w-[300px]">
+                                {(item.summary?.total_approved || 0) > 0 || (item.summary?.total_rejected || 0) > 0 ? (
+                                  <div className="flex flex-col gap-2">
+                                    <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                      <div className="px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-slate-400">จำนวนขอ</p>
+                                        <p className="mt-0.5 text-xs font-black text-slate-700">
+                                          {formatNumber(item.summary?.total_requested)}
+                                        </p>
+                                      </div>
+                                      <div className="border-l border-slate-100 bg-emerald-50 px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-emerald-500">อนุมัติ</p>
+                                        <p className="mt-0.5 text-xs font-black text-emerald-700">
+                                          {formatNumber(item.summary?.total_approved)}
+                                        </p>
+                                      </div>
+                                      <div className="border-l border-slate-100 bg-rose-50 px-2 py-2 text-center">
+                                        <p className="text-[9px] font-bold text-rose-500">ไม่อนุมัติ</p>
+                                        <p className="mt-0.5 text-xs font-black text-rose-700">
+                                          {formatNumber(item.summary?.total_rejected)}
+                                        </p>
+                                      </div>
                                     </div>
+                                    
+                                    {(item.approved_trucks && item.approved_trucks.length > 0) && (
+                                      <div className="mt-1 rounded border border-emerald-100 bg-emerald-50/50 p-2">
+                                        <p className="mb-1 text-[10px] font-bold text-emerald-600">รายการที่อนุมัติ:</p>
+                                        <ul className="space-y-1">
+                                          {item.approved_trucks.map((t, idx) => (
+                                            <li key={`app-${idx}`} className="text-[10px] text-slate-600 flex items-start gap-1">
+                                              <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"></span>
+                                              <span>
+                                                <span className="font-bold">{t.old_license}</span> &rarr; {t.new_truck_type} ({t.new_vendor_name || 'ไม่ระบุ Vendor'})
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
 
-                                    <div className="border-l border-slate-100 bg-emerald-50 px-2 py-2 text-center">
-                                      <p className="text-[9px] font-bold text-emerald-500">
-                                        อนุมัติ
-                                      </p>
-                                      <p className="mt-0.5 text-xs font-black text-emerald-700">
-                                        {formatNumber(getQtySummary(item).approvedQty)}
-                                      </p>
-                                    </div>
-
-                                    <div className="border-l border-slate-100 bg-rose-50 px-2 py-2 text-center">
-                                      <p className="text-[9px] font-bold text-rose-500">
-                                        ไม่อนุมัติ
-                                      </p>
-                                      <p className="mt-0.5 text-xs font-black text-rose-700">
-                                        {formatNumber(getQtySummary(item).notApprovedQty)}
-                                      </p>
-                                    </div>
+                                    {(item.rejected_trucks && item.rejected_trucks.length > 0) && (
+                                      <div className="mt-1 rounded border border-rose-100 bg-rose-50/50 p-2">
+                                        <p className="mb-1 text-[10px] font-bold text-rose-600">รายการที่ไม่อนุมัติ:</p>
+                                        <ul className="space-y-1">
+                                          {item.rejected_trucks.map((t, idx) => (
+                                            <li key={`rej-${idx}`} className="text-[10px] text-slate-600 flex items-start gap-1">
+                                              <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400"></span>
+                                              <span>
+                                                <span className="font-bold">{t.old_license}</span> ({t.reason})
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="text-center">
                                     <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
-                                      {formatNumber(
-                                        getQtySummary(item).requestedQty,
-                                      )}
+                                      {formatNumber(item.summary?.total_requested || getQtySummary(item).requestedQty)}
                                     </span>
                                   </div>
                                 )}

@@ -1610,7 +1610,7 @@ export default function GmStatusPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={12} className="py-12 text-center">
                         <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-4 border-blue-100 border-t-blue-500" />
                         <p className="text-xs font-medium text-slate-400">
                           กำลังโหลดข้อมูล...
@@ -1619,7 +1619,7 @@ export default function GmStatusPage() {
                     </tr>
                   ) : filteredRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center">
+                      <td colSpan={12} className="py-12 text-center">
                         <p className="text-sm font-bold text-slate-400">
                           ไม่พบข้อมูลตามเงื่อนไขนี้
                         </p>
@@ -1630,7 +1630,7 @@ export default function GmStatusPage() {
                       <Fragment key={date}>
                         <tr>
                           <td
-                            colSpan={11}
+                            colSpan={12}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
                             <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
