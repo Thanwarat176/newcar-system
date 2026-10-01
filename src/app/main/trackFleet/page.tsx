@@ -63,7 +63,7 @@ interface RequestItem {
   current_process?: string;
   vehicle_warehouse_info?: VehicleWarehouseInfo[];
   vehicle_info?: VehicleWarehouseInfo | null;
-  
+
   // New fields from track_fleet_get.php
   incoming_truck_id?: number;
   new_truck_type?: string;
@@ -335,7 +335,7 @@ export default function TrackFleetPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const apiBase = "http://192.168.158.210/api_new_truck/api/request_track_fleet.php";
+      const apiBase = "http://192.168.158.210/api_new_truck/api/track_fleet_get.php";
 
       const params = new URLSearchParams();
       params.set("group_mode", "incoming");
@@ -420,12 +420,52 @@ export default function TrackFleetPage() {
           dc_codes: json.filters?.dc_codes || [],
           process_options: json.filters?.process_options || [],
         });
+        const totalVehicles = Number(
+          json.pagination?.total_vehicles ??
+          json.pagination?.total_records ??
+          0
+        );
+
+        const responsePage = Math.max(
+          1,
+          Number(json.pagination?.page ?? currentPage),
+        );
+
+        const responseLimit = Math.max(
+          1,
+          Number(json.pagination?.limit ?? pageSize),
+        );
+
+        const totalPages = Math.max(
+          1,
+          Number(
+            json.pagination?.total_pages ??
+            Math.ceil(totalVehicles / responseLimit),
+          ),
+        );
+
         setPagination({
-          total_vehicles: json.pagination?.total_vehicles || 0,
-          total_records: json.pagination?.total_records || 0,
-          page: json.pagination?.page || 1,
-          limit: json.pagination?.limit || 20,
-          total_pages: json.pagination?.total_pages || 1,
+          total_vehicles: totalVehicles,
+          total_records: Number(
+            json.pagination?.total_records ?? totalVehicles,
+          ),
+          page: responsePage,
+          limit: responseLimit,
+          total_pages: totalPages,
+        });
+
+        // ให้เลขหน้าตรงกับ API เมื่อ API ปรับหน้าที่เกินกลับมา
+        if (responsePage !== currentPage) {
+          setCurrentPage(responsePage);
+        }
+        setPagination({
+          total_vehicles: totalVehicles,
+          total_records: Number(
+            json.pagination?.total_records ?? totalVehicles
+          ),
+          page: Number(json.pagination?.page ?? currentPage),
+          limit: Number(json.pagination?.limit ?? pageSize),
+          total_pages: Math.max(1, Math.ceil(totalVehicles / pageSize)),
         });
       } else {
         throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
@@ -1179,7 +1219,7 @@ export default function TrackFleetPage() {
 
             <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                ค้นหาข้อมูลรถหลายรายการ
+                ข้อมูลรถหลายรายการ
               </label>
 
               <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition hover:border-blue-200 focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100/70">
@@ -1596,7 +1636,8 @@ export default function TrackFleetPage() {
                       "เลขที่เอกสาร",
                       "DC Type",
                       "DC",
-                      "ประเภทรถใหม่",
+                      "ประเภทคำขอ",
+                      "ประเภทรถ",
                       "Vendor (ผู้ให้บริการ)",
                       "ทดแทนทะเบียนเก่า",
                       "ข้อมูลรถคันใหม่",
@@ -1731,7 +1772,13 @@ export default function TrackFleetPage() {
 
                               <td className="whitespace-nowrap px-3 py-3">
                                 <p className="font-bold text-slate-700">
-                                  {item.new_truck_type || item.fleet_type || "-"}
+                                  {item.fleet_type || "-"}
+                                </p>
+                              </td>
+
+                              <td className="whitespace-nowrap px-3 py-3">
+                                <p className="font-bold text-slate-700">
+                                  {item.new_truck_type || "-"}
                                 </p>
                               </td>
 
@@ -1757,7 +1804,7 @@ export default function TrackFleetPage() {
                               </td>
 
                               <td className="px-3 py-3">
-                              <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
+                                <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
                                   <div className="grid grid-cols-[72px_1fr] gap-x-2">
                                     <span className="font-bold text-slate-400">เลขตัวถัง</span>
                                     <span className="break-all font-black text-slate-700">
@@ -1877,99 +1924,95 @@ export default function TrackFleetPage() {
             </div>
           </div>
 
-          {pagination.total_vehicles > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-xs font-semibold text-slate-500">
-                  แสดง{" "}
-                  <span className="font-black text-slate-800">
-                    {formatNumber((currentPage - 1) * pageSize + 1)}
-                  </span>{" "}
-                  ถึง{" "}
-                  <span className="font-black text-slate-800">
-                    {formatNumber(Math.min(currentPage * pageSize, pagination.total_vehicles))}
-                  </span>{" "}
-                  จากทั้งหมด{" "}
-                  <span className="font-black text-slate-800">
-                    {formatNumber(pagination.total_vehicles)}
-                  </span>{" "}
-                  คัน
-                </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">
+                แสดง
+              </span>
 
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                  <span>แสดงหน้าละ:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="h-8 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white"
-                  >
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
-                </div>
+              <select
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setCurrentPage(1);
+                }}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold"
+              >
+                <option value={20}>20 รายการ</option>
+                <option value={25}>25 รายการ</option>
+                <option value={50}>50 รายการ</option>
+                <option value={100}>100 รายการ</option>
+              </select>
+
+              <span className="text-xs text-slate-400">
+                จากทั้งหมด{" "}
+                {Number(pagination.total_vehicles).toLocaleString("th-TH")} รายการ
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={loading || currentPage <= 1}
+                onClick={() =>
+                  setCurrentPage((page) => Math.max(page - 1, 1))
+                }
+                className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
+              >
+                ก่อนหน้า
+              </button>
+
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                <span>หน้า</span>
+
+                <select
+                  aria-label="เลือกหน้า"
+                  value={currentPage}
+                  disabled={loading}
+                  onChange={(event) =>
+                    setCurrentPage(Number(event.target.value))
+                  }
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 outline-none focus:border-blue-500 disabled:opacity-40"
+                >
+                  {Array.from(
+                    { length: Math.max(1, Number(pagination.total_pages)) },
+                    (_, index) => {
+                      const page = index + 1;
+
+                      return (
+                        <option key={page} value={page}>
+                          {page}
+                        </option>
+                      );
+                    },
+                  )}
+                </select>
+
+                <span>
+                  / {Math.max(1, Number(pagination.total_pages))}
+                </span>
               </div>
 
-              {pagination.total_pages > 1 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    ‹ ก่อนหน้า
-                  </button>
-
-                  {Array.from({ length: pagination.total_pages }, (_, i) => i + 1)
-                    .filter(
-                      (page) =>
-                        page === 1 ||
-                        page === pagination.total_pages ||
-                        Math.abs(page - currentPage) <= 2
-                    )
-                    .reduce<(number | string)[]>((acc, page, idx, arr) => {
-                      if (idx > 0 && page - (arr[idx - 1] as number) > 1) {
-                        acc.push("...");
-                      }
-                      acc.push(page);
-                      return acc;
-                    }, [])
-                    .map((item, idx) =>
-                      typeof item === "number" ? (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => setCurrentPage(item)}
-                          className={`h-8 min-w-[32px] rounded-xl px-2 text-xs font-black transition ${currentPage === item
-                            ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
-                            : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                            }`}
-                        >
-                          {item}
-                        </button>
-                      ) : (
-                        <span key={`ellipsis-${idx}`} className="px-1 text-xs font-bold text-slate-400">
-                          ...
-                        </span>
-                      )
-                    )}
-
-                  <button
-                    type="button"
-                    disabled={currentPage === pagination.total_pages}
-                    onClick={() => setCurrentPage((p) => Math.min(pagination.total_pages, p + 1))}
-                    className="inline-flex h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    ถัดไป ›
-                  </button>
-                </div>
-              )}
+              <button
+                type="button"
+                disabled={
+                  loading ||
+                  currentPage >= Math.max(1, Number(pagination.total_pages))
+                }
+                onClick={() =>
+                  setCurrentPage((page) =>
+                    Math.min(
+                      page + 1,
+                      Math.max(1, Number(pagination.total_pages)),
+                    ),
+                  )
+                }
+                className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+              >
+                ถัดไป
+              </button>
             </div>
-          )}
+          </div>
         </div>
 
       </main>

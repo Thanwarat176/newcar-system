@@ -246,7 +246,7 @@ export default function AddFleetPage() {
   const [openExportModal, setOpenExportModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
-const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(25);
 
   // Filter ขั้นตอนปัจจุบันของรถใน TCAS
   // value จะผูกกับ current_process + current_step + total_steps
@@ -1239,32 +1239,32 @@ const [pageSize, setPageSize] = useState(25);
 
   const normalizeStatus = (status?: string) => {
     const value = String(status || "").trim().toLowerCase();
-  
+
     if (value === "gm_pending" || value === "gm กำลังอนุมัติ") {
       return "gm_pending";
     }
-  
+
     if (
       value === "fbp_pending" ||
       value === "กำลังประเมินกองรถ (fbp)"
     ) {
       return "fbp_pending";
     }
-  
+
     if (
       value === "reject_by_gm" ||
       value === "gm ไม่อนุมัติ"
     ) {
       return "reject_by_gm";
     }
-  
+
     if (
       value === "progress" ||
       value === "รอดำเนินการตามกระบวนการ (tcas)"
     ) {
       return "progress";
     }
-  
+
     return value;
   };
 
@@ -1870,10 +1870,10 @@ const [pageSize, setPageSize] = useState(25);
     1,
     Math.ceil(sortedRequests.length / pageSize),
   );
-  
+
   const paginatedRequests = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize;
-  
+
     return sortedRequests.slice(
       startIndex,
       startIndex + pageSize,
@@ -2399,7 +2399,7 @@ const [pageSize, setPageSize] = useState(25);
                       className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                       {count.toLocaleString("th-TH")}
+                      {count.toLocaleString("th-TH")}
                       <span className="ml-1 text-sm font-black opacity-60">คัน</span>
                     </p>
 
@@ -3689,60 +3689,60 @@ const [pageSize, setPageSize] = useState(25);
               </table>
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
-  <div className="flex items-center gap-2">
-    <span className="text-xs font-semibold text-slate-500">
-      แสดง
-    </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-500">
+                    แสดง
+                  </span>
 
-    <select
-      value={pageSize}
-      onChange={(event) => {
-        setPageSize(Number(event.target.value));
-        setCurrentPage(1);
-      }}
-      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold"
-    >
-      <option value={20}>20 รายการ</option>
-      <option value={25}>25 รายการ</option>
-      <option value={50}>50 รายการ</option>
-      <option value={100}>100 รายการ</option>
-    </select>
+                  <select
+                    value={pageSize}
+                    onChange={(event) => {
+                      setPageSize(Number(event.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold"
+                  >
+                    <option value={20}>20 รายการ</option>
+                    <option value={25}>25 รายการ</option>
+                    <option value={50}>50 รายการ</option>
+                    <option value={100}>100 รายการ</option>
+                  </select>
 
-    <span className="text-xs text-slate-400">
-      จากทั้งหมด {sortedRequests.length.toLocaleString("th-TH")} รายการ
-    </span>
-  </div>
+                  <span className="text-xs text-slate-400">
+                    จากทั้งหมด {sortedRequests.length.toLocaleString("th-TH")} รายการ
+                  </span>
+                </div>
 
-  <div className="flex items-center gap-2">
-    <button
-      type="button"
-      disabled={currentPage === 1}
-      onClick={() =>
-        setCurrentPage((page) => Math.max(page - 1, 1))
-      }
-      className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
-    >
-      ก่อนหน้า
-    </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() =>
+                      setCurrentPage((page) => Math.max(page - 1, 1))
+                    }
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
+                  >
+                    ก่อนหน้า
+                  </button>
 
-    <span className="min-w-[90px] text-center text-xs font-bold text-slate-600">
-      หน้า {currentPage} / {totalPages}
-    </span>
+                  <span className="min-w-[90px] text-center text-xs font-bold text-slate-600">
+                    หน้า {currentPage} / {totalPages}
+                  </span>
 
-    <button
-      type="button"
-      disabled={currentPage >= totalPages}
-      onClick={() =>
-        setCurrentPage((page) =>
-          Math.min(page + 1, totalPages),
-        )
-      }
-      className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
-    >
-      ถัดไป
-    </button>
-  </div>
-</div>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() =>
+                      setCurrentPage((page) =>
+                        Math.min(page + 1, totalPages),
+                      )
+                    }
+                    className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+                  >
+                    ถัดไป
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
