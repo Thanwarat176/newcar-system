@@ -176,6 +176,9 @@ interface RequestItem {
   car_license?: string | null;
 
   details?: RequestDetailItem[];
+  outgoing_trucks?: RequestDetailItem[];
+  approved_truck_type?: string | null;
+  reject_reason?: string | null;
 
   latest_process_id?: string | number | null;
   latest_process_name?: string | null;
@@ -782,6 +785,32 @@ export default function AddFleetPage() {
     }));
   };
 
+  // Use the same complete list for the table, search, and expanded details.
+  const getReplacementTruckRows = (item: RequestItem): RequestDetailItem[] => {
+    const rows = new Map<string, RequestDetailItem>();
+    const sources = [...(item.details ?? []), ...(item.outgoing_trucks ?? [])];
+    for (const detail of sources) {
+      const license = String(detail.license ?? "").trim();
+      if (!license) continue;
+      const key = license.replace(/\s+/g, "").toUpperCase();
+      const existing = rows.get(key);
+      rows.set(key, {
+        ...detail,
+        ...existing,
+        license: existing?.license || license,
+        province: String(existing?.province || detail.province || "").trim(),
+        truck_type: String(existing?.truck_type || detail.truck_type || "").trim(),
+        company_id: String(existing?.company_id || detail.company_id || "").trim(),
+        company_name: String(existing?.company_name || detail.company_name || "").trim(),
+      });
+    }
+    for (const license of getLicenseList(item.license_replace)) {
+      const key = license.replace(/\s+/g, "").toUpperCase();
+      if (!rows.has(key)) rows.set(key, { id: `fallback-${key}`, license });
+    }
+    return [...rows.values()];
+  };
+
   const handleSort = (key: SortKey) => {
     setSortConfig((current) => {
       if (current?.key === key) {
@@ -905,13 +934,13 @@ export default function AddFleetPage() {
               "",
 
             dc_type:
-              flowSummaryItem?.dc_type ||
-              requestItem?.dc_type ||
+              requestItem?.dc_type ??
+              flowSummaryItem?.dc_type ??
               "",
 
             dc_code:
-              flowSummaryItem?.dc_code ||
-              requestItem?.dc_code ||
+              requestItem?.dc_code ??
+              flowSummaryItem?.dc_code ??
               "",
 
             date:
@@ -934,6 +963,13 @@ export default function AddFleetPage() {
               flowSummaryItem?.license_replace ||
               "",
 
+            details: requestItem?.details ?? flowSummaryItem?.details ?? [],
+            outgoing_trucks: requestItem?.outgoing_trucks ?? flowSummaryItem?.outgoing_trucks ?? [],
+            approved_company_name: requestItem?.approved_company_name ?? flowSummaryItem?.approved_company_name ?? null,
+            approved_truck_type: requestItem?.approved_truck_type ?? flowSummaryItem?.approved_truck_type ?? null,
+            reject_reason: requestItem?.reject_reason ?? flowSummaryItem?.reject_reason ?? null,
+            warehouse_plan_date: requestItem ? requestItem.warehouse_plan_date ?? null : flowSummaryItem?.warehouse_plan_date ?? null,
+
             status_details:
               requestItem?.status_details ??
               flowSummaryItem?.status_details ??
@@ -950,16 +986,16 @@ export default function AddFleetPage() {
 
             approved_qty: (() => {
               const rawVal = Number(
-                flowSummaryItem?.approved_qty ??
                 requestItem?.approved_qty ??
+                flowSummaryItem?.approved_qty ??
                 0,
               );
               return Number.isFinite(rawVal) && rawVal > 0 && rawVal <= 100 ? Math.floor(rawVal) : 0;
             })(),
 
             usage_date:
-              flowSummaryItem?.usage_date ||
-              requestItem?.usage_date ||
+              requestItem?.usage_date ??
+              flowSummaryItem?.usage_date ??
               "",
 
             workload:
@@ -1237,191 +1273,162 @@ export default function AddFleetPage() {
     return raw.replace(/\s+/g, " ");
   };
 
-  const normalizeStatus = (status?: string) => {
+  const normalizeStatus = (status?: string): string => {
     const value = String(status || "").trim().toLowerCase();
 
-    if (value === "gm_pending" || value === "gm กำลังอนุมัติ") {
+    if (
+      value === "gm_pending" ||
+      value === "gm กำลังอนุมัติ"
+    ) {
       return "gm_pending";
     }
 
     if (
       value === "fbp_pending" ||
+      value === "partial_approved" ||
       value === "กำลังประเมินกองรถ (fbp)"
     ) {
       return "fbp_pending";
     }
 
     if (
-      value === "reject_by_gm" ||
-      value === "gm ไม่อนุมัติ"
+      value === "progress" ||
+      value === "process" ||
+      value === "confirm_request" ||
+      value === "in_progress" ||
+      value === "รอดำเนินการตามกระบวนการ (tcas)"
     ) {
-      return "reject_by_gm";
+      return "process";
     }
 
     if (
-      value === "progress" ||
-      value === "รอดำเนินการตามกระบวนการ (tcas)"
+      value === "completed" ||
+      value === "success" ||
+      value === "approved"
     ) {
-      return "progress";
+      return "completed";
+    }
+
+    if (
+      value === "rejected" ||
+      value === "cancel" ||
+      value === "reject_gm" ||
+      value === "gm_rejected" ||
+      value === "fbp_rejected" ||
+      value === "reject_center" ||
+      value === "center_rejected" ||
+      value === "gm ไม่อนุมัติ" ||
+      value.startsWith("reject_") ||
+      value.startsWith("rejected_by_")
+    ) {
+      return "rejected";
     }
 
     return value;
   };
 
   const formatStatusText = (status?: string) => {
-    const rawValue = String(status || "")
-      .trim()
-      .toLowerCase();
+    const rawValue = String(status || "").trim().toLowerCase();
     const value = normalizeStatus(status);
 
-    if (value === "gm_pending") return "รอ GM อนุมัติ";
-    if (value === "fbp_pending") return "กำลังประเมินกองรถ (FBP)";
-    if (value === "process") return "ดำเนินการตามกระบวนการ (TCAS)";
-
     if (
-      rawValue === "reject_gm" ||
-      rawValue === "reject_by_gm" ||
-      rawValue === "rejected_by_gm" ||
-      rawValue === "gm_rejected" ||
-      rawValue === "9. ยกเลิกหนังสือ" ||
-      rawValue === "rejected_by_gm"
+      [
+        "reject_gm",
+        "reject_by_gm",
+        "rejected_by_gm",
+        "gm_rejected",
+        "gm ไม่อนุมัติ",
+      ].includes(rawValue)
     ) {
       return "GM ไม่อนุมัติ";
     }
 
     if (
-      rawValue === "reject_by_fbp" ||
-      rawValue === "fbp_rejected" ||
-      rawValue === "reject_center" ||
-      rawValue === "reject_by_center" ||
-      rawValue === "rejected_by_center" ||
-      rawValue === "center_rejected"
+      [
+        "reject_by_fbp",
+        "rejected_by_fbp",
+        "fbp_rejected",
+        "reject_center",
+        "reject_by_center",
+        "rejected_by_center",
+        "center_rejected",
+      ].includes(rawValue)
     ) {
       return "ส่วนกลางไม่อนุมัติ";
     }
 
-    if (rawValue.startsWith("reject_")) {
-      return "ขั้นตอนดำเนินการไม่อนุมัติ";
+    switch (value) {
+      case "gm_pending":
+        return "รอ GM อนุมัติ";
+      case "fbp_pending":
+        return "กำลังประเมินกองรถ (FBP)";
+      case "process":
+        return "ดำเนินการตามกระบวนการ (TCAS)";
+      case "completed":
+        return "เสร็จสิ้น";
+      case "rejected":
+        return "ไม่อนุมัติ";
+      default:
+        return formatBackendText(status);
     }
-
-    if (value === "rejected") return "ปฏิเสธ";
-    if (value === "completed") return "เสร็จสิ้น";
-
-    return formatBackendText(status);
   };
 
   const getStatusClass = (status?: string) => {
-    const value = normalizeStatus(status);
-
-    if (value === "gm_pending") {
-      return "bg-purple-50 text-purple-700 border-purple-200";
+    switch (normalizeStatus(status)) {
+      case "gm_pending":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      case "fbp_pending":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "process":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "completed":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "rejected":
+        return "bg-rose-50 text-rose-700 border-rose-200";
+      default:
+        return "bg-slate-50 text-slate-600 border-slate-200";
     }
-
-    if (value === "fbp_pending") {
-      return "bg-yellow-50 text-yellow-700 border-yellow-200";
-    }
-
-    if (value === "process") {
-      return "bg-blue-50 text-blue-700 border-blue-200";
-    }
-
-    if (value === "completed") {
-      return "bg-green-50 text-green-700 border-green-200";
-    }
-
-    if (value === "rejected") {
-      return "bg-red-50 text-red-700 border-red-200";
-    }
-
-    return "bg-slate-50 text-slate-600 border-slate-200";
   };
 
   const getStatusVisual = (status?: string) => {
-    const rawValue = String(status || "")
-      .trim()
-      .toLowerCase();
-
-    const value = normalizeStatus(status);
-
-    // FBP กำลังพิจารณา
-    // normalizeStatus("fbp_pending") จะได้ fbp_pending
-    if (rawValue === "fbp_pending" || value === "fbp_pending") {
-      return {
-        dotClass: "bg-amber-500",
-        textClass: "text-amber-700",
-        hint: "รอการพิจารณา",
-      };
+    switch (normalizeStatus(status)) {
+      case "gm_pending":
+        return {
+          dotClass: "bg-purple-500",
+          textClass: "text-purple-700",
+          hint: "รอ GM พิจารณา",
+        };
+      case "fbp_pending":
+        return {
+          dotClass: "bg-amber-500",
+          textClass: "text-amber-700",
+          hint: "รอ FBP พิจารณา",
+        };
+      case "process":
+        return {
+          dotClass: "bg-blue-500",
+          textClass: "text-blue-700",
+          hint: "กำลังดำเนินการ",
+        };
+      case "completed":
+        return {
+          dotClass: "bg-emerald-500",
+          textClass: "text-emerald-700",
+          hint: "เสร็จสิ้นกระบวนการ",
+        };
+      case "rejected":
+        return {
+          dotClass: "bg-rose-500",
+          textClass: "text-rose-700",
+          hint: "ไม่ผ่านการพิจารณา",
+        };
+      default:
+        return {
+          dotClass: "bg-slate-400",
+          textClass: "text-slate-600",
+          hint: "สถานะรายการ",
+        };
     }
-
-    // FBP ไม่อนุมัติ
-    if (
-      rawValue === "reject_by_fbp" ||
-      rawValue === "fbp_rejected" ||
-      rawValue === "reject_center" ||
-      rawValue === "reject_by_center" ||
-      rawValue === "rejected_by_center" ||
-      rawValue === "center_rejected"
-    ) {
-      return {
-        dotClass: "bg-rose-500",
-        textClass: "text-rose-700",
-        hint: "ไม่ผ่านการประเมิน",
-      };
-    }
-
-    // อนุมัติ / เสร็จสิ้น
-    // normalizeStatus("approved") จะได้ completed
-    if (rawValue === "approved" || value === "completed") {
-      return {
-        dotClass: "bg-emerald-500",
-        textClass: "text-emerald-700",
-        hint: "ผ่านการประเมิน",
-      };
-    }
-
-    // รอ GM
-    if (value === "gm_pending") {
-      return {
-        dotClass: "bg-purple-500",
-        textClass: "text-purple-700",
-        hint: "รอ GM พิจารณา",
-      };
-    }
-
-    // อยู่ระหว่าง TCAS
-    if (value === "process") {
-      const backendStatus = String(status || "")
-        .trim()
-        .toLowerCase();
-
-      const backendStatusText: Record<string, string> = {
-        progress: "กำลังดำเนินการ",
-        process: "ดำเนินการตามกระบวนการ",
-        confirm_request: "ยืนยันคำขอแล้ว",
-        in_progress: "อยู่ระหว่างดำเนินการ",
-      };
-
-      return {
-        dotClass: "bg-blue-500",
-        textClass: "text-blue-700",
-        hint: backendStatusText[backendStatus] || status || "กำลังดำเนินการ",
-      };
-    }
-
-    // สถานะไม่อนุมัติอื่น ๆ
-    if (value === "rejected") {
-      return {
-        dotClass: "bg-rose-500",
-        textClass: "text-rose-700",
-        hint: "ไม่อนุมัติ",
-      };
-    }
-
-    return {
-      dotClass: "bg-slate-400",
-      textClass: "text-slate-600",
-      hint: "สถานะรายการ",
-    };
   };
 
   const getLicenseList = (licenseReplace: string[] | string) => {
@@ -1768,7 +1775,7 @@ export default function AddFleetPage() {
         (itemRequestDateKey >= startDateKey &&
           itemRequestDateKey <= endDateKey);
 
-      const licenseText = getLicenseList(item.license_replace).join(" ");
+      const licenseText = getReplacementTruckRows(item).map((detail) => detail.license).join(" ");
       const keyword = searchText.trim().toLowerCase();
 
       const matchSearch =
@@ -1871,14 +1878,41 @@ export default function AddFleetPage() {
     Math.ceil(sortedRequests.length / pageSize),
   );
 
+  const activePage = Math.min(Math.max(currentPage, 1), totalPages);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    statusFilter,
+    currentProcessFilter,
+    searchText,
+    truckTypeSearch,
+    dcTypeFilter,
+    fleetTypeFilter,
+    truckTypeFilter,
+    dcFilter,
+    hasRequestDateRange,
+    requestDateRange,
+    selectedDC,
+    userInfo,
+    sortConfig,
+    pageSize,
+  ]);
+
+  useEffect(() => {
+    setCurrentPage((page) =>
+      Math.min(Math.max(page, 1), totalPages),
+    );
+  }, [totalPages]);
+
   const paginatedRequests = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
+    const startIndex = (activePage - 1) * pageSize;
 
     return sortedRequests.slice(
       startIndex,
       startIndex + pageSize,
     );
-  }, [sortedRequests, currentPage, pageSize]);
+  }, [sortedRequests, activePage, pageSize]);
 
   const groupedFilteredByRequestDate = useMemo(() => {
     return paginatedRequests.reduce<Record<string, RequestItem[]>>(
@@ -1947,6 +1981,7 @@ export default function AddFleetPage() {
 
     return getRequestVehicleQty(item);
   };
+
 
   const statusCounts = useMemo(() => {
     const result = {
@@ -3018,46 +3053,9 @@ export default function AddFleetPage() {
 
                             const isFlowLoading = Boolean(flowLoading[requestFlowKey]);
 
-                            const licenseList = getLicenseList(
-                              item.license_replace,
-                            );
-
-                            const replacementTruckRows: RequestDetailItem[] =
-                              Array.isArray(item.details) &&
-                                item.details.length > 0
-                                ? item.details.map((detail) => ({
-                                  ...detail,
-                                  license: String(
-                                    detail.license || "",
-                                  ).trim(),
-                                  province: String(
-                                    detail.province || "",
-                                  ).trim(),
-                                  truck_type: String(
-                                    detail.truck_type || "",
-                                  ).trim(),
-                                  company_id: String(
-                                    detail.company_id || "",
-                                  ).trim(),
-                                  company_name: String(
-                                    detail.company_name || "",
-                                  ).trim(),
-                                }))
-                                : licenseList.map((license, licenseIndex) => ({
-                                  id: `fallback-${licenseIndex}`,
-                                  license,
-                                  province: "",
-                                  truck_type: "",
-                                  company_id: "",
-                                  company_name: "",
-                                }));
-
-                            const visibleLicenses = licenseList.slice(0, 2);
-
-                            const hiddenLicenseCount = Math.max(
-                              licenseList.length - 2,
-                              0,
-                            );
+                            const replacementTruckRows = getReplacementTruckRows(item);
+                            const licenseList = replacementTruckRows.map((detail) => detail.license || "");
+                            const visibleLicenses = licenseList;
 
                             const normalizedFleetType = String(
                               item.fleet_type || "",
@@ -3162,22 +3160,18 @@ export default function AddFleetPage() {
                                   {statusFilter !== "process" && (
                                     <td className="max-w-[150px] px-3 py-3">
                                       {licenseList.length > 0 ? (
-                                        <div className="flex flex-wrap gap-1">
+                                        <div className="flex flex-col items-start gap-1">
                                           {visibleLicenses.map((lic, li) => (
                                             <span
                                               key={`${rowKey}-lic-${li}`}
                                               title={lic}
-                                              className="inline-flex max-w-[86px] truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200"
+                                              className="inline-flex whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200"
                                             >
                                               {lic}
                                             </span>
                                           ))}
 
-                                          {hiddenLicenseCount > 0 && (
-                                            <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-500 ring-1 ring-blue-100">
-                                              +{hiddenLicenseCount}
-                                            </span>
-                                          )}
+
                                         </div>
                                       ) : (
                                         <span className="text-slate-300">
@@ -3366,12 +3360,12 @@ export default function AddFleetPage() {
                                       colSpan={
                                         statusFilter === "process" ||
                                           statusFilter === "completed"
-                                          ? 10
-                                          : 11
+                                          ? 11
+                                          : 12
                                       }
                                       className="px-3 py-2"
                                     >
-                                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                      <div className="sticky left-0 w-[1150px] max-w-[calc(100vw-64px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                                         {/* Header: แสดงข้อมูลสำคัญก่อน ไม่ใช้หัวข้อใหญ่ซ้ำหลายชั้น */}
                                         <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                                           <div className="min-w-0">
@@ -3423,95 +3417,129 @@ export default function AddFleetPage() {
                                             }`}
                                         >
                                           {/* ซ้าย: สรุปคำขอ */}
-                                          <section className="min-w-0 p-4 lg:border-r lg:border-slate-200">
-                                            <div className="mb-3 flex items-center justify-between">
-                                              <h4 className="text-[11px] font-black text-slate-700">
-                                                สรุปคำขอ
-                                              </h4>
-                                              <span className="text-[10px] font-semibold text-slate-400">
+                                          <section className="flex h-full min-w-0 flex-col bg-slate-50/60 p-4 sm:p-5 lg:border-r lg:border-slate-200">
+                                            {/* หัวข้อ */}
+                                            <div className="mb-5 flex items-center justify-between gap-3">
+                                              <div className="flex items-center gap-3">
+                                                <span className="h-9 w-1 rounded-full bg-blue-600" />
+
+                                                <div>
+                                                  <h4 className="text-sm font-black text-slate-800">
+                                                    สรุปคำขอ
+                                                  </h4>
+                                                  <p className="mt-0.5 text-[10px] font-medium text-slate-500">
+                                                    ข้อมูลคำขอและผลการอนุมัติ
+                                                  </p>
+                                                </div>
+                                              </div>
+
+                                              <span className="shrink-0 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-blue-700">
                                                 {item.fleet_truck_type || "-"}
                                               </span>
                                             </div>
 
-                                            {/* จำนวน: เปลี่ยนจากการ์ดสูง 3 ใบ เป็นแถบสรุปบรรทัดเดียว */}
-                                            {/* {isProcessStatus && (
-                                            <div className="mb-4 grid grid-cols-3 overflow-hidden rounded-lg border border-slate-200">
-                                              <div className="bg-slate-50 px-2 py-2 text-center">
-                                                <p className="text-[9px] font-bold text-slate-400">ขอ</p>
-                                                <p className="mt-0.5 text-base font-black text-slate-800">
-                                                  {formatNumber(totalQty)}
-                                                </p>
-                                              </div>
+                                            {/* ข้อมูลคำขอ */}
+                                            <div className="mb-4">
+                                              <h5 className="mb-2.5 text-[11px] font-bold text-slate-500">
+                                                ข้อมูลจากคลัง
+                                              </h5>
 
-                                              <div className="border-x border-slate-200 bg-emerald-50 px-2 py-2 text-center">
-                                                <p className="text-[9px] font-bold text-emerald-600">อนุมัติ</p>
-                                                <p className="mt-0.5 text-base font-black text-emerald-700">
-                                                  {formatNumber(approvedQty)}
-                                                </p>
-                                              </div>
-
-                                              <div className="bg-amber-50 px-2 py-2 text-center">
-                                                <p className="text-[9px] font-bold text-amber-600">คงเหลือ</p>
-                                                <p className="mt-0.5 text-base font-black text-amber-700">
-                                                  {formatNumber(rejectedQty)}
-                                                </p>
-                                              </div>
+                                              <dl className="grid auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2">
+                                                {[
+                                                  { label: "ประเภทคลัง", value: item.dc_type || "-" },
+                                                  { label: "ชื่อคลัง", value: item.dc_code || "-" },
+                                                  {
+                                                    label: "วันที่ใช้งาน",
+                                                    value: item.usage_date
+                                                      ? formatThaiDate(item.usage_date)
+                                                      : "-",
+                                                  },
+                                                  {
+                                                    label: "จำนวนรถที่ขอ (คัน)",
+                                                    value: formatNumber(item.qty),
+                                                  },
+                                                  { label: "Workload", value: formatNumber(item.workload) },
+                                                  { label: "Truck Turn", value: formatNumber(item.truckturn) },
+                                                ].map((field) => (
+                                                  <div
+                                                    key={field.label}
+                                                    className="flex h-full min-h-[88px] min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-3.5"
+                                                  >
+                                                    <dt className="text-[10px] font-semibold text-slate-500">
+                                                      {field.label}
+                                                    </dt>
+                                                    <dd className="mt-3 whitespace-pre-wrap break-words text-[13px] font-bold leading-5 text-slate-800">
+                                                      {field.value}
+                                                    </dd>
+                                                  </div>
+                                                ))}
+                                              </dl>
                                             </div>
-                                          )} */}
 
-                                            {/* ข้อมูลทั่วไปแบบ label/value ไม่ต้องทำเป็นการ์ดแยกทุกช่อง */}
-                                            <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
-                                              {hasTcasVehicleDetail && (
-                                                <>
-                                                  <div className="min-w-0">
-                                                    <dt className="text-[9px] font-bold text-slate-400">
-                                                      ผู้ประกอบการขนส่งที่อนุมัติ
-                                                    </dt>
-                                                    <dd className="mt-0.5 break-words text-[11px] font-black text-slate-700">
-                                                      {item.approved_company_name ||
-                                                        "-"}
-                                                    </dd>
-                                                  </div>
-
-                                                  <div className="min-w-0">
-                                                    <dt className="text-[9px] font-bold text-slate-400">
-                                                      อนุมัติโดย
-                                                    </dt>
-                                                    <dd className="mt-0.5 break-words text-[11px] font-black text-blue-700">
-                                                      {formatApprovedBy(
-                                                        item.approved_by,
-                                                      )}
-                                                    </dd>
-                                                  </div>
-                                                </>
-                                              )}
-
-                                              <div>
-                                                <dt className="text-[9px] font-bold text-slate-400">
-                                                  Workload
-                                                </dt>
-                                                <dd className="mt-0.5 text-[11px] font-black text-slate-700">
-                                                  {formatNumber(item.workload)}
-                                                </dd>
+                                            {/* ผลการอนุมัติ */}
+                                            <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3.5 sm:p-4">
+                                              <div className="mb-3 flex items-center gap-2">
+                                                <span className="h-2 w-2 rounded-full bg-blue-600" />
+                                                <h5 className="text-[11px] font-bold text-blue-800">
+                                                  ข้อมูลการอนุมัติ
+                                                </h5>
                                               </div>
 
-                                              <div>
-                                                <dt className="text-[9px] font-bold text-slate-400">
-                                                  Truck Turn
-                                                </dt>
-                                                <dd className="mt-0.5 text-[11px] font-black text-slate-700">
-                                                  {formatNumber(item.truckturn)}
-                                                </dd>
-                                              </div>
-                                            </dl>
+                                              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <div className="min-w-0 rounded-xl border border-blue-100 bg-white p-3.5 sm:col-span-2">
+                                                  <dt className="text-[10px] font-semibold text-slate-500">
+                                                    บริษัทขนส่งที่อนุมัติ
+                                                  </dt>
+                                                  <dd className="mt-2 break-words text-[13px] font-bold leading-6 text-slate-800">
+                                                    {item.approved_company_name || "-"}
+                                                  </dd>
+                                                </div>
 
-                                            <div className="mt-4 border-t border-slate-100 pt-3">
-                                              <p className="text-[9px] font-bold text-slate-400">
-                                                หมายเหตุ
-                                              </p>
-                                              <p className="mt-1 whitespace-pre-wrap break-words text-[11px] font-medium leading-5 text-slate-600">
-                                                {item.remark || "-"}
-                                              </p>
+                                                {[
+                                                  {
+                                                    label: "ประเภทรถที่อนุมัติ",
+                                                    value: item.approved_truck_type || "-",
+                                                  },
+                                                  {
+                                                    label: "คาดการณ์วันเข้าคลัง",
+                                                    value: item.warehouse_plan_date
+                                                      ? formatThaiDate(item.warehouse_plan_date)
+                                                      : "-",
+                                                  },
+                                                  ...(hasTcasVehicleDetail
+                                                    ? [
+                                                      {
+                                                        label: "อนุมัติโดย",
+                                                        value: formatApprovedBy(item.approved_by),
+                                                      },
+                                                    ]
+                                                    : []),
+                                                ].map((field) => (
+                                                  <div
+                                                    key={field.label}
+                                                    className="flex min-h-[88px] min-w-0 flex-col rounded-xl border border-blue-100 bg-white p-3.5"
+                                                  >
+                                                    <dt className="text-[10px] font-semibold text-slate-500">
+                                                      {field.label}
+                                                    </dt>
+                                                    <dd className="mt-auto whitespace-pre-wrap break-words pt-3 text-[13px] font-bold leading-5 text-blue-800">
+                                                      {field.value}
+                                                    </dd>
+                                                  </div>
+                                                ))}
+                                              </dl>
+                                            </div>
+
+                                            {/* หมายเหตุ */}
+                                            <div className="mt-auto pt-4">
+                                              <div className="min-h-[100px] rounded-xl border border-slate-200 bg-white p-4">
+                                                <p className="text-[10px] font-bold text-slate-500">
+                                                  หมายเหตุจากคลัง
+                                                </p>
+                                                <p className="mt-2 whitespace-pre-wrap break-words text-[12px] font-medium leading-6 text-slate-700">
+                                                  {item.remark || "-"}
+                                                </p>
+                                              </div>
                                             </div>
                                           </section>
 
@@ -3713,31 +3741,50 @@ export default function AddFleetPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    disabled={currentPage === 1}
+                    disabled={loading || activePage <= 1}
                     onClick={() =>
-                      setCurrentPage((page) => Math.max(page - 1, 1))
+                      setCurrentPage(Math.max(activePage - 1, 1))
                     }
-                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ก่อนหน้า
                   </button>
 
-                  <span className="min-w-[90px] text-center text-xs font-bold text-slate-600">
-                    หน้า {currentPage} / {totalPages}
-                  </span>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                    <span>หน้า</span>
+
+                    <select
+                      aria-label="เลือกหน้าตาราง"
+                      value={activePage}
+                      disabled={loading || sortedRequests.length === 0}
+                      onChange={(event) =>
+                        setCurrentPage(Number(event.target.value))
+                      }
+                      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {Array.from(
+                        { length: totalPages },
+                        (_, index) => (
+                          <option key={index + 1} value={index + 1}>
+                            {index + 1}
+                          </option>
+                        ),
+                      )}
+                    </select>
+
+                    <span>/ {totalPages.toLocaleString("th-TH")}</span>
+                  </div>
 
                   <button
                     type="button"
-                    disabled={currentPage >= totalPages}
+                    disabled={loading || activePage >= totalPages}
                     onClick={() =>
-                      setCurrentPage((page) =>
-                        Math.min(page + 1, totalPages),
-                      )
+                      setCurrentPage(Math.min(activePage + 1, totalPages))
                     }
-                    className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+                    className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ถัดไป
                   </button>

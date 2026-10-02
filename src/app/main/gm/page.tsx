@@ -91,6 +91,8 @@ export default function GmStatusPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [searchText, setSearchText] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [requestTypeFilter, setRequestTypeFilter] = useState("all");
   const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
@@ -478,15 +480,14 @@ export default function GmStatusPage() {
   const normalizeStatus = (status?: string) => {
     const value = String(status || "").trim().toLowerCase();
 
-    if (value === "reject_by_gm") {
-      return "reject_by_gm";
-    }
+    const gmApprovedStatuses = [
+      "success",
+      "progress",
+      "partial_approved",
+      "fbp_pending",
+    ];
 
-    if (value === "gm_pending") {
-      return "gm_pending";
-    }
-
-    if (value === "fbp_pending") {
+    if (gmApprovedStatuses.includes(value)) {
       return "fbp_pending";
     }
 
@@ -755,7 +756,7 @@ export default function GmStatusPage() {
       if (statusFilter === "all") {
         if (!isAllowedCardStatus(item.status)) return false;
       } else {
-        if (itemStatus !== statusFilter) return false;
+        if (itemStatus !== normalizeStatus(statusFilter)) return false;
       }
 
       if (
@@ -808,6 +809,7 @@ export default function GmStatusPage() {
           item.license_replace,
           item.request_by,
           item.status,
+          formatStatusText(item.status),
         ]
           .join(" ")
           .toLowerCase();
@@ -912,6 +914,48 @@ export default function GmStatusPage() {
         : -comparison;
     });
   }, [groupedFilteredByRequestDate, sortConfig]);
+
+  // Paginate in the same date-group order displayed by the table.
+  const orderedRequests = useMemo(
+    () => sortedFilteredDates.flatMap((date) => groupedFilteredByRequestDate[date]),
+    [sortedFilteredDates, groupedFilteredByRequestDate],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(orderedRequests.length / pageSize));
+  const activePage = Math.min(Math.max(currentPage, 1), totalPages);
+  const pageStart = (activePage - 1) * pageSize;
+  const paginatedRequests = useMemo(
+    () => orderedRequests.slice(pageStart, pageStart + pageSize),
+    [orderedRequests, pageStart, pageSize],
+  );
+  const paginatedGroups = useMemo(() => {
+    const groups: Record<string, RequestItem[]> = {};
+    for (const item of paginatedRequests) {
+      const date = getRequestDateKey(item);
+      (groups[date] ??= []).push(item);
+    }
+    return groups;
+  }, [paginatedRequests]);
+  const paginatedDates = Object.keys(paginatedGroups);
+  const pageGroupOffsets: Record<string, number> = {};
+  let groupOffset = 0;
+  for (const date of paginatedDates) {
+    pageGroupOffsets[date] = groupOffset;
+    groupOffset += paginatedGroups[date].length;
+  }
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    searchText, statusFilter, requestTypeFilter, truckTypeFilter,
+    dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange,
+    selectedDC, userInfo, sortConfig, pageSize,
+  ]);
+
+  // Keep the selected page valid after approval, refresh or fewer results.
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
+  }, [totalPages]);
 
   const statusCounts = useMemo(() => {
     const summarize = (items: RequestItem[]) => ({
@@ -1589,8 +1633,8 @@ export default function GmStatusPage() {
                             }
                           }}
                           className={`whitespace-nowrap bg-transparent px-3 py-3 ${i === 0
-                              ? "sticky left-0 z-30 w-[52px] text-center"
-                              : ""
+                            ? "sticky left-0 z-30 w-[52px] text-center"
+                            : ""
                             } ${i === 6 ? "text-center" : ""} ${i === 10 ? "text-right" : ""
                             } ${sortKey
                               ? "cursor-pointer select-none transition hover:bg-blue-700"
@@ -1626,7 +1670,7 @@ export default function GmStatusPage() {
                       </td>
                     </tr>
                   ) : (
-                    sortedFilteredDates.map((date) => (
+                    paginatedDates.map((date) => (
                       <Fragment key={date}>
                         <tr>
                           <td
@@ -1660,7 +1704,7 @@ export default function GmStatusPage() {
                           </td>
                         </tr>
 
-                        {groupedFilteredByRequestDate[date].map((item, index) => {
+                        {paginatedGroups[date].map((item, index) => {
                           const status = item.status || "pending";
                           const statusText = formatStatusText(status);
                           const statusVisual = getStatusVisual(status);
@@ -1683,7 +1727,7 @@ export default function GmStatusPage() {
                               <tr className="group bg-white text-xs transition hover:bg-blue-50/30">
                                 <td className="sticky left-0 z-10 bg-white px-3 py-3 text-center group-hover:bg-blue-50/30">
                                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-black text-slate-500">
-                                    {index + 1}
+                                    {pageStart + pageGroupOffsets[date] + index + 1}
                                   </span>
                                 </td>
 
@@ -1747,7 +1791,7 @@ export default function GmStatusPage() {
                                 <td className="px-3 py-3">
                                   {normalizeStatus(item.status) ===
                                     "reject_by_gm" ||
-                                  normalizeStatus(item.status) ===
+                                    normalizeStatus(item.status) ===
                                     "fbp_pending" ? (
                                     <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                                       <div className="px-2 py-2 text-center">
@@ -1964,6 +2008,92 @@ export default function GmStatusPage() {
                 </tbody>
               </table>
             </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">
+                แสดง
+              </span>
+
+              <select
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setCurrentPage(1);
+                }}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold"
+              >
+                <option value={20}>20 รายการ</option>
+                <option value={25}>25 รายการ</option>
+                <option value={50}>50 รายการ</option>
+                <option value={100}>100 รายการ</option>
+              </select>
+
+              <span className="text-xs text-slate-400">
+                แสดง {orderedRequests.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + pageSize, orderedRequests.length)} จากทั้งหมด{" "}
+                {orderedRequests.length.toLocaleString("th-TH")} รายการ
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={loading || activePage <= 1}
+                onClick={() =>
+                  setCurrentPage(Math.max(activePage - 1, 1))
+                }
+                className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 disabled:opacity-40"
+              >
+                ก่อนหน้า
+              </button>
+
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                <span>หน้า</span>
+
+                <select
+                  aria-label="เลือกหน้า"
+                  value={activePage}
+                  disabled={loading || orderedRequests.length === 0}
+                  onChange={(event) =>
+                    setCurrentPage(Number(event.target.value))
+                  }
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 outline-none focus:border-blue-500 disabled:opacity-40"
+                >
+                  {Array.from(
+                    { length: totalPages },
+                    (_, index) => {
+                      const page = index + 1;
+
+                      return (
+                        <option key={page} value={page}>
+                          {page}
+                        </option>
+                      );
+                    },
+                  )}
+                </select>
+
+                <span>
+                  / {totalPages}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                disabled={
+                  loading ||
+                  activePage >= totalPages
+                }
+                onClick={() =>
+                  setCurrentPage(Math.min(activePage + 1, totalPages))
+                }
+                className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+              >
+                ถัดไป
+              </button>
+            </div>
+          </div>
+
           </div>
         </div>
       </main>

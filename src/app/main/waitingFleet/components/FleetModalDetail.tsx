@@ -66,6 +66,13 @@ interface RequestItem {
     reject_reason?: string | null;
 
     details?: RequestDetailItem[];
+    approved_trucks?: {
+        old_license: string;
+        new_truck_type: string;
+        new_vendor_name: string;
+        new_vendor_id: string;
+    }[];
+    rejected_trucks?: { old_license: string; reason: string }[];
 }
 
 interface ApprovedSupplierApiItem {
@@ -289,6 +296,26 @@ function FleetPopup({ children, label, busy, onDismiss }: {
     );
 }
 
+const licenseDecisionKey = (value: unknown) =>
+    String(value ?? "").trim().split(/\s+-\s+/)[0].replace(/\s+/g, "").toUpperCase();
+
+const finalDetailDecision = (value: unknown): "approved" | "rejected" | null => {
+    const status = String(value ?? "").trim().toLowerCase();
+    if (["approved", "progress", "approve", "อนุมัติ"].includes(status)) return "approved";
+    if (["rejected", "reject_by_fbp", "reject_by_center", "reject", "ไม่อนุมัติ"].includes(status) ||
+        status.startsWith("ไม่อนุมัติ") || status.startsWith("reject_") ||
+        status.startsWith("rejected_by_")) return "rejected";
+    return null;
+};
+
+type SavedLicenseDecision = {
+    license: string;
+    decision: "approved" | "rejected";
+    companyName?: string;
+    truckType?: string;
+    reason?: string;
+};
+
 export default function FleetModalDetail({
     open,
     onClose,
@@ -303,6 +330,121 @@ export default function FleetModalDetail({
         type: "success" | "error";
         text: string;
     } | null>(null);
+
+    const [sessionLicenseDecisions, setSessionLicenseDecisions] = useState<Record<string, SavedLicenseDecision>>({});
+
+    useEffect(() => {
+        setSessionLicenseDecisions({});
+    }, [open, data.id]);
+
+    const savedLicenseDecisions = useMemo(() => {
+        const saved: Record<string, SavedLicenseDecision> = {};
+        for (const detail of data.details ?? []) {
+            const decision = finalDetailDecision(detail.status);
+            const key = licenseDecisionKey(detail.license);
+            if (!decision || !key) continue;
+            saved[key] = {
+                license: `${String(detail.license ?? "").trim()}${detail.province?.trim() ? ` - ${detail.province.trim()}` : ""}`,
+                decision,
+                companyName: detail.company_name_replace || detail.detail_company_name_replace || "",
+                truckType: detail.truck_type_replace || detail.detail_truck_type_replace || "",
+                reason: decision === "rejected" ? String(detail.status ?? "") : "",
+            };
+        }
+        for (const truck of data.approved_trucks ?? []) {
+            const key = licenseDecisionKey(truck.old_license);
+            if (!key) continue;
+            saved[key] = {
+                license: saved[key]?.license || truck.old_license,
+                decision: "approved",
+                companyName: truck.new_vendor_name,
+                truckType: truck.new_truck_type,
+            };
+        }
+        for (const truck of data.rejected_trucks ?? []) {
+            const key = licenseDecisionKey(truck.old_license);
+            if (!key) continue;
+            saved[key] = { license: saved[key]?.license || truck.old_license, decision: "rejected", reason: truck.reason };
+        }
+        return { ...saved, ...sessionLicenseDecisions };
+    }, [data.details, data.approved_trucks, data.rejected_trucks, sessionLicenseDecisions]);
+
+    const getRemainingLicenseCount = (
+        decisions: { license: string; decision: string }[]
+    ): number => {
+        const finished = new Set<string>(
+            Object.keys(savedLicenseDecisions)
+        );
+    
+        for (const item of decisions) {
+            if (finalDetailDecision(item.decision)) {
+                finished.add(licenseDecisionKey(item.license));
+            }
+        }
+    
+        let allLicenses: string[] = [];
+    
+        if (Array.isArray(data.details) && data.details.length > 0) {
+            allLicenses = data.details.map((detail) =>
+                licenseDecisionKey(detail.license)
+            );
+        } else {
+            const raw = data.license_replace;
+            let licenses: string[] = [];
+    
+            if (Array.isArray(raw)) {
+                licenses = raw.map((license) => String(license).trim());
+            } else {
+                const text = String(raw ?? "").trim();
+    
+                if (text) {
+                    try {
+                        const parsed: unknown = JSON.parse(text);
+    
+                        licenses = Array.isArray(parsed)
+                            ? parsed.map((license: unknown) =>
+                                String(license ?? "").trim()
+                            )
+                            : text.split(",").map((license) => license.trim());
+                    } catch {
+                        licenses = text
+                            .split(",")
+                            .map((license) => license.trim());
+                    }
+                }
+            }
+    
+            allLicenses = licenses
+                .filter(Boolean)
+                .map((license) => licenseDecisionKey(license));
+        }
+    
+        // ไม่มีข้อมูลทะเบียน ยังไม่ถือว่าพิจารณาครบ
+        if (allLicenses.length === 0) return 1;
+    
+        return allLicenses.filter(
+            (key: string) => !key || !finished.has(key)
+        ).length;
+    };
+
+    const rememberSavedDecisions = (decisions: {
+        license: string; decision: string; company_name?: string;
+        truck_type?: string; reject_reason?: string;
+    }[]) => {
+        setSessionLicenseDecisions((previous) => {
+            const next = { ...previous };
+            for (const item of decisions) {
+                const decision = finalDetailDecision(item.decision);
+                const key = licenseDecisionKey(item.license);
+                if (!decision || !key) continue;
+                next[key] = {
+                    license: item.license, decision, companyName: item.company_name,
+                    truckType: item.truck_type, reason: item.reject_reason
+                };
+            }
+            return next;
+        });
+    };
 
     const refreshAfterPopupRef = useRef(false);
     const closeAfterPopupRef = useRef(false);
@@ -691,7 +833,7 @@ export default function FleetModalDetail({
                     })(),
                 })
             );
-            if (normalizeFleetTypeKey(data.status) === "PARTIAL_APPROVED") {
+            if (["PARTIAL_APPROVED", "FBP_PENDING"].includes(normalizeFleetTypeKey(data.status))) {
                 const savedIds = savedRows.map((row) => row.rowId);
                 setPersistedRowIds(savedIds);
                 setConfirmedApprovedRowIds(savedIds);
@@ -742,6 +884,8 @@ export default function FleetModalDetail({
         data.fleet_truck_type,
         data.approved_suppliers,
         data.replacement_mappings,
+        data.approved_trucks,
+        data.details,
         data.status,
     ]);
 
@@ -1677,7 +1821,7 @@ export default function FleetModalDetail({
                 const status = String(detail.status || "").toLowerCase().trim();
 
                 // ข้ามคันที่ถูกดำเนินการไปแล้ว (อนุมัติแล้ว หรือ ปฏิเสธแล้ว)
-                if (status === "progress" || status === "approved" || status === "rejected") {
+                if (finalDetailDecision(status) || savedLicenseDecisions[licenseDecisionKey(detail.license)]) {
                     return;
                 }
 
@@ -1723,8 +1867,8 @@ export default function FleetModalDetail({
             }
         }
 
-        return Array.from(licenses);
-    }, [data.details, data.license_replace]);
+        return Array.from(licenses).filter((license) => !savedLicenseDecisions[licenseDecisionKey(license)]);
+    }, [data.details, data.license_replace, savedLicenseDecisions]);
 
     const updateSingleVehicleState = (
         rowKey: string,
@@ -2229,7 +2373,7 @@ export default function FleetModalDetail({
         }
         return [];
     }, [data.approved_suppliers, data.replacement_mappings, isStandardReplacementType,
-        data.approved_company_name, data.approved_company_id, data.approved_truck_type, data.approved_qty]);
+    data.approved_company_name, data.approved_company_id, data.approved_truck_type, data.approved_qty]);
 
     const approvedQtyFromApi = Math.max(
         Number(data.approved_qty ?? 0),
@@ -2255,12 +2399,11 @@ export default function FleetModalDetail({
         return selected.size;
     }, [approvedSuppliers]);
 
-    const unassignedReplacementLicenseCount = Math.max(
-        replacementLicenseOptions.length -
-        selectedReplacementLicenseCount -
-        rejectedReplacementLicenses.length,
-        0
-    );
+    const unassignedReplacementLicenseCount = replacementLicenseOptions.filter((license) =>
+        !approvedSuppliers.some((row) => row.replacementLicenses.some((selected) =>
+            licenseDecisionKey(selected) === licenseDecisionKey(license))) &&
+        !rejectedReplacementLicenses.some((selected) => licenseDecisionKey(selected) === licenseDecisionKey(license))
+    ).length;
 
     const undecidedReplacementLicenses = useMemo(
         () => replacementLicenseOptions.filter(
@@ -2280,7 +2423,6 @@ export default function FleetModalDetail({
     const areReplacementLicensesComplete =
         !isStandardReplacementType ||
         (
-            replacementLicenseOptions.length > 0 &&
             undecidedReplacementLicenses.length === 0
         );
 
@@ -2526,7 +2668,9 @@ export default function FleetModalDetail({
                 approved_by: approvedBy,
 
                 approved_qty: approvedQtyToSave,
-                not_approved_qty: rowToSave ? 0 : draftNotApprovedQty,
+                not_approved_qty: rowToSave ? 0 : isStandardReplacementType
+                    ? rejectedReplacementLicenses.filter((license) => !savedLicenseDecisions[licenseDecisionKey(license)]).length
+                    : draftNotApprovedQty,
 
                 // หมายเหตุของส่วนที่อนุมัติ
                 remark: approvalRemark,
@@ -2575,17 +2719,14 @@ export default function FleetModalDetail({
                     unassignedReplacementLicenseCount,
 
                 rejected_replacement_licenses:
-                    rowToSave ? [] : rejectedReplacementLicenses,
+                    rowToSave ? [] : rejectedReplacementLicenses.filter((license) => !savedLicenseDecisions[licenseDecisionKey(license)]),
 
                 // ส่งผลแยกตามทะเบียน เพื่อให้ backend บันทึกสถานะแต่ละรายการได้
                 replacement_license_decisions: isStandardReplacementType
-                    ? (rowToSave
-                        ? rowToSave.replacementLicenses
-                        : replacementLicenseOptions.filter((license) =>
-                            !approvedSuppliers.some((row) =>
-                                persistedRowIds.includes(row.rowId) && row.replacementLicenses.includes(license)
-                            )
-                        )
+                    ? Array.from(new Set([
+                        ...rowsToSave.flatMap((row) => row.replacementLicenses),
+                        ...(!rowToSave ? rejectedReplacementLicenses : []),
+                    ])).filter((license) => !savedLicenseDecisions[licenseDecisionKey(license)]
                     ).map((license) => {
                         const approvedRow = rowsToSave.find((row) =>
                             row.replacementLicenses.includes(license)
@@ -2612,6 +2753,14 @@ export default function FleetModalDetail({
                     data.fleet_truck_type ||
                     "",
             };
+
+            if (isStandardReplacementType) {
+                payload.unassigned_license_qty = getRemainingLicenseCount(payload.replacement_license_decisions);
+                payload.status = payload.unassigned_license_qty === 0 ? "progress" : "fbp_pending";
+                // Keep append enabled for incremental saves, including the last one.
+                payload.append_approval = true;
+                payload.partial_approval = payload.status !== "progress";
+            }
 
             console.log("FBP APPROVE PAYLOAD:", payload);
 
@@ -2657,6 +2806,14 @@ export default function FleetModalDetail({
                     result?.message ||
                     "จัดรถและบันทึกข้อมูลเรียบร้อยแล้ว",
             });
+
+            rememberSavedDecisions(payload.replacement_license_decisions);
+            setPersistedRowIds((current) => Array.from(new Set([...current, ...rowsToSave.map((row) => row.rowId)])));
+            if (payload.status === "progress") {
+                setDecisionCompleted(true);
+                closeAfterPopupRef.current = true;
+                refreshAfterPopupRef.current = true;
+            }
 
             if (rowToSave) {
                 setConfirmedApprovedRowIds((current) =>
@@ -2707,6 +2864,11 @@ export default function FleetModalDetail({
             const approvedBy = getCurrentUserText();
             if (!approvedBy) throw new Error("ไม่พบข้อมูลผู้ดำเนินการ");
 
+            const rejectionDecisions = licensesToReject.map((license) => ({
+                license, decision: "rejected", reject_reason: rejectReason.trim(),
+            }));
+            const remainingLicenseCount = getRemainingLicenseCount(rejectionDecisions);
+
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/waiting_fleet_save.php",
                 {
@@ -2717,7 +2879,8 @@ export default function FleetModalDetail({
                     },
                     body: JSON.stringify({
                         id: Number(data.id),
-                        status: "fbp_pending",
+                        status: remainingLicenseCount === 0 ? "progress" : "fbp_pending",
+                        unassigned_license_qty: remainingLicenseCount,
                         partial_rejection: true,
                         append_rejection: true,
                         approved_by: approvedBy,
@@ -2741,6 +2904,12 @@ export default function FleetModalDetail({
                 throw new Error(result?.message || "บันทึกไม่อนุมัติไม่สำเร็จ");
             }
 
+            rememberSavedDecisions(rejectionDecisions);
+            if (remainingLicenseCount === 0) {
+                setDecisionCompleted(true);
+                closeAfterPopupRef.current = true;
+                refreshAfterPopupRef.current = true;
+            }
             setRejectedReplacementLicenses((current) =>
                 Array.from(new Set([...current, ...licensesToReject]))
             );
@@ -3112,10 +3281,10 @@ export default function FleetModalDetail({
                         .toLowerCase();
 
                     const alreadyApproved =
-                        savedStatus === "progress";
+                        finalDetailDecision(savedStatus) === "approved";
 
                     const alreadyRejected =
-                        savedStatus === "reject_by_fbp";
+                        finalDetailDecision(savedStatus) === "rejected";
 
                     nextStates[rowKey] = {
                         decision: alreadyApproved
@@ -3616,7 +3785,7 @@ export default function FleetModalDetail({
                             .toLowerCase();
 
                         return (
-                            ["progress", "reject_by_fbp"].includes(savedStatus) ||
+                            Boolean(finalDetailDecision(savedStatus)) ||
                             detailState?.approvedSaved === true ||
                             detailState?.decision === "rejected"
                         );
@@ -3862,9 +4031,7 @@ export default function FleetModalDetail({
                             singleVehicleStates[detailRowKey];
 
                         return (
-                            ["progress", "reject_by_fbp"].includes(
-                                getDetailStatus(detail)
-                            ) ||
+                            Boolean(finalDetailDecision(getDetailStatus(detail))) ||
                             detailState?.approvedSaved === true ||
                             detailState?.decision === "rejected"
                         );
@@ -4109,6 +4276,7 @@ export default function FleetModalDetail({
                     {/* ด้านขวา */}
                     <aside className="min-h-0 overflow-y-auto border-t border-slate-200/70 bg-white p-3 sm:p-5 lg:border-l lg:border-t-0">
                         <div className="space-y-4">
+                            
                             {/* สรุปข้อมูลคำขอ */}
                             <section className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-[0_3px_16px_rgba(15,23,42,0.035)]">
                                 <div className="border-b border-slate-200/70 bg-gradient-to-r from-slate-700 via-slate-800 to-blue-900 px-4 py-3.5 text-white">
@@ -4162,7 +4330,18 @@ export default function FleetModalDetail({
                                         ["ประเภทรถที่อนุมัติ", data.approved_truck_type || "-"],
                                         ["จำนวนที่อนุมัติแล้ว", `${formatNumber(approvedQtyFromApi)} คัน`],
                                         ["เหตุผลไม่อนุมัติ", data.reject_reason || "-"],
-                                    ].map(([label, value]) => (
+                                    ]
+                                    .filter(([label]) => {
+                                        const isReplacementFleet = String(
+                                            data.fleet_type || ""
+                                        ).includes("ทดแทน");
+                                
+                                        return !(
+                                            isReplacementFleet &&
+                                            label === "ผู้ให้บริการที่อนุมัติแล้ว"
+                                        );
+                                    })
+                                    .map(([label, value]) => (
                                         <div
                                             key={label}
                                             className="flex items-start justify-between gap-4 py-3 text-xs"
@@ -4170,14 +4349,71 @@ export default function FleetModalDetail({
                                             <span className="shrink-0 font-semibold text-slate-400">
                                                 {label}
                                             </span>
-
-                                            <span className="break-words text-right font-semibold text-slate-800">
-                                                {value}
-                                            </span>
+                                    
+                                            {label === "ผู้ให้บริการที่อนุมัติแล้ว" ? (
+                                                <div className="min-w-0 flex-1 space-y-2">
+                                                    {String(value || "ยังไม่มีข้อมูล")
+                                                        .split(/,\s*(?![^()]*\))/)
+                                                        .filter((item) => item.trim())
+                                                        .map((item, index) => {
+                                                            const match = item.trim().match(
+                                                                /^(.*?)\s*\(([^()]*)\)\s*$/
+                                                            );
+                                    
+                                                            const companyName = match
+                                                                ? match[1].trim()
+                                                                : item.trim();
+                                    
+                                                            const vehicleDetail = match
+                                                                ? match[2].replace(/\s+x\s+/gi, " × ")
+                                                                : "";
+                                    
+                                                            return (
+                                                                <div
+                                                                    key={`${companyName}-${index}`}
+                                                                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left"
+                                                                >
+                                                                    <div className="break-words font-semibold text-slate-800">
+                                                                        {companyName}
+                                                                    </div>
+                                    
+                                                                    {vehicleDetail && (
+                                                                        <div className="mt-1 text-slate-500">
+                                                                            {vehicleDetail}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                </div>
+                                            ) : (
+                                                <span className="min-w-0 break-words text-right font-semibold text-slate-800">
+                                                    {value}
+                                                </span>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
                             </section>
+
+                            {isStandardReplacementType && Object.keys(savedLicenseDecisions).length > 0 && (
+                                <section className="my-4 rounded-2xl border border-slate-200 bg-white p-4">
+                                    <h3 className="text-sm font-bold text-slate-800">ทะเบียนที่บันทึกแล้ว</h3>
+                                    <p className="mt-1 text-xs text-slate-500">แสดงผลจากครั้งก่อนและครั้งนี้ ทะเบียนเหล่านี้จะไม่ถูกส่งซ้ำ</p>
+                                    <div className="mt-3 space-y-2">
+                                        {Object.entries(savedLicenseDecisions).map(([key, item]) => (
+                                            <div key={key} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 ${item.decision === "approved" ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                                                <div className="min-w-0">
+                                                    <p className="break-words text-sm font-semibold text-slate-800">{item.license}</p>
+                                                    {item.decision === "approved" && (item.companyName || item.truckType) && <p className="mt-1 text-xs text-slate-600">{item.truckType || "-"} · {item.companyName || "ไม่ระบุผู้ให้บริการ"}</p>}
+                                                    {item.decision === "rejected" && item.reason && <p className="mt-1 break-words text-xs text-rose-700">{item.reason}</p>}
+                                                </div>
+                                                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${item.decision === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{item.decision === "approved" ? "อนุมัติ · บันทึกแล้ว" : "ไม่อนุมัติ · บันทึกแล้ว"}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                            )}
 
                             {/* รายละเอียดรถทดแทนแบบพิจารณารายคัน */}
                             {isReplacementRequest && (

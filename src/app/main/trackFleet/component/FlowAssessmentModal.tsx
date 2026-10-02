@@ -1397,32 +1397,40 @@ export default function FlowAssessmentModal({
     field: keyof FlowDateDraft,
     value: string
   ) => {
-    setDateDrafts((current) => ({
-      ...current,
-      [flowId]: {
-        str_date: current[flowId]?.str_date || "",
-        end_date: current[flowId]?.end_date || "",
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleClearFlowDates = (flowId: string) => {
-    setDateDrafts((current) => ({
-      ...current,
-      [flowId]: {
-        str_date: "",
-        end_date: "",
-      },
-    }));
+    const flow = flowRows.find(
+      (item) => String(item.id) === flowId
+    );
+  
+    const isLevel8 = Number(flow?.process_level) === 8;
+  
+    setDateDrafts((current) => {
+      const previousDraft = current[flowId] || {
+        str_date: toDateInputValue(flow?.str_date),
+        end_date: toDateInputValue(flow?.end_date),
+      };
+  
+      return {
+        ...current,
+        [flowId]: isLevel8
+          ? {
+              str_date: value,
+              end_date: value,
+            }
+          : {
+              ...previousDraft,
+              [field]: value,
+            },
+      };
+    });
   };
 
   const handleSaveFlowDates = async (flow: DisplayFlowRow) => {
     const flowId = String(flow.id);
-
+    const isLevel8 = Number(flow.process_level) === 8;
+  
     if (!canEditProcessLevel(flow.process_level)) {
       const department = getCurrentDepartment();
-
+  
       setError(
         department === "FBP"
           ? "แผนก FBP สามารถกรอกได้เฉพาะ Process Level 7"
@@ -1432,27 +1440,29 @@ export default function FlowAssessmentModal({
       );
       return;
     }
-
+  
     const documentFinalStatus = data.flow_data.reduce<
       "cancelled" | "expired" | null
     >((status, item) => {
       if (status || String(item.vehicle_no) !== String(flow.vehicle_no)) {
         return status;
       }
-
+  
       const processName = normalizeProcessName(
-        data.steps.find((step) => String(step.id) === String(item.process_id))
-          ?.process
+        data.steps.find(
+          (step) => String(step.id) === String(item.process_id)
+        )?.process
       );
+  
       const hasFinalDate = Boolean(item.str_date || item.end_date);
-
+  
       if (!hasFinalDate) return null;
       if (processName === CANCEL_DOCUMENT_PROCESS) return "cancelled";
       if (processName === EXPIRED_DOCUMENT_PROCESS) return "expired";
-
+  
       return null;
     }, null);
-
+  
     if (documentFinalStatus) {
       setError(
         documentFinalStatus === "cancelled"
@@ -1461,66 +1471,71 @@ export default function FlowAssessmentModal({
       );
       return;
     }
-
-    // ถ้ามีวันที่ในฐานข้อมูลครบแล้ว ไม่อนุญาตให้บันทึกซ้ำ
+  
     const isAlreadySaved = Boolean(flow.str_date && flow.end_date);
-
+  
     if (isAlreadySaved) {
-      setError("ขั้นตอนนี้กำหนดวันที่และบันทึกเรียบร้อยแล้ว ไม่สามารถแก้ไขซ้ำได้");
+      setError(
+        "ขั้นตอนนี้กำหนดวันที่และบันทึกเรียบร้อยแล้ว ไม่สามารถแก้ไขซ้ำได้"
+      );
       return;
     }
-
-    const draft = dateDrafts[flowId] || {
+  
+    const currentDraft = dateDrafts[flowId] || {
       str_date: toDateInputValue(flow.str_date),
       end_date: toDateInputValue(flow.end_date),
     };
-
-    // บังคับเฉพาะวันที่เริ่ม
+  
+    // Process Level 8 ใช้วันที่เริ่มเป็นวันที่สิ้นสุดด้วย
+    const draft = isLevel8
+      ? {
+          str_date: currentDraft.str_date,
+          end_date: currentDraft.str_date,
+        }
+      : currentDraft;
+  
     if (!draft.str_date) {
       setError("กรุณาเลือกวันที่เริ่ม");
       return;
     }
-
-    // ตรวจวันที่สิ้นสุดเฉพาะกรณีที่มีการกรอก
+  
     if (draft.end_date && draft.end_date < draft.str_date) {
       setError("วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่ม");
       return;
     }
-
-    // จำนวนวันที่ใช้จริง แยกจาก SLA เป้าหมายใน Master Flow
+  
     const actualDays = draft.end_date
       ? calculateSla(draft.str_date, draft.end_date)
       : 0;
-
+  
     if (draft.end_date && actualDays <= 0) {
       setError("ไม่สามารถคำนวณจำนวนวันที่ใช้จริงได้");
       return;
     }
-
+  
     const user = getCreatedBy();
-
+  
     if (!user) {
       setError("ไม่พบข้อมูลผู้ใช้งานใน localStorage");
       return;
     }
-
+  
     try {
       setSavingFlowId(flowId);
       setError("");
       setActionMessage("");
-
+  
       const payload = {
         request_id: String(flow.request_id || requestId || ""),
         process_id: String(flow.process_id || ""),
+        process_level: Number(flow.process_level),
         vehicle_no: String(flow.vehicle_no || ""),
         str_date: draft.str_date,
         end_date: draft.end_date || null,
-        // flow_data.sla เก็บจำนวนวันที่ใช้จริง
-        // SLA เป้าหมายอ่านจาก steps.sla โดยไม่เขียนทับค่า Master
         sla: draft.end_date ? String(actualDays) : "0",
         user,
       };
-
+  
       const response = await fetch(FLOW_UPDATE_API_URL, {
         method: "POST",
         headers: {
@@ -1529,36 +1544,33 @@ export default function FlowAssessmentModal({
         },
         body: JSON.stringify(payload),
       });
-
+  
       let result: UpdateFlowResponse = {};
-
+      const responseText = await response.text();
+  
       try {
-        const text = await response.text();
-      
-        console.log("FLOW UPDATE RESPONSE:", text);
-      
-        result = JSON.parse(text);
-      
-      } catch (error) {
+        result = JSON.parse(responseText);
+      } catch {
         throw new Error(
-          "API RESPONSE ไม่ใช่ JSON: " + error
+          `API RESPONSE ไม่ใช่ JSON (${response.status})`
         );
       }
-
+  
       if (!response.ok || result.status !== "success") {
         throw new Error(
           result.message || `บันทึกวันที่ไม่สำเร็จ (${response.status})`
         );
       }
-
+  
       setActionMessage(
         result.message ||
-        `บันทึกวันที่ขั้นตอน “${flow.process}” ของรถคันที่ ${flow.vehicle_no} สำเร็จ`
+          `บันทึกวันที่ขั้นตอน “${flow.process}” ของรถคันที่ ${flow.vehicle_no} สำเร็จ`
       );
-
+  
       await fetchFlowData();
     } catch (saveError) {
       console.error("handleSaveFlowDates error:", saveError);
+  
       setError(
         saveError instanceof Error
           ? saveError.message
@@ -2211,10 +2223,13 @@ export default function FlowAssessmentModal({
                 <InfoCard
                   icon={<Truck size={17} />}
                   label="ประเภทรถ"
-                  value={request?.fleet_truck_type || "-"}
-                  subValue={`${request?.fleet_type || "-"} · ${formatNumber(
+                  value={ `${request?.fleet_truck_type || "-"} | ${request?.fleet_type || "-"} · ${formatNumber(
                     request?.qty
-                  )} คัน`}
+                  )} คัน`} 
+                  subValue={''}
+                  // {`${request?.fleet_type || "-"} · ${formatNumber(
+                  //   request?.qty
+                  // )} คัน`
                 />
                 <InfoCard
                   icon={<CalendarDays size={17} />}
