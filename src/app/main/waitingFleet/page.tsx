@@ -312,11 +312,29 @@ export default function WaitingFleetPage() {
   };
   const isFbpPendingItem = (item: RequestItem) => {
     const { requestedQty, approvedQty } = getQtySummary(item);
-    if (requestedQty > 0 && approvedQty === requestedQty) return false;
-    if (isReplacementRequest(item) && Array.isArray(item.details) && item.details.length > 0) {
-      return item.details.some((detail) => getDetailStatus(detail) === "fbp_pending");
+  
+    if (requestedQty > 0 && approvedQty === requestedQty) {
+      return false;
     }
-    return normalizeStatus(item.status) === "fbp_pending";
+  
+    const parentPending = normalizeStatus(item.status) === "fbp_pending";
+  
+    if (
+      isReplacementRequest(item) &&
+      Array.isArray(item.details) &&
+      item.details.length > 0
+    ) {
+      return item.details.some((detail) => {
+        const detailStatus = getDetailStatus(detail);
+  
+        return (
+          detailStatus === "fbp_pending" ||
+          (detailStatus === "" && parentPending)
+        );
+      });
+    }
+  
+    return parentPending;
   };
   const isFbpRejectedItem = (item: RequestItem) => {
     const { requestedQty, approvedQty, notApprovedQty } = getQtySummary(item);
