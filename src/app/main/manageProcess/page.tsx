@@ -1313,11 +1313,11 @@ export default function FleetFlowPage() {
 
                                                     <th className="px-6 py-4 text-left">
                                                         <p className="text-xs font-semibold text-slate-700">
-                                                            รายละเอียดกระบวนการ
+                                                        วิกฤต: จำเป็นต้องดำเนินการ (SLA)
                                                         </p>
 
                                                         <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Details
+                                                        Action Required
                                                         </p>
                                                     </th>
 

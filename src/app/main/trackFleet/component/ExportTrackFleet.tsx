@@ -3,6 +3,7 @@
 import {
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 
@@ -26,7 +27,26 @@ import {
     X,
 } from "lucide-react";
 
-interface ExportRequestItem {
+interface FlowDates {
+    quota_wait_start_date?: string | null;
+    quota_wait_end_date?: string | null;
+    allocation_sign_start_date?: string | null;
+    allocation_sign_end_date?: string | null;
+    finance_approval_start_date?: string | null;
+    finance_approval_end_date?: string | null;
+    garage_delivery_start_date?: string | null;
+    garage_delivery_end_date?: string | null;
+    body_installation_start_date?: string | null;
+    body_installation_end_date?: string | null;
+    registration_wait_start_date?: string | null;
+    registration_wait_end_date?: string | null;
+    warehouse_delivery_start_date?: string | null;
+    warehouse_delivery_end_date?: string | null;
+    document_expiry_end_date?: string | null;
+    document_cancel_date?: string | null;
+}
+
+interface ExportRequestItem extends FlowDates {
     id?: string | number | null;
 
     running_doc?: string;
@@ -34,7 +54,7 @@ interface ExportRequestItem {
 
     vehicle_no?: string | number;
     vehicle_license?: string;
-    vehicle_info?: {
+    vehicle_info?: FlowDates & {
         vehicle_no?: string | number | null;
         car_chassis?: string | null;
         car_model?: string | null;
@@ -99,9 +119,20 @@ interface ExportRequestItem {
     export_running_doc?: string;
 
     details?: ExportRequestDetail[];
+    history?: RequestStatusHistoryItem[];
+    incoming_trucks?: ExportRequestDetail[];
+    flow_dates_by_vehicle?: Record<string, FlowDates>;
+    flow_data?: Array<{
+        vehicle_no?: string | number | null;
+        process_level?: string | number | null;
+        str_date?: string | null;
+        end_date?: string | null;
+    }>;
 }
 
-interface ExportRequestDetail {
+interface ExportRequestDetail extends FlowDates {
+    vehicle_no?: string | number;
+    warehouse_info?: ExportRequestItem["vehicle_info"];
     id?: string | number;
     request_id?: string | number;
     license?: string | null;
@@ -164,24 +195,37 @@ interface ExportRequestModalProps {
 export default function ExportRequestModal({
     open,
     onClose,
-    requests = [],
     dcLabel,
     exportApiUrl,
 }: ExportRequestModalProps) {
     const [trackRows, setTrackRows] = useState<ExportRequestItem[]>([]);
-    const [loadingTrackRows, setLoadingTrackRows] = useState(false);
+    const [loadingTrackRows, setLoadingTrackRows] = useState(true);
+    const [loadError, setLoadError] = useState("");
+    const [loadingFbp, setLoadingFbp] = useState(true);
+    const datesInitialized = useRef(false);
+    const requestApiUrl = exportApiUrl ||
+        "http://192.168.158.210/api_new_truck/api/request_get_export.php";
 
-    // Read every page from the same filtered vehicle endpoint as the main table.
+    // Load all request pages from the combined export API.
     useEffect(() => {
-        if (!open || !exportApiUrl) return;
+        if (!open) return;
         const controller = new AbortController();
+        datesInitialized.current = false;
+        setLoadError("");
         setTrackRows([]);
         setLoadingTrackRows(true);
 
         const loadAllVehicles = async () => {
             try {
                 const getPage = async (page: number) => {
-                    const url = new URL(exportApiUrl);
+                    const url = new URL(requestApiUrl, window.location.href);
+                    // Convert the previous request endpoint while preserving its query parameters.
+                    url.pathname = url.pathname.replace(/(?:request_get|track_fleet_get)\.php$/, "request_get_export.php");
+                    if (!url.pathname.endsWith("/request_get_export.php")) {
+                        throw new Error("Export ต้องใช้ request_get_export.php กรุณาตรวจสอบ exportApiUrl");
+                    }
+                    url.searchParams.delete("group_mode");
+                    url.searchParams.set("lite", "0");
                     url.searchParams.set("page", String(page));
                     url.searchParams.set("limit", "100");
                     const response = await fetch(url.toString(), {
@@ -193,11 +237,19 @@ export default function ExportRequestModal({
                     if (payload.status !== "success" || !Array.isArray(payload.data)) {
                         throw new Error(payload.message || "โหลดรายการรถไม่สำเร็จ");
                     }
+                    if (payload.data.some((row: ExportRequestItem) =>
+                        !Object.prototype.hasOwnProperty.call(row, "flow_dates_by_vehicle")
+                    )) {
+                        throw new Error("API ยังไม่ได้ส่งวันที่ขั้นตอน กรุณาวาง request_get_export.php เวอร์ชันล่าสุดบนเซิร์ฟเวอร์");
+                    }
                     return payload;
                 };
 
                 const first = await getPage(1);
-                const totalPages = Number(first.pagination?.total_pages || 1);
+                const totalPages = Number(first.pagination?.total_pages);
+                if (!Number.isInteger(totalPages) || totalPages < 0) {
+                    throw new Error("API ต้องส่ง pagination.total_pages กรุณาใช้ request_get_export.php");
+                }
                 const rows: ExportRequestItem[] = [...first.data];
                 for (let page = 2; page <= totalPages; page += 5) {
                     const batch = await Promise.all(
@@ -210,6 +262,7 @@ export default function ExportRequestModal({
             } catch (error) {
                 if (!controller.signal.aborted) {
                     console.error("โหลดข้อมูล Export ไม่สำเร็จ:", error);
+                    setLoadError(error instanceof Error ? error.message : "โหลดข้อมูล Export ไม่สำเร็จ");
                     setTrackRows([]);
                 }
             } finally {
@@ -218,9 +271,8 @@ export default function ExportRequestModal({
         };
         void loadAllVehicles();
         return () => controller.abort();
-    }, [open, exportApiUrl]);
+    }, [open, requestApiUrl]);
 
-    const [requestStatusRows, setRequestStatusRows] = useState<ExportRequestItem[]>([]);
     const [fbpRows, setFbpRows] = useState<FbpItem[]>([]);
     const [fbpApprovalByRequest, setFbpApprovalByRequest] = useState<
         Record<string, FbpApprovalInfo>
@@ -233,56 +285,9 @@ export default function ExportRequestModal({
 
         const controller = new AbortController();
 
-        const loadRequestStatuses = async () => {
-            try {
-                const response = await fetch(
-                    "http://192.168.158.210/api_new_truck/api/request_get.php",
-                    {
-                        method: "GET",
-                        signal: controller.signal,
-                        cache: "no-store",
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-
-                const payload = await response.json();
-
-                const rows = Array.isArray(payload)
-                    ? payload
-                    : Array.isArray(payload?.data)
-                        ? payload.data
-                        : Array.isArray(payload?.requests)
-                            ? payload.requests
-                            : Array.isArray(payload?.result)
-                                ? payload.result
-                                : [];
-
-                setRequestStatusRows(rows);
-            } catch (error) {
-                if ((error as Error).name !== "AbortError") {
-                    setRequestStatusRows([]);
-                }
-            }
-        };
-
-        loadRequestStatuses();
-
-        return () => {
-            controller.abort();
-        };
-    }, [open]);
-
-    useEffect(() => {
-        if (!open) {
-            return;
-        }
-
-        const controller = new AbortController();
-
         const loadFbpData = async () => {
+            setLoadingFbp(true);
+            setFbpRows([]);
             try {
                 const response = await fetch(
                     "http://192.168.158.210/api_new_truck/api/get_fbp.php",
@@ -299,17 +304,23 @@ export default function ExportRequestModal({
 
                 const payload = await response.json();
 
+                if (!Array.isArray(payload) && (payload.status !== "success" || !Array.isArray(payload.data))) {
+                    throw new Error(payload.message || "โหลดข้อมูล FBP ไม่สำเร็จ");
+                }
                 const rows: FbpItem[] = Array.isArray(payload)
                     ? payload
                     : Array.isArray(payload?.data)
                         ? payload.data
                         : [];
 
-                setFbpRows(rows);
+                if (!controller.signal.aborted) setFbpRows(rows);
             } catch (error) {
                 if ((error as Error).name !== "AbortError") {
                     setFbpRows([]);
+                    setLoadError("โหลดข้อมูลบริษัท FBP ไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่");
                 }
+            } finally {
+                if (!controller.signal.aborted) setLoadingFbp(false);
             }
         };
 
@@ -321,13 +332,7 @@ export default function ExportRequestModal({
     }, [open]);
 
     const safeRequests = useMemo<ExportRequestItem[]>(() => {
-        const sourceRequests = exportApiUrl ? trackRows : requests;
-
-        const statusById = new Map(
-            requestStatusRows
-                .filter((item) => item.id !== null && item.id !== undefined)
-                .map((item) => [String(item.id), item])
-        );
+        const sourceRequests = trackRows;
 
         const normalizeCompanyName = (value?: string) =>
             String(value || "")
@@ -378,10 +383,6 @@ export default function ExportRequestModal({
                     ? String(item.id)
                     : "";
 
-            const apiItem = requestId
-                ? statusById.get(requestId)
-                : undefined;
-
             const parsedApprovedCompany = splitApprovedCompanyName(
                 item.approved_company_name
             );
@@ -396,9 +397,9 @@ export default function ExportRequestModal({
 
             return {
                 ...item,
-                status: apiItem?.status ?? item.status,
+                status: item.status,
                 status_details:
-                    apiItem?.status_details ?? item.status_details,
+                    item.status_details,
                 approved_company_name:
                     matchedFbp?.NAME ?? parsedApprovedCompany.companyName,
                 approved_company_short_name:
@@ -410,7 +411,7 @@ export default function ExportRequestModal({
                     parsedApprovedCompany.truckType ||
                     item.truck_type_replace,
                 details:
-                    apiItem?.details ?? item.details,
+                    item.details,
                 fbp_status:
                     fbpApproval?.statusText ?? item.fbp_status,
                 fbp_approved_date:
@@ -418,10 +419,7 @@ export default function ExportRequestModal({
             };
         });
     }, [
-        requests,
         trackRows,
-        exportApiUrl,
-        requestStatusRows,
         fbpRows,
         fbpApprovalByRequest,
     ]);
@@ -461,7 +459,6 @@ export default function ExportRequestModal({
         Record<string, GmApprovalInfo>
     >({});
 
-    const [loadingGmHistory, setLoadingGmHistory] = useState(false);
 
     // แปลงวันที่เป็น YYYY-MM-DD
     const normalizeDateKey = (
@@ -737,136 +734,6 @@ export default function ExportRequestModal({
         return `${day}/${month}/${year.slice(-2)}`;
     };
 
-    // แสดงทะเบียนทดแทน
-    const getLicenseText = (
-        value?:
-            | string[]
-            | string
-    ) => {
-        if (
-            Array.isArray(
-                value
-            )
-        ) {
-            return value
-                .map(
-                    (
-                        item
-                    ) =>
-                        String(
-                            item
-                        ).trim()
-                )
-                .filter(
-                    Boolean
-                )
-                .join(
-                    ", "
-                );
-        }
-
-        const raw =
-            String(
-                value ||
-                ""
-            ).trim();
-
-        if (
-            !raw
-        ) {
-            return "";
-        }
-
-        try {
-            const parsed =
-                JSON.parse(
-                    raw
-                );
-
-            if (
-                Array.isArray(
-                    parsed
-                )
-            ) {
-                return parsed
-                    .map(
-                        (
-                            item
-                        ) =>
-                            String(
-                                item
-                            ).trim()
-                    )
-                    .filter(
-                        Boolean
-                    )
-                    .join(
-                        ", "
-                    );
-            }
-        } catch {
-            return raw;
-        }
-
-        return raw;
-    };
-
-    // แปลงทะเบียนทดแทนเป็น Array เพื่อแตก 1 ทะเบียน = 1 แถว
-    const getLicenseList = (
-        value?:
-            | string[]
-            | string
-    ) => {
-        if (
-            Array.isArray(
-                value
-            )
-        ) {
-            return value
-                .map((item) =>
-                    String(item).trim()
-                )
-                .filter(Boolean);
-        }
-
-        const raw =
-            String(
-                value ||
-                ""
-            ).trim();
-
-        if (!raw) {
-            return [];
-        }
-
-        try {
-            const parsed =
-                JSON.parse(raw);
-
-            if (
-                Array.isArray(
-                    parsed
-                )
-            ) {
-                return parsed
-                    .map((item) =>
-                        String(item).trim()
-                    )
-                    .filter(Boolean);
-            }
-        } catch {
-            // รองรับข้อความที่คั่นด้วย comma
-            return raw
-                .split(",")
-                .map((item) =>
-                    item.trim()
-                )
-                .filter(Boolean);
-        }
-
-        return [raw];
-    };
-
     // เช็กว่าเป็นข้อมูลรถรายคันจาก TCAS หรือไม่
     const isVehicleRow = (
         item: ExportRequestItem
@@ -1081,120 +948,14 @@ export default function ExportRequestModal({
         };
     };
 
-    const getGmApprovalInfo = (
-        item: ExportRequestItem
-    ): GmApprovalInfo => {
-        const requestId =
-            item.id !== null &&
-                item.id !== undefined
-                ? String(item.id)
-                : "";
-
-        if (
-            requestId &&
-            gmApprovalByRequest[requestId]
-        ) {
-            return gmApprovalByRequest[
-                requestId
-            ];
-        }
-
-        // fallback กรณี history API ยังโหลดไม่สำเร็จ
-        const fallbackStatus =
-            normalizeGmHistoryStatus(
-                item.gm_status
-            );
-
-        if (
-            fallbackStatus === "fbp_pending"
-        ) {
-            return {
-                status: "fbp_pending",
-                statusText: "GM อนุมัติ",
-                changedAt:
-                    item.gm_approved_date || "",
-                changedBy:
-                    item.gm_approved_by || "",
-            };
-        }
-
-        if (
-            fallbackStatus === "reject_by_gm" ||
-            fallbackStatus === "reject_gm" ||
-            fallbackStatus === "rejected_by_gm" ||
-            fallbackStatus === "gm_rejected"
-        ) {
-            return {
-                status: "reject_by_gm",
-                statusText: "GM ไม่อนุมัติ",
-                changedAt:
-                    item.gm_approved_date || "",
-                changedBy:
-                    item.gm_approved_by || "",
-            };
-        }
-
-        if (
-            fallbackStatus === "gm_pending"
-        ) {
-            return {
-                status: "gm_pending",
-                statusText: "รอ GM อนุมัติ",
-                changedAt: "",
-                changedBy: "",
-            };
-        }
-
-        return {
-            status: "",
-            statusText: "",
-            changedAt: "",
-            changedBy: "",
-        };
-    };
-
     useEffect(() => {
-        if (!open) {
-            return;
-        }
-
-        const controller = new AbortController();
-        let cancelled = false;
-
-        const loadGmHistory = async () => {
-            try {
-                setLoadingGmHistory(true);
-
-                const response = await fetch(
-                    "http://192.168.158.210/api_new_truck/api/request_status_history.php",
-                    {
-                        method: "GET",
-                        headers: {
-                            Accept: "application/json",
-                        },
-                        cache: "no-store",
-                        signal: controller.signal,
-                    }
-                );
-
-                const result = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(
-                        result?.message ||
-                        `HTTP ${response.status}`
-                    );
-                }
-
-                const historyRows: RequestStatusHistoryItem[] =
-                    Array.isArray(result)
-                        ? result
-                        : Array.isArray(result?.data)
-                            ? result.data
-                            : result?.request_id && result?.status
-                                ? [result]
-                                : [];
-
+        if (!open) return;
+        const historyRows: RequestStatusHistoryItem[] = trackRows.flatMap((request) =>
+            (request.history || []).map((entry) => ({
+                ...entry,
+                request_id: entry.request_id ?? request.id ?? undefined,
+            }))
+        );
                 const historyByRequest = historyRows.reduce<
                     Record<string, RequestStatusHistoryItem[]>
                 >((groups, historyItem) => {
@@ -1293,42 +1054,19 @@ export default function ExportRequestModal({
                     )
                 ) as Record<string, FbpApprovalInfo>;
 
-                if (cancelled) {
-                    return;
-                }
-
-                setGmApprovalByRequest(approvalByRequest);
-                setFbpApprovalByRequest(fbpApprovalByRequestData);
-            } catch (error) {
-                if ((error as Error).name !== "AbortError") {
-                    if (!cancelled) {
-                        setGmApprovalByRequest({});
-                        setFbpApprovalByRequest({});
-                    }
-                }
-            } finally {
-                if (!cancelled) {
-                    setLoadingGmHistory(false);
-                }
-            }
-        };
-
-        loadGmHistory();
-
-        return () => {
-            cancelled = true;
-            controller.abort();
-        };
-    }, [open]);
+        setGmApprovalByRequest(approvalByRequest);
+        setFbpApprovalByRequest(fbpApprovalByRequestData);
+    }, [open, trackRows]);
 
     // กำหนดช่วงวันที่เริ่มต้นเมื่อเปิด Modal
     useEffect(() => {
         if (
-            !open
+            !open || loadingTrackRows || datesInitialized.current
         ) {
             return;
         }
 
+        datesInitialized.current = true;
         const dates =
             safeRequests
                 .map(
@@ -1420,6 +1158,7 @@ export default function ExportRequestModal({
     }, [
         open,
         safeRequests,
+        loadingTrackRows,
     ]);
 
     // รายการตัวเลือกสำหรับ Filter
@@ -1578,251 +1317,47 @@ export default function ExportRequestModal({
                             )
                         )
                 )
-                .flatMap(
-                    (
-                        item
-                    ) => {
-                        const normalizeCompanyForExport = (value?: string) =>
-                            String(value || "")
-                                .trim()
-                                .replace(/\s+/g, " ")
-                                .toLowerCase();
-
-                        const splitCompanyAndTruckType = (value?: string) => {
-                            const rawValue = String(value || "")
-                                .trim()
-                                .replace(/\s+/g, " ");
-
-                            const match = rawValue.match(
-                                /^(.*?)\s*\(([^()]*)\)\s*$/
-                            );
-
-                            if (!match) {
-                                return {
-                                    companyName: rawValue,
-                                    truckType: "",
-                                };
-                            }
-
-                            const companyName = String(match[1] || "").trim();
-                            const truckType = String(match[2] || "").trim();
-
-                            if (!/\d+\s*W/i.test(truckType)) {
-                                return {
-                                    companyName: rawValue,
-                                    truckType: "",
-                                };
-                            }
-
-                            return {
-                                companyName,
-                                truckType,
-                            };
-                        };
-
-                        const requestDetails = Array.isArray(item.details)
-                            ? item.details
-                            : [];
-
-                        // ถ้า API มี details ให้แตกเป็นรถแต่ละคัน
-                        if (requestDetails.length > 0 && !isVehicleRow(item)) {
-                            const baseRunningDoc = String(
-                                item.running_doc ||
-                                item.running_doc_vehicle_no ||
-                                ""
-                            ).trim();
-
-                            return requestDetails.map((detail, detailIndex) => {
-                                const detailCompanyName = String(
-                                    detail.company_name || ""
-                                ).trim();
-
-                                const matchedFbp = fbpRows.find(
-                                    (fbpItem) =>
-                                        normalizeCompanyForExport(fbpItem.NAME) ===
-                                        normalizeCompanyForExport(
-                                            detailCompanyName
-                                        )
-                                );
-
-                                return {
-                                    ...item,
-
-                                    // เลขเอกสารแยกตามลำดับรถ
-                                    export_running_doc:
-                                        requestDetails.length > 1 &&
-                                            baseRunningDoc
-                                            ? `${baseRunningDoc}_${detailIndex + 1}`
-                                            : "",
-
-                                    // ประเภทรถ = details.truck_type
-                                    fleet_truck_type:
-                                        detail.truck_type || "",
-
-                                    // ทะเบียนทดแทน = details.license_replace
-                                    export_license:
-                                        detail.license_replace || "",
-
-                                    export_qty: 1,
-                                    export_row_index: detailIndex,
-
-                                    // ชื่อบริษัทขนส่ง = details.company_name
-                                    approved_company_name:
-                                        detailCompanyName,
-
-                                    // ชื่อย่อและ Vendor Code จาก FBP
-                                    approved_company_short_name:
-                                        matchedFbp?.SHORT_NAME || "",
-                                    approved_company_id:
-                                        matchedFbp?.CODE || "",
-
-                                    // ประเภทรถที่ถูกทดแทน
-                                    truck_type_replace:
-                                        detail.truck_type_replace || "",
-
-                                    // บริษัทขนส่งที่ถูกทดแทน
-                                    company_name_replace:
-                                        detail.company_name_replace || "",
-                                };
-                            });
-                        }
-
-                        const companyNames = String(
-                            item.approved_company_name || ""
-                        )
-                            .split(/[,，]/)
-                            .map((companyName) => companyName.trim())
-                            .filter(Boolean);
-
-                        const baseRunningDoc = String(
-                            item.running_doc ||
-                            item.running_doc_vehicle_no ||
-                            ""
-                        ).trim();
-
-                        const companyRows = (
-                            companyNames.length > 0
-                                ? companyNames
-                                : [""]
-                        ).map((companyValue, companyIndex) => {
-                            const parsedCompany = splitCompanyAndTruckType(
-                                companyValue
-                            );
-
-                            const matchedFbp = fbpRows.find(
-                                (fbpItem) =>
-                                    normalizeCompanyForExport(fbpItem.NAME) ===
-                                    normalizeCompanyForExport(
-                                        parsedCompany.companyName
-                                    )
-                            );
-
-                            const companyRunningDoc =
-                                companyNames.length > 1 && baseRunningDoc
-                                    ? `${baseRunningDoc}_${companyIndex + 1}`
-                                    : "";
-
+                .flatMap((item): ExportRequestItem[] => {
+                    // flow_data_get.php numbers incoming cars in id order.
+                    // Prefer those cars over outgoing details, which can have N:M replacements.
+                    if (isVehicleRow(item)) return [{ ...item, export_qty: 1 }];
+                    const incoming = item.incoming_trucks || [];
+                    const details = item.details || [];
+                    const vehicles = incoming.length ? incoming : details;
+                    if (vehicles.length) {
+                        return vehicles.map((vehicle, index) => {
+                            const number = vehicle.vehicle_no ?? vehicle.warehouse_info?.vehicle_no ?? index + 1;
+                            const info = vehicle.warehouse_info
+                                ?? item.vehicle_warehouse_info?.find((entry) => String(entry?.vehicle_no) === String(number))
+                                ?? null;
                             return {
                                 ...item,
-                                approved_company_name:
-                                    matchedFbp?.NAME ||
-                                    parsedCompany.companyName,
-                                approved_company_short_name:
-                                    matchedFbp?.SHORT_NAME ||
-                                    (companyNames.length === 1
-                                        ? item.approved_company_short_name
-                                        : ""),
-                                approved_company_id:
-                                    matchedFbp?.CODE ||
-                                    (companyNames.length === 1
-                                        ? item.approved_company_id
-                                        : ""),
-                                truck_type_replace:
-                                    parsedCompany.truckType ||
-                                    item.truck_type_replace,
-                                export_running_doc: companyRunningDoc,
+                                vehicle_no: number,
+                                vehicle_info: info,
+                                export_qty: 1,
+                                export_row_index: index,
+                                export_running_doc: "",
                             };
                         });
-
-                        // ถ้ามีหลายบริษัท ให้แตกเป็นบริษัทละ 1 แถว
-                        // และจับคู่ทะเบียนตามลำดับบริษัท
-                        if (companyRows.length > 1) {
-                            const licenses = getLicenseList(
-                                item.license_replace
-                            );
-
-                            return companyRows.map(
-                                (companyItem, companyIndex) => ({
-                                    ...companyItem,
-                                    export_license:
-                                        licenses[companyIndex] || "",
-                                    export_qty: 1,
-                                    export_row_index: companyIndex,
-                                })
-                            );
-                        }
-
-                        const exportItem = companyRows[0] || item;
-
-                        // TCAS ถูกแตกเป็นรายรถจาก HomePage อยู่แล้ว
-                        // ใช้ทะเบียนของรถคันนั้นเป็น 1 แถว
-                        if (
-                            isVehicleRow(
-                                exportItem
-                            )
-                        ) {
-                            return [
-                                {
-                                    ...exportItem,
-                                    export_license:
-                                        exportItem.vehicle_license ||
-                                        "",
-                                    export_qty: 1,
-                                    export_row_index: 0,
-                                },
-                            ];
-                        }
-
-                        // รายการทั่วไป / รถทดแทน:
-                        // ถ้ามีหลายทะเบียน ให้แตกเป็นทะเบียนละ 1 แถว
-                        const licenses =
-                            getLicenseList(
-                                exportItem.license_replace
-                            );
-
-                        if (
-                            licenses.length >
-                            0
-                        ) {
-                            return licenses.map(
-                                (
-                                    license,
-                                    index
-                                ) => ({
-                                    ...exportItem,
-                                    export_license:
-                                        license,
-                                    export_qty: 1,
-                                    export_row_index:
-                                        index,
-                                })
-                            );
-                        }
-
-                        // ไม่มีทะเบียน ให้คงเป็น 1 แถวตามคำขอเดิม
-                        return [
-                            {
-                                ...exportItem,
-                                export_license:
-                                    "",
-                                export_qty:
-                                    exportItem.qty ?? 0,
-                                export_row_index:
-                                    0,
-                            },
-                        ];
                     }
-                );
+                    const keys = Array.from(new Set([
+                        ...Object.keys(item.flow_dates_by_vehicle || {}),
+                        ...(item.flow_data || []).map((flow) => String(flow.vehicle_no ?? "").trim()),
+                        ...(item.vehicle_warehouse_info || []).map((info) => String(info?.vehicle_no ?? "").trim()),
+                    ])).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+                    if (!keys.length) {
+                        const count = Math.max(1, Math.floor(Number(item.qty) || 1));
+                        for (let number = 1; number <= count; number++) keys.push(String(number));
+                    }
+                    return keys.map((number, index) => ({
+                        ...item,
+                        vehicle_no: number,
+                        vehicle_info: item.vehicle_warehouse_info?.find((entry) => String(entry?.vehicle_no) === number) ?? null,
+                        export_qty: 1,
+                        export_row_index: index,
+                        export_running_doc: "",
+                    }));
+                });
         }, [
             safeRequests,
             startDate,
@@ -1868,45 +1403,6 @@ export default function ExportRequestModal({
             setCurrentPage(totalPages);
         }
     }, [currentPage, totalPages]);
-
-    // แสดงตัวเลขแบบมี comma เช่น 230000 -> 230,000
-    const formatNumberWithComma = (
-        value?: number | string | null
-    ) => {
-        if (
-            value === null ||
-            value === undefined ||
-            value === ""
-        ) {
-            return "";
-        }
-
-        const raw =
-            String(value)
-                .replace(/,/g, "")
-                .trim();
-
-        const numberValue =
-            Number(raw);
-
-        if (
-            Number.isNaN(numberValue)
-        ) {
-            return String(value);
-        }
-
-        return numberValue.toLocaleString(
-            "en-US"
-        );
-    };
-
-    // ตัดจำนวนท้ายประเภทรถ เช่น B-6W 6.5 m x 1 คัน -> B-6W 6.5 m
-    const formatApprovedTruckType = (value?: string | null) => {
-        return String(value || "")
-            .trim()
-            .replace(/\s*[x×]\s*\d+\s*คัน\s*$/i, "")
-            .trim();
-    };
 
     // รวมจำนวนรถ
     const totalQty =
@@ -1955,6 +1451,27 @@ export default function ExportRequestModal({
             }
             return "";
         };
+        const dateField = (item: ExportRequestItem, name: keyof FlowDates) => {
+            const key = String(item.vehicle_no ?? "").trim();
+            const dates = item.flow_dates_by_vehicle?.[key];
+            const matchingVehicle = item.vehicle_warehouse_info?.find(
+                (entry) => String(entry?.vehicle_no ?? "") === key
+            );
+            let value: string | null | undefined;
+            if (dates) {
+                value = dates[name];
+            } else if (item.flow_dates_by_vehicle && key) {
+                // A missing vehicle entry means no flow dates for this car.
+                value = null;
+            } else {
+                value = item.vehicle_info?.[name] ?? matchingVehicle?.[name] ?? item[name];
+            }
+            return value && String(value).trim() ? formatThaiDate(String(value)) : "";
+        };
+        const warehouseDate = (item: ExportRequestItem) => {
+            const value = field(item, "warehouse_plan_date");
+            return value ? formatThaiDate(String(value)) : "";
+        };
         const toExportRow = (item: ExportRequestItem, index: number) => ({
             "ลำดับ": index + 1,
             "วันที่สร้างคำขอ": formatShortDate(
@@ -1966,70 +1483,23 @@ export default function ExportRequestModal({
             "ประเภทคลัง": item.dc_type || "-",
             "ชื่อคลัง": item.dc_code || "-",
             "ประเภทรถ": item.fleet_truck_type || "-",
-            "จำนวนรถที่ขอ (คัน) *": item.export_qty ?? item.qty ?? "-",
-            "รอรับ Workload":
-                item.workload !== null &&
-                item.workload !== undefined &&
-                item.workload !== ""
-                    ? formatNumberWithComma(item.workload)
-                    : "-",
-            "จำนวน truckturn": item.truckturn ?? "-",
-            "ทะเบียนทดแทน1(ระบุทะเบียน)": item.export_license || "-",
-            "หมายเหตุที่แจ้งขอ": item.remark || "-",
-            "วันที่ใช้งาน": item.usage_date
-                ? formatShortDate(item.usage_date)
-                : "-",
-            "ผู้แจ้งขอ": item.request_by || "-",
-            "สถานะอนุมัติจาก GM": getGmApprovalInfo(item).statusText || "",
-            "วันที่ GM อนุมัติ": getGmApprovalInfo(item).changedAt || "",
-            "ประเภทรถที่อนุมัติ":
-                formatApprovedTruckType(item.approved_truck_type) || "-",
-            "จำนวนรถที่อนุมัติ": item.approved_qty ?? "-",
-            "ชื่อบริษัทขนส่ง (ย่อ)2": item.approved_company_short_name || "-",
-            "VENDOR CODE": item.approved_company_id ?? "-",
-            "ชื่อบริษัทขนส่ง": item.approved_company_name || "-",
-            "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "-",
-            "บริษัทขนส่งที่ถูกทดแทน": item.company_name_replace || "-",
-            "หมายเหตุการประเมินกองรถ": item.fbp_remark || "-",
-            "สถานะการประเมินกองรถ": item.fbp_status || "-",
-            "วันที่ประเมินกองรถ": item.fbp_approved_date || "-",
-            "คาดการณ์วันเข้าคลัง": field(item, "warehouse_plan_date"),
-            "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
-            "จัดสรรผู้ผลิต": field(item, "allocated_manufacturer", "manufacturer"),
-            "จัดสรรรุ่นรถ": field(item, "car_model"),
-            "เลขเครื่อง": field(item, "car_engine"),
-            "เลข Chassis": field(item, "car_chassis"),
-            "ทะเบียน": field(item, "car_license", "vehicle_license"),
-            "เลขบันทึก FBP": field(item, "fbp_memo_no", "fbp_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึก FBP": field(item, "fbp_memo_date", "fbp_document_date"),
-            "เลขบันทึกแจ้ง TIS": field(item, "tis_memo_no", "tis_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": field(item, "tis_memo_date", "tis_document_date"),
-            "เลขบันทึกแจ้ง TIL": field(item, "til_memo_no", "til_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": field(item, "til_memo_date", "til_document_date"),
-            "เลขบันทึกแจ้ง ASK": field(item, "ask_memo_no", "ask_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": field(item, "ask_memo_date", "ask_document_date"),
-            "เลขบันทึกแจ้ง Kleasing": field(item, "kleasing_memo_no", "kleasing_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": field(item, "kleasing_memo_date", "kleasing_document_date"),
-            "เลขบันทึกแจ้ง TTB2": field(item, "ttb2_memo_no", "ttb2_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": field(item, "ttb2_memo_date", "ttb2_document_date"),
-            "เลขบันทึกแจ้ง THAIOLIX": field(item, "thaiolix_memo_no", "thaiolix_document_no"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": field(item, "thaiolix_memo_date", "thaiolix_document_date"),
-            "วันที่เริ่มรอจัดสรรตามโควต้า": field(item, "quota_wait_start_date"),
-            "วันที่สิ้นสุดรอจัดสรรตามโควต้า": field(item, "quota_wait_end_date"),
-            "วันที่เริ่มรอลงนามหนังสือจัดสรร": field(item, "allocation_sign_start_date"),
-            "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": field(item, "allocation_sign_end_date"),
-            "วันที่เริ่มรอไฟแนนซ์อนุมัติ": field(item, "finance_approval_start_date"),
-            "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": field(item, "finance_approval_end_date"),
-            "วันที่เริ่มรอส่งรถเข้าอู่": field(item, "garage_delivery_start_date"),
-            "วันที่สิ้นสุดรอส่งรถเข้าอู่": field(item, "garage_delivery_end_date"),
-            "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": field(item, "body_installation_start_date"),
-            "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": field(item, "body_installation_end_date"),
-            "วันที่เริ่มรอจดทะเบียนรถ": field(item, "registration_wait_start_date"),
-            "วันที่สิ้นสุดรอจดทะเบียนรถ": field(item, "registration_wait_end_date"),
-            "วันที่เริ่มส่งมอบคลังแล้ว": field(item, "warehouse_delivery_start_date"),
-            "วันที่สิ้นสุดส่งมอบคลังแล้ว": field(item, "warehouse_delivery_end_date"),
-            "วันที่สิ้นสุดหนังสือหมดอายุ": field(item, "document_expiry_end_date"),
-            "วันที่ยกเลิกหนังสือ": field(item, "document_cancel_date"),
+            "คาดการณ์วันเข้าคลัง": warehouseDate(item),
+            "วันที่เริ่มรอจัดสรรตามโควต้า": dateField(item, "quota_wait_start_date"),
+            "วันที่สิ้นสุดรอจัดสรรตามโควต้า": dateField(item, "quota_wait_end_date"),
+            "วันที่เริ่มรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_start_date"),
+            "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_end_date"),
+            "วันที่เริ่มรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_start_date"),
+            "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_end_date"),
+            "วันที่เริ่มรอส่งรถเข้าอู่": dateField(item, "garage_delivery_start_date"),
+            "วันที่สิ้นสุดรอส่งรถเข้าอู่": dateField(item, "garage_delivery_end_date"),
+            "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_start_date"),
+            "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_end_date"),
+            "วันที่เริ่มรอจดทะเบียนรถ": dateField(item, "registration_wait_start_date"),
+            "วันที่สิ้นสุดรอจดทะเบียนรถ": dateField(item, "registration_wait_end_date"),
+            "วันที่เริ่มส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_start_date"),
+            "วันที่สิ้นสุดส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_end_date"),
+            "วันที่สิ้นสุดหนังสือหมดอายุ": dateField(item, "document_expiry_end_date"),
+            "วันที่ยกเลิกหนังสือ": dateField(item, "document_cancel_date"),
             "Remark": field(item, "remark"),
         });
 
@@ -2037,7 +1507,7 @@ export default function ExportRequestModal({
 
     // Export Excel
     const handleExport = () => {
-        if (exportRows.length === 0) {
+        if (loadingTrackRows || loadingFbp || loadError || exportRows.length === 0) {
             return;
         }
 
@@ -2534,7 +2004,9 @@ export default function ExportRequestModal({
                                         {exportRows.length === 0 ? (
                                             <tr>
                                                 <td colSpan={previewColumns.length} className="py-20 text-center text-slate-400">
-                                                    ไม่พบรายการตามเงื่อนไขที่เลือก
+                                                    {loadError || (loadingTrackRows || loadingFbp
+                                                        ? "กำลังโหลดข้อมูล Export…"
+                                                        : "ไม่พบรายการตามเงื่อนไขที่เลือก")}
                                                 </td>
                                             </tr>
                                         ) : paginatedRows.map((item, index) => {
@@ -2614,7 +2086,9 @@ export default function ExportRequestModal({
                         </p>
                     </div>
 
-                    <div className="flex justify-end gap-2">
+                    <div className="flex items-center justify-end gap-2">
+                        {loadError && <p role="alert" className="text-xs text-rose-600">{loadError}</p>}
+                        {!loadError && (loadingTrackRows || loadingFbp) && <p className="text-xs text-slate-500">กำลังโหลดข้อมูล…</p>}
                         <button
                             type="button"
                             onClick={onClose}
@@ -2625,7 +2099,7 @@ export default function ExportRequestModal({
                         <button
                             type="button"
                             onClick={handleExport}
-                            disabled={loadingTrackRows || exportRows.length === 0}
+                            disabled={loadingTrackRows || loadingFbp || !!loadError || exportRows.length === 0}
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                         >
                             <Download size={15} />

@@ -1449,9 +1449,7 @@ export default function FlowAssessmentModal({
       }
   
       const processName = normalizeProcessName(
-        data.steps.find(
-          (step) => String(step.id) === String(item.process_id)
-        )?.process
+        stepMap.get(String(item.process_id).trim())?.process
       );
   
       const hasFinalDate = Boolean(item.str_date || item.end_date);
@@ -1930,7 +1928,23 @@ export default function FlowAssessmentModal({
   }, [open, onClose]);
 
   const stepMap = useMemo(() => {
-    return new Map(data.steps.map((step) => [String(step.id), step]));
+    const map = new Map<string, StepItem>();
+  
+    // จับคู่ด้วย master_flow.id ก่อน
+    for (const step of data.steps) {
+      map.set(String(step.id).trim(), step);
+    }
+  
+    // รองรับข้อมูล Import ที่ใช้ process_level เป็น process_id
+    for (const step of data.steps) {
+      const level = String(step.process_level).trim();
+  
+      if (!map.has(level)) {
+        map.set(level, step);
+      }
+    }
+  
+    return map;
   }, [data.steps]);
 
   const flowRows = useMemo<DisplayFlowRow[]>(() => {
