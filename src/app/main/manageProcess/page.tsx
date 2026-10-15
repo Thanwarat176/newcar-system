@@ -7,7 +7,7 @@ import {
     useState,
 } from "react";
 import ReorderFlowModal from "./ReorderFlowModal";
-import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { GripVertical, LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import CreateFlowModal from "./CreateFlowModal";
 import DeleteFlowModal from "./DeleteFlowModal";
 import EditFlowModal from "./EditFlowModal";
@@ -899,941 +899,101 @@ export default function FleetFlowPage() {
     ]);
 
     return (
-        <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50">
-            <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
-                {/* Header */}
-                <section className="mb-6 overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-lg shadow-blue-100/50">
-                    <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 to-teal-500 px-6 py-7 text-white sm:px-8">
-                        <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-
-                        <div className="absolute -bottom-24 left-20 h-56 w-56 rounded-full bg-teal-200/20 blur-3xl" />
-
-                        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                            <div>
-                                <div className="mb-3 flex items-center gap-3">
-                                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-sm backdrop-blur-sm">
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            className="h-5 w-5"
-                                            stroke="currentColor"
-                                            strokeWidth="1.8"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                d="M5 6h14M5 12h14M5 18h14"
-                                            />
-
-                                            <circle
-                                                cx="3"
-                                                cy="6"
-                                                r="1"
-                                                fill="currentColor"
-                                            />
-
-                                            <circle
-                                                cx="3"
-                                                cy="12"
-                                                r="1"
-                                                fill="currentColor"
-                                            />
-
-                                            <circle
-                                                cx="3"
-                                                cy="18"
-                                                r="1"
-                                                fill="currentColor"
-                                            />
-                                        </svg>
-                                    </span>
-
-                                    <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                                        จัดการขั้นตอนการดำเนินงาน
-                                    </h1>
-                                </div>
-
-
-
-                                <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-50/90">
-                                    แสดงกระบวนการแยกตามประเภทรถ
-                                    เรียงลำดับตาม Process Level
-                                    และสามารถลากเพื่อเปลี่ยนลำดับได้
-                                </p>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setCreateModalOpen(true)}
-                                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-white/20"
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    เพิ่มขั้นตอนใหม่
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => void refreshFlowData()}
-                                    disabled={refreshing}
-                                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/15 px-4 text-sm font-semibold text-white shadow-sm backdrop-blur-sm transition hover:bg-white/25 focus:outline-none focus:ring-4 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <RefreshCw
-                                        className={`h-4 w-4 ${refreshing ? "animate-spin" : ""
-                                            }`}
-                                    />
-
-                                    {refreshing
-                                        ? "กำลังโหลด..."
-                                        : "รีเฟรชข้อมูล"}
-                                </button>
-                            </div>
-                        </div>
+        <main className="min-h-screen bg-slate-50 text-slate-800">
+            <div className="mx-auto max-w-[1600px] px-3 py-4 sm:px-6">
+                <header className="flex flex-wrap items-center justify-between gap-3 pb-4">
+                    <div>
+                        <h1 className="text-xl font-bold tracking-tight text-slate-900">จัดการขั้นตอนการดำเนินงาน</h1>
+                        <p className="mt-1 text-xs text-slate-500">แสดงกระบวนการแยกตามประเภทรถ · เรียงลำดับตาม Process Level</p>
                     </div>
-
-                    {/* Summary */}
-                    <div className="grid grid-cols-1 divide-y divide-blue-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-                        <div className="px-6 py-5">
-                            <p className="text-xs font-medium text-slate-500">
-                                ประเภทรถทั้งหมด
-                            </p>
-
-                            <p className="mt-1 text-2xl font-bold text-slate-900">
-                                {fleetTypes.length}
-                            </p>
-                        </div>
-
-                        <div className="px-6 py-5">
-                            <p className="text-xs font-medium text-slate-500">
-                                กระบวนการที่แสดง
-                            </p>
-
-                            <p className="mt-1 text-2xl font-bold text-slate-900">
-                                {totalDisplayedProcesses}
-                            </p>
-                        </div>
-
-                        <div className="px-6 py-5">
-                            <p className="text-xs font-medium text-slate-500">
-                                ประเภทที่เลือก
-                            </p>
-
-                            <p className="mt-1 truncate text-lg font-bold text-slate-900">
-                                {selectedFleetType}
-                            </p>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Filter */}
-                <section className="mb-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm shadow-blue-100/40">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                        <div>
-                            <div className="flex items-center gap-3">
-                                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-teal-500 text-white shadow-md shadow-blue-200/60">
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        className="h-5 w-5"
-                                        stroke="currentColor"
-                                        strokeWidth="1.8"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M4 6h16M7 12h10M10 18h4"
-                                        />
-                                    </svg>
-                                </span>
-
-                                <div>
-                                    <h2 className="text-sm font-semibold text-slate-900">
-                                        ตัวกรองประเภทรถ
-                                    </h2>
-
-                                    <p className="mt-1 text-xs text-slate-500">
-                                        เลือกดูขั้นตอนของประเภทรถที่ต้องการ
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="w-full sm:w-80">
-                            <label
-                                htmlFor="fleet-type"
-                                className="mb-2 block text-xs font-medium text-slate-600"
-                            >
-                                ประเภทรถ
-                            </label>
-
-                            <select
-                                id="fleet-type"
-                                value={selectedFleetType}
-                                onChange={(event) =>
-                                    setSelectedFleetType(
-                                        event.target.value
-                                    )
-                                }
-                                className="h-11 w-full rounded-xl border border-blue-200 bg-white px-4 text-sm font-medium text-slate-800 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
-                            >
-                                <option value="ทั้งหมด">
-                                    ทั้งหมด
-                                </option>
-
-                                {fleetTypes.map(
-                                    (fleetType) => (
-                                        <option
-                                            key={fleetType}
-                                            value={fleetType}
-                                        >
-                                            {fleetType}
-                                        </option>
-                                    )
-                                )}
-                            </select>
-                        </div>
-
-                    </div>
-                </section>
-
-                {/* Loading */}
-                {loading && (
-                    <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm">
-                        <div className="h-20 animate-pulse bg-gradient-to-r from-blue-100 to-teal-100" />
-
-                        <div className="space-y-3 p-6">
-                            {[1, 2, 3, 4].map(
-                                (item) => (
-                                    <div
-                                        key={item}
-                                        className="h-20 animate-pulse rounded-2xl bg-slate-100"
-                                    />
-                                )
-                            )}
-                        </div>
-                    </section>
-                )}
-
-                {/* Error */}
-                {!loading && error && (
-                    <section className="rounded-3xl border border-red-200 bg-white px-6 py-12 text-center shadow-sm">
-                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-red-600">
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                className="h-7 w-7"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                            >
-                                <circle
-                                    cx="12"
-                                    cy="12"
-                                    r="9"
-                                />
-
-                                <path
-                                    strokeLinecap="round"
-                                    d="M12 7v6"
-                                />
-
-                                <circle
-                                    cx="12"
-                                    cy="17"
-                                    r="0.8"
-                                    fill="currentColor"
-                                />
-                            </svg>
-                        </div>
-
-                        <h2 className="mt-4 text-lg font-bold text-slate-900">
-                            ไม่สามารถโหลดข้อมูลได้
-                        </h2>
-
-                        <p className="mt-2 text-sm text-red-600">
-                            {error}
-                        </p>
-
-                        <button
-                            type="button"
-                            onClick={() =>
-                                void refreshFlowData()
-                            }
-                            className="mt-5 rounded-xl bg-gradient-to-br from-blue-600 to-teal-500 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200/60 transition hover:from-blue-700 hover:to-teal-600"
-                        >
-                            ลองใหม่
+                    <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => void refreshFlowData()} disabled={refreshing} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
+                            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                            {refreshing ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
                         </button>
-                    </section>
-                )}
-
-                {/* Empty */}
-                {!loading &&
-                    !error &&
-                    Object.keys(groupedFlow).length ===
-                    0 && (
-                        <section className="rounded-3xl border border-blue-100 bg-white px-6 py-14 text-center shadow-sm">
-                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-blue-100 to-teal-100 text-blue-600">
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    className="h-7 w-7"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M4 6h16v12H4V6Z"
-                                    />
-
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M8 10h8M8 14h5"
-                                    />
-                                </svg>
-                            </div>
-
-                            <h2 className="mt-4 text-lg font-bold text-slate-900">
-                                ไม่พบข้อมูลกระบวนการ
-                            </h2>
-
-                            <p className="mt-2 text-sm text-slate-500">
-                                กรุณาตรวจสอบข้อมูลจาก API
-                            </p>
-                        </section>
-                    )}
-
-                {/* Tables */}
-                {!loading &&
-                    !error &&
-                    Object.entries(groupedFlow)
-                        .sort(
-                            (
-                                [fleetTypeA],
-                                [fleetTypeB]
-                            ) =>
-                                fleetTypeA.localeCompare(
-                                    fleetTypeB,
-                                    "th"
-                                )
-                        )
-                        .map(
-                            ([fleetType, processes]) => (
-                                <section
-                                    key={fleetType}
-                                    className="mb-6 overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-lg shadow-blue-100/40"
-                                >
-                                    {/* Fleet header */}
-                                    <div className="flex flex-col gap-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-teal-50 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-teal-500 text-white shadow-md shadow-blue-200/60">
-                                                <svg
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    className="h-5 w-5"
-                                                    stroke="currentColor"
-                                                    strokeWidth="1.8"
-                                                >
-                                                    <path
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        d="M3 6h11v10H3V6Zm11 4h3l3 3v3h-6v-6Z"
-                                                    />
-
-                                                    <circle
-                                                        cx="7"
-                                                        cy="18"
-                                                        r="2"
-                                                    />
-
-                                                    <circle
-                                                        cx="17"
-                                                        cy="18"
-                                                        r="2"
-                                                    />
-                                                </svg>
-                                            </div>
-
-                                            <div>
-                                                <p className="text-xs font-medium text-slate-500">
-                                                    ประเภทรถ
-                                                </p>
-
-                                                <h2 className="text-lg font-bold text-slate-900">
-                                                    {fleetType}
-                                                </h2>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span className="rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700">
-                                                ลากแถวเพื่อเปลี่ยนลำดับ
-                                            </span>
-
-                                            <span className="rounded-full bg-gradient-to-r from-blue-600 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
-                                                {processes.length} ขั้นตอน
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Desktop table */}
-                                    <div className="hidden overflow-x-auto lg:block">
-                                        <table className="w-full min-w-[1200px] border-collapse">
-                                            <thead>
-                                                <tr className="border-b border-blue-100 bg-gradient-to-r from-blue-50/80 to-teal-50/80">
-                                                    <th className="w-[70px] px-3 py-4 text-center">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                            ย้าย
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Drag
-                                                        </p>
-                                                    </th>
-
-                                                    <th className="w-[180px] px-6 py-4 text-left">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                            ขั้นตอนระดับที่
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Level
-                                                        </p>
-                                                    </th>
-
-                                                    <th className="w-[260px] px-6 py-4 text-left">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                            ชื่อกระบวนการ
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Process Name
-                                                        </p>
-                                                    </th>
-
-                                                    <th className="px-6 py-4 text-left">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                        วิกฤต: จำเป็นต้องดำเนินการ (SLA)
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                        Action Required
-                                                        </p>
-                                                    </th>
-
-                                                    <th className="w-[240px] px-6 py-4 text-left">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                            ปรับปรุงล่าสุด
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Last Updated
-                                                        </p>
-                                                    </th>
-
-                                                    <th className="w-[130px] px-6 py-4 text-center">
-                                                        <p className="text-xs font-semibold text-slate-700">
-                                                            การจัดการ
-                                                        </p>
-
-                                                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">
-                                                            Actions
-                                                        </p>
-                                                    </th>
-                                                </tr>
-                                            </thead>
-
-                                            <tbody className="divide-y divide-blue-50">
-                                                {processes.map(
-                                                    (item, index) => {
-                                                        const rawLevel =
-                                                            Number(
-                                                                item.process_level
-                                                            );
-
-                                                        const level =
-                                                            Number.isFinite(
-                                                                rawLevel
-                                                            )
-                                                                ? rawLevel
-                                                                : index + 1;
-
-                                                        let updatedAt =
-                                                            "-";
-
-                                                        if (
-                                                            item.updated_at
-                                                        ) {
-                                                            const date =
-                                                                new Date(
-                                                                    item.updated_at
-                                                                );
-
-                                                            if (
-                                                                !Number.isNaN(
-                                                                    date.getTime()
-                                                                )
-                                                            ) {
-                                                                updatedAt =
-                                                                    new Intl.DateTimeFormat(
-                                                                        "th-TH",
-                                                                        {
-                                                                            year: "numeric",
-                                                                            month: "short",
-                                                                            day: "numeric",
-                                                                            hour: "2-digit",
-                                                                            minute:
-                                                                                "2-digit",
-                                                                        }
-                                                                    ).format(date);
-                                                            } else {
-                                                                updatedAt =
-                                                                    item.updated_at;
-                                                            }
-                                                        }
-
-                                                        const itemKey =
-                                                            item.id ??
-                                                            item.flow_id ??
-                                                            `${fleetType}-${item.process_level}-${index}`;
-
-                                                        const isDragging =
-                                                            (draggedItem?.id ??
-                                                                draggedItem?.flow_id) ===
-                                                            (item.id ??
-                                                                item.flow_id);
-
-                                                        const isDragOver =
-                                                            dragOverKey ===
-                                                            itemKey;
-
-                                                        const flowId =
-                                                            item.id ??
-                                                            item.flow_id;
-
-                                                        return (
-                                                            <tr
-                                                                key={itemKey}
-                                                                draggable
-                                                                onDragStart={(
-                                                                    event
-                                                                ) =>
-                                                                    handleDragStart(
-                                                                        event,
-                                                                        item
-                                                                    )
-                                                                }
-                                                                onDragOver={(
-                                                                    event
-                                                                ) =>
-                                                                    handleDragOver(
-                                                                        event,
-                                                                        item
-                                                                    )
-                                                                }
-                                                                onDragLeave={
-                                                                    handleDragLeave
-                                                                }
-                                                                onDragEnd={
-                                                                    handleDragEnd
-                                                                }
-                                                                onDrop={(
-                                                                    event
-                                                                ) =>
-                                                                    handleDrop(
-                                                                        event,
-                                                                        item,
-                                                                        fleetType
-                                                                    )
-                                                                }
-                                                                className={`group cursor-move transition ${isDragOver
-                                                                    ? "border-t-2 border-teal-500 bg-gradient-to-r from-blue-50 to-teal-50"
-                                                                    : "hover:bg-gradient-to-r hover:from-blue-50/70 hover:to-teal-50/70"
-                                                                    } ${isDragging
-                                                                        ? "opacity-40"
-                                                                        : ""
-                                                                    }`}
-                                                            >
-                                                                <td className="px-3 py-5 text-center align-top">
-                                                                    <button
-                                                                        type="button"
-                                                                        title="ลากเพื่อเปลี่ยนลำดับ"
-                                                                        aria-label="ลากเพื่อเปลี่ยนลำดับ"
-                                                                        className="inline-flex h-9 w-9 cursor-grab items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 active:cursor-grabbing"
-                                                                    >
-                                                                        <svg
-                                                                            viewBox="0 0 24 24"
-                                                                            fill="currentColor"
-                                                                            className="h-5 w-5"
-                                                                        >
-                                                                            <circle
-                                                                                cx="8"
-                                                                                cy="6"
-                                                                                r="1.5"
-                                                                            />
-
-                                                                            <circle
-                                                                                cx="16"
-                                                                                cy="6"
-                                                                                r="1.5"
-                                                                            />
-
-                                                                            <circle
-                                                                                cx="8"
-                                                                                cy="12"
-                                                                                r="1.5"
-                                                                            />
-
-                                                                            <circle
-                                                                                cx="16"
-                                                                                cy="12"
-                                                                                r="1.5"
-                                                                            />
-
-                                                                            <circle
-                                                                                cx="8"
-                                                                                cy="18"
-                                                                                r="1.5"
-                                                                            />
-
-                                                                            <circle
-                                                                                cx="16"
-                                                                                cy="18"
-                                                                                r="1.5"
-                                                                            />
-                                                                        </svg>
-                                                                    </button>
-                                                                </td>
-
-                                                                <td className="px-6 py-5 align-top">
-                                                                    <div className="flex items-center gap-3">
-                                                                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-teal-500 text-sm font-bold text-white shadow-md shadow-blue-200/60">
-                                                                            {level}
-                                                                        </span>
-
-                                                                        <div>
-                                                                            <p className="text-sm font-semibold text-slate-800">
-                                                                                Level{" "}
-                                                                                {level}
-                                                                            </p>
-
-                                                                            <p className="mt-0.5 text-xs text-slate-400">
-                                                                                ลำดับขั้นตอน
-                                                                            </p>
-                                                                        </div>
-                                                                    </div>
-                                                                </td>
-
-                                                                <td className="px-6 py-5 align-top">
-                                                                    <p className="break-words text-sm font-semibold leading-6 text-slate-900">
-                                                                        {item.process ||
-                                                                            "-"}
-                                                                    </p>
-
-                                                                    {formatSla(item) && (
-                                                                        <div className="mt-2">
-                                                                            <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                                                                                SLA {formatSla(item)}
-                                                                            </span>
-                                                                        </div>
-                                                                    )}
-                                                                </td>
-
-                                                                <td className="px-6 py-5 align-top">
-                                                                    <p className="whitespace-pre-line break-words text-sm leading-6 text-slate-600">
-                                                                        {item.detail ||
-                                                                            "-"}
-                                                                    </p>
-                                                                </td>
-
-                                                                <td className="px-6 py-5 align-top">
-                                                                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                                                                        <svg
-                                                                            viewBox="0 0 24 24"
-                                                                            fill="none"
-                                                                            className="h-4 w-4 shrink-0 text-blue-500"
-                                                                            stroke="currentColor"
-                                                                            strokeWidth="1.8"
-                                                                        >
-                                                                            <path
-                                                                                strokeLinecap="round"
-                                                                                strokeLinejoin="round"
-                                                                                d="M5 4v3M19 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"
-                                                                            />
-                                                                        </svg>
-
-                                                                        <span>
-                                                                            {updatedAt}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                                                                        <svg
-                                                                            viewBox="0 0 24 24"
-                                                                            fill="none"
-                                                                            className="h-4 w-4 shrink-0 text-teal-500"
-                                                                            stroke="currentColor"
-                                                                            strokeWidth="1.8"
-                                                                        >
-                                                                            <circle
-                                                                                cx="12"
-                                                                                cy="8"
-                                                                                r="4"
-                                                                            />
-
-                                                                            <path
-                                                                                strokeLinecap="round"
-                                                                                strokeLinejoin="round"
-                                                                                d="M5 20a7 7 0 0 1 14 0"
-                                                                            />
-                                                                        </svg>
-
-                                                                        <span>
-                                                                            {item.updated_by
-                                                                                ? `โดย ${item.updated_by}`
-                                                                                : "ไม่ระบุผู้แก้ไข"}
-                                                                        </span>
-                                                                    </div>
-                                                                </td>
-
-                                                                <td className="px-6 py-5 align-top">
-                                                                    <div className="flex items-center justify-center gap-2">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleEdit(item)}
-                                                                            title="แก้ไขข้อมูล"
-                                                                            aria-label={`แก้ไข ${item.process || "กระบวนการ"}`}
-                                                                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-teal-50 text-blue-600 transition hover:border-teal-300 hover:from-blue-100 hover:to-teal-100 focus:outline-none focus:ring-4 focus:ring-teal-100"
-                                                                        >
-                                                                            <Pencil className="h-4 w-4" />
-                                                                        </button>
-
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => openDeleteModal(item)}
-                                                                            disabled={deletingId === flowId}
-                                                                            title="ลบข้อมูล"
-                                                                            aria-label={`ลบ ${item.process || "กระบวนการ"}`}
-                                                                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:border-red-300 hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                        >
-                                                                            {deletingId === flowId ? (
-                                                                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                                                                            ) : (
-                                                                                <Trash2 className="h-4 w-4" />
-                                                                            )}
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    }
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-
-                                    {/* Mobile */}
-                                    <div className="divide-y divide-blue-50 lg:hidden">
-                                        {processes.map(
-                                            (item, index) => {
-                                                const rawLevel =
-                                                    Number(
-                                                        item.process_level
-                                                    );
-
-                                                const level =
-                                                    Number.isFinite(
-                                                        rawLevel
-                                                    )
-                                                        ? rawLevel
-                                                        : index + 1;
-
-                                                let updatedAt = "-";
-
-                                                if (item.updated_at) {
-                                                    const date =
-                                                        new Date(
-                                                            item.updated_at
-                                                        );
-
-                                                    if (
-                                                        !Number.isNaN(
-                                                            date.getTime()
-                                                        )
-                                                    ) {
-                                                        updatedAt =
-                                                            new Intl.DateTimeFormat(
-                                                                "th-TH",
-                                                                {
-                                                                    year: "numeric",
-                                                                    month: "short",
-                                                                    day: "numeric",
-                                                                    hour: "2-digit",
-                                                                    minute:
-                                                                        "2-digit",
-                                                                }
-                                                            ).format(date);
-                                                    } else {
-                                                        updatedAt =
-                                                            item.updated_at;
-                                                    }
-                                                }
-
-                                                const itemKey =
-                                                    item.id ??
-                                                    item.flow_id ??
-                                                    `${fleetType}-${item.process_level}-${index}`;
-
-                                                const flowId =
-                                                    item.id ??
-                                                    item.flow_id;
-
+                        <button type="button" onClick={() => setCreateModalOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                            <Plus className="h-4 w-4" />เพิ่มขั้นตอนใหม่
+                        </button>
+                    </div>
+                </header>
+                <div className="grid items-start gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+                    <aside className="rounded-xl border border-slate-200 bg-white lg:sticky lg:top-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                            <h2 className="text-xs font-semibold text-slate-600">ประเภทรถทั้งหมด</h2>
+                            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold">{fleetTypes.length}</span>
+                        </div>
+                        <nav aria-label="ตัวกรองประเภทรถ" className="flex gap-1 overflow-x-auto p-2 lg:flex-col">
+                            {["ทั้งหมด", ...fleetTypes].map((fleetType) => {
+                                const count = fleetType === "ทั้งหมด" ? flowData.length : flowData.filter(item => getFleetType(item) === fleetType).length;
+                                const active = selectedFleetType === fleetType;
+                                return (
+                                    <button key={fleetType} type="button" aria-pressed={active} onClick={() => setSelectedFleetType(fleetType)} className={`flex shrink-0 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs transition lg:w-full ${active ? "bg-blue-50 font-semibold text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
+                                        <span className="whitespace-nowrap lg:whitespace-normal lg:break-words">{fleetType}</span>
+                                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${active ? "bg-blue-100" : "bg-slate-100 text-slate-500"}`}>{count}</span>
+                                    </button>
+                                );
+                            })}
+                        </nav>
+                    </aside>
+                    <div className="min-w-0 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                            <p className="text-slate-500">ประเภทที่เลือก <span className="font-semibold text-slate-800">{selectedFleetType}</span> <span className="mx-2 text-slate-300">/</span>กระบวนการที่แสดง <span className="font-semibold text-blue-700">{totalDisplayedProcesses}</span></p>
+                            <p className="text-slate-400">ลากแถวเพื่อเปลี่ยนลำดับภายในประเภทรถเดียวกัน</p>
+                        </div>
+                        {loading && <div role="status" className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-16 text-sm text-slate-500"><LoaderCircle className="h-5 w-5 animate-spin" />กำลังโหลดข้อมูล...</div>}
+                        {!loading && error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"><p className="font-semibold">ไม่สามารถโหลดข้อมูลได้</p><p className="mt-1">{error}</p><button type="button" onClick={() => void refreshFlowData()} className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold">ลองใหม่</button></div>}
+                        {!loading && !error && Object.keys(groupedFlow).length === 0 && <div className="rounded-xl border border-slate-200 bg-white py-16 text-center"><h2 className="text-sm font-semibold">ไม่พบข้อมูลกระบวนการ</h2><p className="mt-1 text-xs text-slate-500">กรุณาตรวจสอบข้อมูลจาก API</p></div>}
+                        {!loading && !error && Object.entries(groupedFlow).sort(([a], [b]) => a.localeCompare(b, "th")).map(([fleetType, processes]) => (
+                            <section key={fleetType} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                                    <div className="flex items-center gap-2"><span className="h-4 w-1 rounded-full bg-blue-600" /><h2 className="text-sm font-semibold text-slate-900">{fleetType}</h2></div>
+                                    <span className="text-xs text-slate-500">{processes.length} ขั้นตอน</span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[850px] table-fixed border-collapse text-xs">
+                                        <caption className="sr-only">ขั้นตอนการดำเนินงานของ {fleetType}</caption>
+                                        <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                                            <tr>
+                                                <th scope="col" className="w-10 px-2 py-2.5 text-center">ย้าย</th>
+                                                <th scope="col" className="w-14 px-2 py-2.5 text-center" title="ขั้นตอนระดับที่ (Process Level)">ระดับ</th>
+                                                <th scope="col" className="w-[24%] px-3 py-2.5 text-left">ชื่อกระบวนการ</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left">วิกฤต: จำเป็นต้องดำเนินการ (SLA)</th>
+                                                <th scope="col" className="w-[185px] px-3 py-2.5 text-left">ปรับปรุงล่าสุด</th>
+                                                <th scope="col" className="w-[90px] px-2 py-2.5 text-center">การจัดการ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {processes.map((item, index) => {
+                                                const rawLevel = Number(item.process_level);
+                                                const level = Number.isFinite(rawLevel) ? rawLevel : index + 1;
+                                                const itemKey = item.id ?? item.flow_id ?? `${fleetType}-${item.process_level}-${index}`;
+                                                const flowId = getFlowId(item);
+                                                const isDragging = draggedItem === item;
+                                                const isDragOver = dragOverKey === itemKey;
+                                                const date = item.updated_at ? new Date(item.updated_at) : null;
+                                                const updatedAt = date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat("th-TH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date) : item.updated_at || "-";
                                                 return (
-                                                    <article
-                                                        key={itemKey}
-                                                        className="p-5"
-                                                    >
-                                                        <div className="flex items-start justify-between gap-4">
-                                                            <div className="flex min-w-0 items-center gap-3">
-                                                                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-teal-500 text-sm font-bold text-white shadow-md shadow-blue-200/60">
-                                                                    {level}
-                                                                </span>
-
-                                                                <div className="min-w-0">
-                                                                    <p className="text-xs font-medium text-slate-400">
-                                                                        Process
-                                                                        Level{" "}
-                                                                        {level}
-                                                                    </p>
-
-                                                                    <h3 className="mt-1 break-words text-sm font-semibold text-slate-900">
-                                                                        {item.process ||
-                                                                            "-"}
-                                                                    </h3>
-
-                                                                    {formatSla(item) && (
-                                                                        <span className="mt-2 inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                                                                            SLA {formatSla(item)}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-
-                                                            <div className="flex shrink-0 gap-2">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        handleEdit(
-                                                                            item
-                                                                        )
-                                                                    }
-                                                                    title="แก้ไขข้อมูล"
-                                                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-teal-50 text-blue-600"
-                                                                >
-                                                                    <svg
-                                                                        viewBox="0 0 24 24"
-                                                                        fill="none"
-                                                                        className="h-4 w-4"
-                                                                        stroke="currentColor"
-                                                                        strokeWidth="1.8"
-                                                                    >
-                                                                        <path
-                                                                            strokeLinecap="round"
-                                                                            strokeLinejoin="round"
-                                                                            d="M13.5 6.5 17.5 10.5M4 20l4.5-1 10-10a2.83 2.83 0 0 0-4-4l-10 10L4 20Z"
-                                                                        />
-                                                                    </svg>
-                                                                </button>
-
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => openDeleteModal(item)}
-                                                                    disabled={deletingId === flowId}
-                                                                    title="ลบข้อมูล"
-                                                                    aria-label={`ลบ ${item.process || "กระบวนการ"}`}
-                                                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                >
-                                                                    {deletingId === flowId ? (
-                                                                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                                                                    ) : (
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                    )}
-                                                                </button>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="mt-4 rounded-xl bg-gradient-to-br from-blue-50 to-teal-50 p-4">
-                                                            <p className="text-xs font-semibold text-slate-500">
-                                                                รายละเอียดกระบวนการ
-                                                            </p>
-
-                                                            <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-slate-700">
-                                                                {item.detail ||
-                                                                    "-"}
-                                                            </p>
-                                                        </div>
-
-                                                        <div className="mt-4 space-y-2 text-xs text-slate-500">
-                                                            <div className="flex items-center gap-2">
-                                                                <svg
-                                                                    viewBox="0 0 24 24"
-                                                                    fill="none"
-                                                                    className="h-4 w-4 shrink-0 text-blue-500"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="1.8"
-                                                                >
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        d="M5 4v3M19 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"
-                                                                    />
-                                                                </svg>
-
-                                                                <span>
-                                                                    {updatedAt}
-                                                                </span>
-                                                            </div>
-
-                                                            <div className="flex items-center gap-2">
-                                                                <svg
-                                                                    viewBox="0 0 24 24"
-                                                                    fill="none"
-                                                                    className="h-4 w-4 shrink-0 text-teal-500"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="1.8"
-                                                                >
-                                                                    <circle
-                                                                        cx="12"
-                                                                        cy="8"
-                                                                        r="4"
-                                                                    />
-
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        d="M5 20a7 7 0 0 1 14 0"
-                                                                    />
-                                                                </svg>
-
-                                                                <span>
-                                                                    {item.updated_by
-                                                                        ? `โดย ${item.updated_by}`
-                                                                        : "ไม่ระบุผู้แก้ไข"}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="mt-4 rounded-xl border border-blue-100 bg-white p-3 text-xs text-slate-500">
-                                                            การลากเปลี่ยนลำดับรองรับบนหน้าจอคอมพิวเตอร์
-                                                        </div>
-                                                    </article>
+                                                    <tr key={itemKey} draggable={!reordering} onDragStart={event => handleDragStart(event, item)} onDragOver={event => handleDragOver(event, item)} onDragLeave={handleDragLeave} onDragEnd={handleDragEnd} onDrop={event => handleDrop(event, item, fleetType)} className={`transition ${isDragOver ? "bg-blue-50 ring-1 ring-inset ring-blue-400" : "hover:bg-slate-50"} ${isDragging ? "opacity-40" : ""}`}>
+                                                        <td className="px-2 py-3 text-center align-top"><span title="ลากแถวเพื่อเปลี่ยนลำดับ" className="inline-flex h-7 w-6 cursor-grab items-center justify-center text-slate-400 active:cursor-grabbing"><GripVertical aria-hidden="true" className="h-4 w-4" /></span></td>
+                                                        <td className="px-2 py-3 text-center align-top"><span className="inline-flex h-7 min-w-7 items-center justify-center rounded-md bg-blue-50 px-1 font-semibold text-blue-700">{level}</span></td>
+                                                        <td className="px-3 py-3 align-top"><p className="whitespace-pre-line break-words text-sm font-medium leading-5 text-slate-900">{item.process || "-"}</p>{formatSla(item) && <span className="mt-1.5 inline-flex rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">SLA {formatSla(item)}</span>}</td>
+                                                        <td className="px-3 py-3 align-top"><p className="whitespace-pre-line break-words leading-5 text-slate-600">{item.detail || "-"}</p></td>
+                                                        <td className="px-3 py-3 align-top"><p className="leading-5 text-slate-700">{updatedAt}</p><p className="mt-0.5 break-words leading-5 text-slate-400">{item.updated_by ? `โดย ${item.updated_by}` : "ไม่ระบุผู้แก้ไข"}</p></td>
+                                                        <td className="px-2 py-3 align-top"><div className="flex justify-center gap-1">
+                                                            <button type="button" onClick={() => handleEdit(item)} title="แก้ไขข้อมูล" aria-label={`แก้ไข ${item.process || "กระบวนการ"}`} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-blue-50 hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"><Pencil className="h-3.5 w-3.5" /></button>
+                                                            <button type="button" onClick={() => openDeleteModal(item)} disabled={deletingId === flowId} title="ลบข้อมูล" aria-label={`ลบ ${item.process || "กระบวนการ"}`} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500 disabled:opacity-50">{deletingId === flowId ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button>
+                                                        </div></td>
+                                                    </tr>
                                                 );
-                                            }
-                                        )}
-                                    </div>
-                                </section>
-                            )
-                        )}
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        ))}
+                        <p className="px-1 text-[11px] text-slate-400 lg:hidden">เลื่อนตารางแนวนอนเพื่อดูข้อมูลทั้งหมด · การลากเปลี่ยนลำดับรองรับบนคอมพิวเตอร์</p>
+                    </div>
+                </div>
             </div>
 
             <CreateFlowModal

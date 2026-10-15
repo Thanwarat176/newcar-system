@@ -2865,7 +2865,7 @@ export default function FleetModalDetail({
             if (!approvedBy) throw new Error("ไม่พบข้อมูลผู้ดำเนินการ");
 
             const rejectionDecisions = licensesToReject.map((license) => ({
-                license, decision: "rejected", reject_reason: rejectReason.trim(),
+                license: license.split(" - ")[0].trim(), decision: "rejected", status: "rejected", reject_reason: rejectReason.trim(),
             }));
             const remainingLicenseCount = getRemainingLicenseCount(rejectionDecisions);
 
@@ -2879,7 +2879,7 @@ export default function FleetModalDetail({
                     },
                     body: JSON.stringify({
                         id: Number(data.id),
-                        status: remainingLicenseCount === 0 ? "progress" : "fbp_pending",
+                        status: "rejected",
                         unassigned_license_qty: remainingLicenseCount,
                         partial_rejection: true,
                         append_rejection: true,
@@ -2887,12 +2887,8 @@ export default function FleetModalDetail({
                         approved_qty: 0,
                         not_approved_qty: licensesToReject.length,
                         reject_reason: rejectReason.trim(),
-                        rejected_replacement_licenses: licensesToReject,
-                        replacement_license_decisions: licensesToReject.map((license) => ({
-                            license,
-                            decision: "rejected",
-                            reject_reason: rejectReason.trim(),
-                        })),
+                        rejected_replacement_licenses: rejectionDecisions.map((item) => item.license),
+                        replacement_license_decisions: rejectionDecisions,
                     }),
                 }
             );
@@ -3012,7 +3008,7 @@ export default function FleetModalDetail({
 
             const payload = {
                 id: Number(data.id),
-                status: "reject_by_fbp",
+                status: "rejected",
                 approved_by: approvedBy,
                 reject_reason: rejectReason.trim(),
             };
@@ -3547,10 +3543,7 @@ export default function FleetModalDetail({
     const isDetailFinalized = (
         item: RequestDetailItem
     ) => {
-        return [
-            "progress",
-            "reject_by_fbp",
-        ].includes(getDetailStatus(item));
+        return finalDetailDecision(getDetailStatus(item)) !== null;
     };
 
     const approveSingleReplacementVehicle = async (
@@ -3950,7 +3943,7 @@ export default function FleetModalDetail({
             company_name: "",
 
             truck_type: originalTruckType,
-            status: "reject_by_fbp",
+            status: "rejected",
 
             approved_by: approvedBy,
         };
@@ -4100,7 +4093,6 @@ export default function FleetModalDetail({
             value === "approved" ||
             value === "approve" ||
             value === "success" ||
-            value === "completed" ||
             value === "สำเร็จ" ||
             value === "อนุมัติ"
         ) {
@@ -4110,11 +4102,7 @@ export default function FleetModalDetail({
         if (
             value === "reject_by_fbp" ||
             value === "reject_by_gm" ||
-            value === "fbp_rejected" ||
-            value === "reject_by_fbp" ||
             value === "rejected" ||
-            value === "reject" ||
-            value === "not approved" ||
             value === "ไม่อนุมัติ"
         ) {
             return "ไม่อนุมัติ";
@@ -4122,7 +4110,6 @@ export default function FleetModalDetail({
 
         if (
             value === "cancel" ||
-            value === "cancelled" ||
             value === "canceled" ||
             value === "ยกเลิก"
         ) {
@@ -4650,7 +4637,7 @@ export default function FleetModalDetail({
                                                 const isRejected =
                                                     rowState.decision ===
                                                     "rejected" ||
-                                                    getDetailStatus(item) === "reject_by_fbp";
+                                                    finalDetailDecision(getDetailStatus(item)) === "rejected";
 
                                                 const isFinalized =
                                                     isApproved || isRejected;

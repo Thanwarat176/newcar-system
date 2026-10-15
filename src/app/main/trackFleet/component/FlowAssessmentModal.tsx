@@ -3665,109 +3665,118 @@ export default function FlowAssessmentModal({
         </div>
       )}
 
-      {openDatePicker &&
-        (() => {
-          const activeFlow = flowRows.find(
-            (flow) =>
-              String(flow.id) === openDatePicker.flowId
-          );
+{openDatePicker &&
+  (() => {
+    const activeFlow = flowRows.find(
+      (flow) => String(flow.id) === openDatePicker.flowId
+    );
 
-          if (!activeFlow) return null;
+    if (!activeFlow) return null;
 
-          const activeDraft =
-            dateDrafts[openDatePicker.flowId] || {
-              str_date: toDateInputValue(activeFlow.str_date),
-              end_date: toDateInputValue(activeFlow.end_date),
-            };
+    const activeDraft = dateDrafts[openDatePicker.flowId] || {
+      str_date: toDateInputValue(activeFlow.str_date),
+      end_date: toDateInputValue(activeFlow.end_date),
+    };
 
-          const selectedValue =
-            activeDraft[openDatePicker.field];
+    const selectedValue = activeDraft[openDatePicker.field];
 
-          const selectedDate = selectedValue
-            ? parseDateValue(selectedValue)
-            : new Date();
+    const selectedDate = selectedValue
+      ? parseDateValue(selectedValue)
+      : new Date();
 
-          const isEndDate =
-            openDatePicker.field === "end_date";
+    const isEndDate = openDatePicker.field === "end_date";
 
-          return (
-            <div
-              className="fixed inset-0 z-[100000]"
-              onMouseDown={() => setOpenDatePicker(null)}
-            >
-              <div
-                className="fixed max-h-[calc(100vh-24px)] w-[340px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,0.28)]"
-                style={{
-                  top: openDatePicker.position.top,
-                  left: openDatePicker.position.left,
-                }}
-                onMouseDown={(event) =>
-                  event.stopPropagation()
-                }
-              >
-                <div className="flex items-center justify-between bg-blue-50 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-black text-blue-700">
-                      {isEndDate
-                        ? "เลือกวันที่สิ้นสุด"
-                        : "เลือกวันที่เริ่ม"}
-                    </p>
+    return (
+      <div
+        className="fixed inset-0 z-[100000]"
+        onMouseDown={() => setOpenDatePicker(null)}
+      >
+        <div
+          className="fixed max-h-[calc(100vh-24px)] w-[340px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,0.28)]"
+          style={{
+            top: openDatePicker.position.top,
+            left: openDatePicker.position.left,
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-black text-blue-700">
+                {isEndDate
+                  ? "เลือกวันที่สิ้นสุด"
+                  : "เลือกวันที่เริ่ม"}
+              </p>
 
-                    <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
-                      {activeFlow.process} · รถคันที่{" "}
-                      {activeFlow.vehicle_no}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOpenDatePicker(null)
-                    }
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-
-                <Calendar
-                  locale={th}
-                  date={selectedDate}
-                  minDate={
-                    isEndDate && activeDraft.str_date
-                      ? parseDateValue(activeDraft.str_date)
-                      : undefined
-                  }
-                  onChange={(date) => {
-                    const selectedDateKey = toDateKey(date);
-
-                    handleFlowDateChange(
-                      openDatePicker.flowId,
-                      openDatePicker.field,
-                      selectedDateKey
-                    );
-
-                    setOpenDatePicker(null);
-                  }}
-                  showMonthAndYearPickers
-                  color="#2563eb"
-                />
-
-                <div className="border-t border-slate-100 bg-white px-4 py-3">
-                  <p className="text-[10px] font-semibold text-slate-400">
-                    วันที่ที่เลือก
-                  </p>
-
-                  <p className="mt-1 text-xs font-black text-blue-700">
-                    {selectedValue
-                      ? formatDate(selectedValue)
-                      : "ยังไม่ได้เลือกวันที่"}
-                  </p>
-                </div>
-              </div>
+              <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
+                {activeFlow.process} · รถคันที่{" "}
+                {activeFlow.vehicle_no}
+              </p>
             </div>
-          );
-        })()}
+
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                disabled={!selectedValue}
+                onClick={() => {
+                  handleFlowDateChange(
+                    openDatePicker.flowId,
+                    openDatePicker.field,
+                    ""
+                  );
+                  setOpenDatePicker(null);
+                }}
+                className="flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 text-xs font-bold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X size={13} />
+                ล้างวันที่
+              </button>
+
+              <button
+                type="button"
+                aria-label="ปิดปฏิทิน"
+                onClick={() => setOpenDatePicker(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+
+          <Calendar
+            locale={th}
+            date={selectedDate}
+            minDate={
+              isEndDate && activeDraft.str_date
+                ? parseDateValue(activeDraft.str_date)
+                : undefined
+            }
+            onChange={(date) => {
+              handleFlowDateChange(
+                openDatePicker.flowId,
+                openDatePicker.field,
+                toDateKey(date)
+              );
+              setOpenDatePicker(null);
+            }}
+            showMonthAndYearPickers
+            color="#2563eb"
+          />
+
+          <div className="border-t border-slate-100 bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold text-slate-400">
+              วันที่ที่เลือก
+            </p>
+
+            <p className="mt-1 text-xs font-black text-blue-700">
+              {selectedValue
+                ? formatDate(selectedValue)
+                : "ยังไม่ได้เลือกวันที่"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  })()}
     </div>
   );
 }

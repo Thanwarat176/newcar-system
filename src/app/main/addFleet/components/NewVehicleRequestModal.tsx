@@ -267,7 +267,7 @@ export default function NewVehicleRequestModal({
 
         return (
             isCenterUser &&
-            (fleetType === "รถทดแทน 7 ปี" || fleetType === "รถทดแทนรถลาออก")
+            (fleetType === "รถทดแทน 7 ปี" || fleetType === "รถทดแทนรถลาออก" || fleetType === "รถทดแทน")
         );
     }, [isCenterUser, formData.fleet_type]);
 

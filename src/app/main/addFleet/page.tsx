@@ -225,6 +225,7 @@ export default function AddFleetPage() {
     [],
   );
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
+  const [selectedDCs, setSelectedDCs] = useState<SelectedDC[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -252,7 +253,7 @@ export default function AddFleetPage() {
   const [pageSize, setPageSize] = useState(25);
 
   // Filter ขั้นตอนปัจจุบันของรถใน TCAS
-  // value จะผูกกับ current_process + current_step + total_steps
+  // value ใช้เลข current_step เพื่อรวมรถที่อยู่ขั้นตอนเดียวกัน
   const [currentProcessFilter, setCurrentProcessFilter] = useState("all");
 
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -283,37 +284,47 @@ export default function AddFleetPage() {
   });
 
   useEffect(() => {
-    const loadSelectedDC = () => {
-      const savedSelectedDC = localStorage.getItem("selected_dc");
-
-      if (!savedSelectedDC) {
-        setSelectedDC(null);
-        return;
-      }
-
+    const readJSON = (key: string): unknown => {
       try {
-        const parsedDC = JSON.parse(savedSelectedDC);
-        setSelectedDC(parsedDC);
-      } catch (error) {
-        console.error("อ่าน selected_dc ไม่ได้:", error);
-        localStorage.removeItem("selected_dc");
-        setSelectedDC(null);
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : null;
+      } catch {
+        return null;
       }
     };
 
-    loadSelectedDC();
+    const isSelectedDC = (value: unknown): value is SelectedDC =>
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      "DC_CODE" in value &&
+      typeof value.DC_CODE === "string" &&
+      Boolean(value.DC_CODE.trim());
 
+    const loadSelectedDC = () => {
+      const single = readJSON("selected_dc");
+      const multiple = readJSON("selected_dcs");
+      setSelectedDC(isSelectedDC(single) ? single : null);
+      setSelectedDCs(
+        Array.isArray(multiple) ? multiple.filter(isSelectedDC) : []
+      );
+      setCurrentPage(1);
+    };
+
+    loadSelectedDC();
     window.addEventListener("selectedDCChanged", loadSelectedDC);
+    window.addEventListener("storage", loadSelectedDC);
 
     return () => {
       window.removeEventListener("selectedDCChanged", loadSelectedDC);
+      window.removeEventListener("storage", loadSelectedDC);
     };
   }, []);
 
   useEffect(() => {
     const savedUser =
-      localStorage.getItem("user_info") ||
       localStorage.getItem("user") ||
+      localStorage.getItem("user_info") ||
       localStorage.getItem("userInfo");
 
     if (!savedUser) {
@@ -1333,11 +1344,7 @@ export default function AddFleetPage() {
 
     if (
       [
-        "reject_gm",
         "reject_by_gm",
-        "rejected_by_gm",
-        "gm_rejected",
-        "gm ไม่อนุมัติ",
       ].includes(rawValue)
     ) {
       return "GM ไม่อนุมัติ";
@@ -1346,12 +1353,6 @@ export default function AddFleetPage() {
     if (
       [
         "reject_by_fbp",
-        "rejected_by_fbp",
-        "fbp_rejected",
-        "reject_center",
-        "reject_by_center",
-        "rejected_by_center",
-        "center_rejected",
       ].includes(rawValue)
     ) {
       return "ส่วนกลางไม่อนุมัติ";
@@ -1506,90 +1507,57 @@ export default function AddFleetPage() {
     return "active";
   };
 
+  // Explicit warehouse selection takes precedence over the user's CENTER default.
+  const warehouseScope = useMemo(() => {
+    const normalizeCode = (value: unknown) =>
+      String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+
+    const selectedCodes = [
+      ...new Set(
+        [...selectedDCs.map((item) => item.DC_CODE), selectedDC?.DC_CODE]
+          .map(normalizeCode)
+          .filter(Boolean)
+      ),
+    ];
+
+    if (selectedCodes.length > 0) {
+      return {
+        showAll: selectedCodes.includes("CENTER"),
+        codes: selectedCodes.filter((code) => code !== "CENTER"),
+      };
+    }
+
+    const originalWarehouse = [
+      userInfo?.warehouse, userInfo?.WAREHOUSE,
+      userInfo?.team, userInfo?.TEAM,
+    ].map(normalizeCode).find((value) => value && value !== "-") || "";
+
+    return {
+      showAll: originalWarehouse === "CENTER",
+      codes: originalWarehouse && originalWarehouse !== "CENTER"
+        ? [originalWarehouse] : [],
+    };
+  }, [selectedDC, selectedDCs, userInfo]);
+
   const warehouseFilteredRequests = useMemo(() => {
-    const userWarehouse = String(
-      userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
-      userInfo?.team ||
-      userInfo?.TEAM ||
-      "",
-    )
-      .trim()
-      .toUpperCase();
-
-    const selectedCode = String(selectedDC?.DC_CODE || "")
-      .trim()
-      .toUpperCase();
-
-    // ✅ ถ้า user เป็น CENTER หรือ selectedDC เป็น CENTER ให้เห็นทั้งหมด
-    if (userWarehouse === "CENTER" || selectedCode === "CENTER") {
-      return requests;
-    }
-
-    // ✅ ถ้าไม่ใช่ CENTER แต่มี DC ที่เลือก ให้แสดงเฉพาะ DC นั้น
-    if (selectedCode) {
-      return requests.filter((item) => {
-        const itemDCCode = String(item.dc_code || "")
-          .trim()
-          .toUpperCase();
-
-        return itemDCCode === selectedCode;
-      });
-    }
-
-    // ✅ ถ้าไม่ได้เลือก DC ให้แสดงตาม warehouse / team ของ user
-    if (userWarehouse) {
-      return requests.filter((item) => {
-        const itemDCCode = String(item.dc_code || "")
-          .trim()
-          .toUpperCase();
-
-        return itemDCCode === userWarehouse;
-      });
-    }
-
-    return [];
-  }, [requests, selectedDC, userInfo]);
+    if (warehouseScope.showAll) return requests;
+    const allowedCodes = new Set(warehouseScope.codes);
+    return requests.filter((item) =>
+      allowedCodes.has(
+        String(item.dc_code ?? "").trim().replace(/\s+/g, " ").toUpperCase()
+      )
+    );
+  }, [requests, warehouseScope]);
 
   const warehouseFilteredProcessRows = useMemo(() => {
-    const userWarehouse = String(
-      userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
-      userInfo?.team ||
-      userInfo?.TEAM ||
-      "",
-    )
-      .trim()
-      .toUpperCase();
-
-    const selectedCode = String(selectedDC?.DC_CODE || "")
-      .trim()
-      .toUpperCase();
-
-    if (userWarehouse === "CENTER" || selectedCode === "CENTER") {
-      return processVehicleRows;
-    }
-
-    if (selectedCode) {
-      return processVehicleRows.filter(
-        (item) =>
-          String(item.dc_code || "")
-            .trim()
-            .toUpperCase() === selectedCode,
-      );
-    }
-
-    if (userWarehouse) {
-      return processVehicleRows.filter(
-        (item) =>
-          String(item.dc_code || "")
-            .trim()
-            .toUpperCase() === userWarehouse,
-      );
-    }
-
-    return [];
-  }, [processVehicleRows, selectedDC, userInfo]);
+    if (warehouseScope.showAll) return processVehicleRows;
+    const allowedCodes = new Set(warehouseScope.codes);
+    return processVehicleRows.filter((item) =>
+      allowedCodes.has(
+        String(item.dc_code ?? "").trim().replace(/\s+/g, " ").toUpperCase()
+      )
+    );
+  }, [processVehicleRows, warehouseScope]);
 
   const warehouseFilteredAllRows = useMemo(() => {
     // Request ที่ยังไม่เข้า TCAS ใช้ข้อมูลเดิม
@@ -1640,50 +1608,15 @@ export default function AddFleetPage() {
   }, [warehouseFilteredRequests, dcTypeFilter]);
 
   const currentProcessOptions = useMemo(() => {
-    const optionMap = new Map<
-      string,
-      {
-        value: string;
-        label: string;
-        currentStep: number;
-        totalSteps: number;
-      }
-    >();
-
-    const optionStatus =
-      statusFilter === "rejected" ? "rejected" : "process";
-
-    warehouseFilteredProcessRows
-      .filter((item) => normalizeStatus(item.status) === optionStatus)
-      .forEach((item) => {
-        const processText =
-          String(item.current_process || "").trim() || "ยังไม่เริ่ม";
-
-        const currentStep = Number(item.current_step ?? 0);
-        const totalSteps = Number(item.total_steps ?? 0);
-
-        const value = `${currentStep}|${totalSteps}|${processText}`;
-
-        optionMap.set(value, {
-          value,
-          label: `${processText} (${currentStep}/${totalSteps})`,
-          currentStep,
-          totalSteps,
-        });
-      });
-
-    return Array.from(optionMap.values()).sort((a, b) => {
-      if (a.totalSteps !== b.totalSteps) {
-        return a.totalSteps - b.totalSteps;
-      }
-
-      if (a.currentStep !== b.currentStep) {
-        return a.currentStep - b.currentStep;
-      }
-
-      return a.label.localeCompare(b.label, "th");
+    const steps = new Set<number>();
+    warehouseFilteredProcessRows.forEach((item) => {
+      const step = Number(item.current_step);
+      if (Number.isInteger(step) && step > 0) steps.add(step);
     });
-  }, [warehouseFilteredProcessRows, statusFilter]);
+    return Array.from(steps)
+      .sort((a, b) => a - b)
+      .map((step) => ({ value: String(step), label: `ขั้นตอนที่ ${step}` }));
+  }, [warehouseFilteredProcessRows]);
 
   const truckTypeOptions = useMemo(() => {
     const uniqueTruckTypes = new Set<string>();
@@ -1721,22 +1654,12 @@ export default function AddFleetPage() {
       const matchStatus =
         statusFilter === "all" || normalizedItemStatus === statusFilter;
 
-      const itemProcessText =
-        String(item.current_process || "").trim() || "ยังไม่เริ่ม";
-
-      const itemCurrentStep = Number(item.current_step ?? 0);
-      const itemTotalSteps = Number(item.total_steps ?? 0);
-
-      const itemCurrentProcessValue = `${itemCurrentStep}|${itemTotalSteps}|${itemProcessText}`;
-
-      // ใช้ Filter ขั้นตอนตอนดูรายการกำลังดำเนินการหรือไม่อนุมัติ
-      const canFilterCurrentProcess =
-        statusFilter === "process" || statusFilter === "rejected";
-
       const matchCurrentProcess =
-        !canFilterCurrentProcess ||
         currentProcessFilter === "all" ||
-        itemCurrentProcessValue === currentProcessFilter;
+        (item.vehicle_no !== null &&
+          item.vehicle_no !== undefined &&
+          item.vehicle_no !== "" &&
+          Number(item.current_step) === Number(currentProcessFilter));
 
       const matchDCType =
         dcTypeFilter === "all" ||
@@ -2066,30 +1989,13 @@ export default function AddFleetPage() {
   }, [filteredRequests]);
 
   const selectedDCLabel = useMemo(() => {
-    const userWarehouse = String(
-      userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
-      userInfo?.team ||
-      userInfo?.TEAM ||
-      "",
-    )
-      .trim()
-      .toUpperCase();
-
-    const selectedCode = selectedDC?.DC_CODE?.trim().toUpperCase();
-
-    if (userWarehouse === "CENTER" || selectedCode === "CENTER") {
+    if (warehouseScope.showAll) {
       return "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด";
     }
-
-    if (!selectedCode) {
-      return userWarehouse ? `${userWarehouse} - คลังของฉัน` : "-";
-    }
-
-    return selectedDC?.DC_NAME
-      ? `${selectedDC.DC_CODE} - ${selectedDC.DC_NAME}`
-      : selectedDC?.DC_CODE || "-";
-  }, [selectedDC, userInfo]);
+    return warehouseScope.codes.length > 0
+      ? warehouseScope.codes.join(", ")
+      : "ไม่พบคลังที่ใช้งาน";
+  }, [warehouseScope]);
 
   const handleToggleRequestDatePicker = () => {
     if (!requestDateButtonRef.current) return;
@@ -2457,7 +2363,7 @@ export default function AddFleetPage() {
         {/* ── FILTER BAR COMPACT ── */}
         <div className="mb-4 overflow-visible rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.07)]">
           {/* header */}
-          <div className="flex items-center justify-between rounded-t-2xl bg-gradient-to-r from-slate-50 via-blue-50/50 to-slate-50 px-4 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-gradient-to-r from-slate-50 via-blue-50/50 to-slate-50 px-4 py-2.5">
             <div className="flex items-center gap-2 text-xs font-black text-slate-700">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
                 <SlidersHorizontal size={16} />
@@ -2479,14 +2385,10 @@ export default function AddFleetPage() {
           </div>
 
           {/* FILTER INPUTS */}
-          <div className="relative z-30 rounded-[24px] mb-3 bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 sm:px-5">
-            <div className="grid gap-3 lg:grid-cols-[repeat(16,minmax(0,1fr))]">
+          <div className="relative z-30 rounded-b-2xl border-t border-slate-100 bg-white p-4 sm:p-5">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-12">
               {/* SEARCH */}
-              <div
-                className={
-                  statusFilter === "process" ? "lg:col-span-2" : "lg:col-span-4"
-                }
-              >
+              <div className="min-w-0 sm:col-span-2 lg:col-span-6">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   ค้นหา
                 </label>
@@ -2518,7 +2420,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* FLEET TYPE */}
-              <div className="lg:col-span-2">
+              <div className="min-w-0 lg:col-span-3">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   ประเภทคำขอ
                 </label>
@@ -2532,7 +2434,7 @@ export default function AddFleetPage() {
                   <select
                     value={fleetTypeFilter}
                     onChange={(e) => setFleetTypeFilter(e.target.value)}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                   >
                     <option value="all">ทุกประเภทคำขอ</option>
 
@@ -2550,7 +2452,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* TRUCK TYPE SEARCH */}
-              <div className="lg:col-span-2">
+              <div className="min-w-0 lg:col-span-3">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   ประเภทรถ
                 </label>
@@ -2564,7 +2466,7 @@ export default function AddFleetPage() {
                   <select
                     value={truckTypeFilter}
                     onChange={(e) => setTruckTypeFilter(e.target.value)}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                   >
                     <option value="all">ทุกประเภทรถ</option>
 
@@ -2582,7 +2484,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* DC TYPE */}
-              <div className="lg:col-span-2">
+              <div className="min-w-0 lg:col-span-2">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   DC Type
                 </label>
@@ -2599,7 +2501,7 @@ export default function AddFleetPage() {
                       setDcTypeFilter(e.target.value);
                       setDcFilter("all");
                     }}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                   >
                     <option value="all">ทุก DC Type</option>
 
@@ -2617,7 +2519,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* DC */}
-              <div className="lg:col-span-2">
+              <div className="min-w-0 lg:col-span-2">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   DC
                 </label>
@@ -2631,7 +2533,7 @@ export default function AddFleetPage() {
                   <select
                     value={dcFilter}
                     onChange={(e) => setDcFilter(e.target.value)}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                   >
                     <option value="all">ทุก DC</option>
 
@@ -2649,45 +2551,40 @@ export default function AddFleetPage() {
               </div>
 
               {/* CURRENT PROCESS / TCAS STEP */}
-              {(statusFilter === "process" || statusFilter === "rejected") && (
-                <div className="lg:col-span-3">
-                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                    สถานะ / ขั้นตอน
-                  </label>
+              <div className="min-w-0 lg:col-span-3">
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  ดูสถานะขั้นตอน
+                </label>
 
-                  <div className="relative">
-                    <Filter
-                      size={14}
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
-                    />
+                <div className="relative">
+                  <Filter
+                    size={14}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
+                  />
 
-                    <select
-                      value={currentProcessFilter}
-                      onChange={(e) => setCurrentProcessFilter(e.target.value)}
-                      className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
-                    >
-                      <option value="all">ทุกขั้นตอน</option>
+                  <select
+                    aria-label="ดูสถานะขั้นตอนที่"
+                    value={currentProcessFilter}
+                    onChange={(e) => setCurrentProcessFilter(e.target.value)}
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  >
+                    <option value="all">ทุกขั้นตอน</option>
 
-                      {currentProcessOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    {currentProcessOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
 
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
-                      ▼
-                    </span>
-                  </div>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                    ▼
+                  </span>
                 </div>
-              )}
+              </div>
 
               {/* DATE */}
-              <div
-                className={
-                  statusFilter === "process" ? "lg:col-span-2" : "lg:col-span-3"
-                }
-              >
+              <div className="min-w-0 lg:col-span-3">
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   วันที่ขอ
                 </label>
@@ -2817,7 +2714,7 @@ export default function AddFleetPage() {
               </div>
 
               {/* CLEAR */}
-              <div className="flex items-end lg:col-span-1">
+              <div className="flex min-w-0 items-end lg:col-span-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -2845,7 +2742,7 @@ export default function AddFleetPage() {
                     className="transition group-hover:-rotate-6"
                   />
 
-                  <span className="hidden xl:inline">ล้าง</span>
+                  <span>ล้างตัวกรอง</span>
                 </button>
               </div>
             </div>

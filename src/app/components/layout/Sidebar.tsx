@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-
 import {
   Truck,
   Clock3,
@@ -13,14 +12,25 @@ import {
   LogOut,
   Settings,
   Inbox,
+  LayoutDashboard,
+  ChevronLeft,
+  ChevronDown,
 } from "lucide-react";
 
 import { PATHS } from "../../lib/paths";
+
+interface SubMenuItem {
+  label: string;
+  path?: string;
+  disabled?: boolean;
+  tooltip?: string;
+}
 
 interface MenuItem {
   label: string;
   path: string;
   icon: LucideIcon;
+  children?: SubMenuItem[];
 }
 
 interface SidebarUser {
@@ -28,24 +38,18 @@ interface SidebarUser {
   em_id?: string;
   employee_id?: string;
   EMPLOYEE_ID?: string;
-
   name?: string;
   NAME?: string;
-
   surname?: string;
   SURNAME?: string;
-
   user_type?: string;
   ROLE?: string;
   role?: string;
   POSITION?: string;
-
   department?: string | null;
   DEPARTMENT?: string | null;
-
   warehouse?: string | null;
   WAREHOUSE?: string | null;
-
   team?: string | null;
   TEAM?: string | null;
 }
@@ -63,430 +67,396 @@ interface SelectedDepartment {
 }
 
 interface SidebarProps {
+  collapsed: boolean;
+  onToggle: () => void;
   isFullAccessTeam?: boolean;
   isSuperadmin?: boolean;
   canViewReport?: boolean;
 }
 
-const normalizeValue = (
-  value?: string | null
-): string => {
-  return String(value ?? "")
+interface SidebarData {
+  user: SidebarUser | null;
+  selectedDC: SelectedDC | null;
+  selectedDCs: SelectedDC[];
+  selectedDepartments: SelectedDepartment[];
+}
+
+const EMPTY_DATA: SidebarData = {
+  user: null,
+  selectedDC: null,
+  selectedDCs: [],
+  selectedDepartments: [],
+};
+
+const STORAGE_KEYS = [
+  "user",
+  "selected_dc",
+  "selected_dcs",
+  "selected_departments",
+  "selected_department_codes",
+];
+
+const normalizeValue = (value: unknown): string =>
+  String(value ?? "")
     .trim()
     .toUpperCase()
     .replace(/[\s_-]/g, "");
-};
 
-export default function Sidebar(
-  _props: SidebarProps
-) {
+function getText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+
+    if (text && text !== "-") {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+const isRecord = (
+  value: unknown
+): value is Record<string, unknown> =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value);
+
+function readStoredValue(key: string): unknown {
+  try {
+    const value = localStorage.getItem(key);
+
+    if (!value || value === "undefined") {
+      return null;
+    }
+
+    return JSON.parse(value);
+  } catch (error) {
+    console.error(`อ่าน ${key} ไม่สำเร็จ:`, error);
+    return null;
+  }
+}
+
+function uniqueCodes(codes: string[]): string[] {
+  const result = new Map<string, string>();
+
+  for (const value of codes) {
+    const code = getText(value);
+
+    if (code) {
+      result.set(normalizeValue(code), code);
+    }
+  }
+
+  return [...result.values()];
+}
+
+const matchesPath = (
+  pathname: string,
+  path?: string
+): boolean =>
+  Boolean(
+    path &&
+      (pathname === path || pathname.startsWith(`${path}/`))
+  );
+
+export default function Sidebar({
+  collapsed,
+  onToggle,
+}: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [userInfo, setUserInfo] =
-    useState<SidebarUser | null>(null);
+  const [sidebarData, setSidebarData] =
+    useState<SidebarData>(EMPTY_DATA);
 
-  const [selectedDC, setSelectedDC] =
-    useState<SelectedDC | null>(null);
+  const [openGroups, setOpenGroups] = useState<
+    Record<string, boolean>
+  >({
+    [PATHS.main.trackFleet]: true,
+  });
 
-  const [
+  const {
+    user: userInfo,
+    selectedDC,
+    selectedDCs,
     selectedDepartments,
-    setSelectedDepartments,
-  ] = useState<SelectedDepartment[]>([]);
+  } = sidebarData;
 
-  /*
-   * โหลดข้อมูล User, DC และฝ่ายส่วนกลาง
-   */
+  // โหลดใหม่ทั้งเมื่อเปลี่ยนหน้าและเมื่อยืนยันการเลือก
   useEffect(() => {
     const loadSidebarData = () => {
-      const savedUser =
-        localStorage.getItem("user");
+      const user = readStoredValue("user");
+      const dc = readStoredValue("selected_dc");
+      const dcs = readStoredValue("selected_dcs");
+      const departments = readStoredValue(
+        "selected_departments"
+      );
 
-      const savedSelectedDC =
-        localStorage.getItem("selected_dc");
+      const validDCs: SelectedDC[] = [];
 
-      const savedSelectedDepartments =
-        localStorage.getItem(
-          "selected_departments"
-        );
+      if (Array.isArray(dcs)) {
+        for (const item of dcs) {
+          if (!isRecord(item)) continue;
 
-      if (savedUser) {
-        try {
-          const parsedUser =
-            JSON.parse(
-              savedUser
-            ) as SidebarUser;
+          const code = getText(item.DC_CODE);
 
-          console.log(
-            "SIDEBAR USER:",
-            parsedUser
-          );
+          if (!code) continue;
 
-          setUserInfo(parsedUser);
-        } catch (error) {
-          console.error(
-            "อ่านข้อมูล user ไม่สำเร็จ:",
-            error
-          );
-
-          localStorage.removeItem("user");
-          setUserInfo(null);
+          validDCs.push({
+            DC_CODE: code,
+            DC_NAME: getText(item.DC_NAME),
+            DC_TYPE: getText(item.DC_TYPE),
+          });
         }
-      } else {
-        setUserInfo(null);
       }
 
-      /*
-       * อ่าน DC ที่เลือก
-       */
-      const hasValidSelectedDC =
-        savedSelectedDC &&
-        savedSelectedDC !== '""' &&
-        savedSelectedDC !== "null" &&
-        savedSelectedDC !== "undefined";
+      const validDepartments: SelectedDepartment[] = [];
 
-      if (hasValidSelectedDC) {
-        try {
-          const parsedDC =
-            JSON.parse(
-              savedSelectedDC
-            ) as SelectedDC;
+      if (Array.isArray(departments)) {
+        for (const item of departments) {
+          if (!isRecord(item)) continue;
 
-          if (
-            parsedDC &&
-            typeof parsedDC === "object"
-          ) {
-            console.log(
-              "SIDEBAR SELECTED DC:",
-              parsedDC
-            );
+          const code = getText(item.value);
 
-            setSelectedDC(parsedDC);
-          } else {
-            localStorage.removeItem(
-              "selected_dc"
-            );
+          if (!code) continue;
 
-            setSelectedDC(null);
-          }
-        } catch (error) {
-          console.error(
-            "อ่านข้อมูล selected_dc ไม่สำเร็จ:",
-            error
-          );
-
-          localStorage.removeItem(
-            "selected_dc"
-          );
-
-          setSelectedDC(null);
+          validDepartments.push({
+            value: code,
+            label: getText(item.label) || code,
+            type: getText(item.type) || "CENTER",
+          });
         }
-      } else {
-        if (savedSelectedDC) {
-          localStorage.removeItem(
-            "selected_dc"
-          );
-        }
-
-        setSelectedDC(null);
       }
 
-      /*
-       * อ่านฝ่ายส่วนกลางที่เลือก
-       */
-      if (savedSelectedDepartments) {
-        try {
-          const parsedDepartments =
-            JSON.parse(
-              savedSelectedDepartments
-            ) as SelectedDepartment[];
+      const validDC: SelectedDC | null =
+        isRecord(dc) && getText(dc.DC_CODE)
+          ? {
+              DC_CODE: getText(dc.DC_CODE),
+              DC_NAME: getText(dc.DC_NAME),
+              DC_TYPE: getText(dc.DC_TYPE),
+            }
+          : null;
 
-          if (Array.isArray(parsedDepartments)) {
-            const validDepartments =
-              parsedDepartments.filter(
-                (item) =>
-                  item &&
-                  typeof item === "object" &&
-                  item.value
-              );
-
-            console.log(
-              "SIDEBAR SELECTED DEPARTMENTS:",
-              validDepartments
-            );
-
-            setSelectedDepartments(
-              validDepartments
-            );
-          } else {
-            setSelectedDepartments([]);
-          }
-        } catch (error) {
-          console.error(
-            "อ่านข้อมูล selected_departments ไม่สำเร็จ:",
-            error
-          );
-
-          localStorage.removeItem(
-            "selected_departments"
-          );
-
-          localStorage.removeItem(
-            "selected_department_codes"
-          );
-
-          setSelectedDepartments([]);
-        }
-      } else {
-        setSelectedDepartments([]);
-      }
+      setSidebarData({
+        user: isRecord(user)
+          ? (user as SidebarUser)
+          : null,
+        selectedDC: validDC,
+        selectedDCs: validDCs,
+        selectedDepartments: validDepartments,
+      });
     };
 
     loadSidebarData();
 
-    window.addEventListener(
+    const events = [
       "userChanged",
-      loadSidebarData
-    );
-
-    window.addEventListener(
       "selectedDCChanged",
-      loadSidebarData
-    );
-
-    window.addEventListener(
+      "selectedDepartmentsChanged",
       "storage",
-      loadSidebarData
-    );
+    ];
+
+    events.forEach((event) => {
+      window.addEventListener(event, loadSidebarData);
+    });
 
     return () => {
-      window.removeEventListener(
-        "userChanged",
-        loadSidebarData
-      );
-
-      window.removeEventListener(
-        "selectedDCChanged",
-        loadSidebarData
-      );
-
-      window.removeEventListener(
-        "storage",
-        loadSidebarData
-      );
+      events.forEach((event) => {
+        window.removeEventListener(event, loadSidebarData);
+      });
     };
-  }, []);
+  }, [pathname]);
 
-  /*
-   * ชื่อผู้ใช้งาน
-   */
-  const displayName = useMemo(() => {
-    const firstName =
-      userInfo?.name ||
-      userInfo?.NAME ||
-      "";
+  useEffect(() => {
+    if (matchesPath(pathname, PATHS.main.trackFleet)) {
+      setOpenGroups((previous) => ({
+        ...previous,
+        [PATHS.main.trackFleet]: true,
+      }));
+    }
+  }, [pathname]);
 
-    const surname =
-      userInfo?.surname ||
-      userInfo?.SURNAME ||
-      "";
+  const displayName =
+    [
+      getText(userInfo?.name, userInfo?.NAME),
+      getText(userInfo?.surname, userInfo?.SURNAME),
+    ]
+      .filter(Boolean)
+      .join(" ") || "User";
 
-    const fullName =
-      `${firstName} ${surname}`.trim();
+  const displayPosition =
+    getText(
+      userInfo?.POSITION,
+      userInfo?.ROLE,
+      userInfo?.role,
+      userInfo?.user_type
+    ) || "ผู้ใช้งาน";
 
-    return fullName || "User";
-  }, [userInfo]);
+  const originalDepartment = getText(
+    userInfo?.department,
+    userInfo?.DEPARTMENT
+  );
 
-  /*
-   * ตำแหน่งผู้ใช้งาน
-   */
-  const displayPosition = useMemo(() => {
-    return (
-      userInfo?.POSITION ||
-      userInfo?.ROLE ||
-      userInfo?.role ||
-      userInfo?.user_type ||
-      "Position"
-    );
-  }, [userInfo]);
+  const originalWarehouse = getText(
+    userInfo?.warehouse,
+    userInfo?.WAREHOUSE
+  );
 
-  /*
-   * Normalize ข้อมูลสำหรับตรวจสอบสิทธิ์
-   */
-  const normalizedRole = useMemo(() => {
-    return normalizeValue(
-      userInfo?.ROLE ||
-      userInfo?.role ||
-      userInfo?.user_type ||
-      userInfo?.POSITION
-    );
-  }, [userInfo]);
-
-  /*
-   * user_type ใช้สำหรับตรวจสอบสิทธิ์ Admin โดยตรง
-   * ไม่รวมกับ ROLE, POSITION, department หรือ warehouse
-   */
-  const normalizedUserType = useMemo(() => {
-    return normalizeValue(userInfo?.user_type);
-  }, [userInfo]);
+  const originalTeam = getText(
+    userInfo?.team,
+    userInfo?.TEAM
+  );
 
   const normalizedDepartment =
-    useMemo(() => {
-      return normalizeValue(
-        userInfo?.department ||
-        userInfo?.DEPARTMENT
-      );
-    }, [userInfo]);
+    normalizeValue(originalDepartment);
 
   const normalizedWarehouse =
-    useMemo(() => {
-      return normalizeValue(
-        userInfo?.warehouse ||
-        userInfo?.WAREHOUSE
-      );
-    }, [userInfo]);
+    normalizeValue(originalWarehouse);
 
-  const normalizedTeam = useMemo(() => {
-    return normalizeValue(
-      userInfo?.team ||
-      userInfo?.TEAM
-    );
-  }, [userInfo]);
+  const normalizedUserType =
+    normalizeValue(userInfo?.user_type);
 
-  /*
-   * ตรวจสอบว่าเป็น CENTER หรือไม่
-   * รองรับทั้ง warehouse = CENTER และ team = CENTER
-   */
-  const isCenterUser = useMemo(() => {
-    return (
-      normalizedWarehouse === "CENTER" ||
-      normalizedTeam === "CENTER"
-    );
+  const loginUser = getText(
+    userInfo?.em_id,
+    userInfo?.employee_id,
+    userInfo?.EMPLOYEE_ID
+  ).toUpperCase();
+
+  const isCenterUser =
+    loginUser === "CENTER" ||
+    normalizedWarehouse === "CENTER" ||
+    normalizeValue(originalTeam) === "CENTER";
+
+  const normalizedSelectedDepartments = useMemo(
+    () =>
+      uniqueCodes(
+        selectedDepartments.map((item) => item.value)
+      ).map(normalizeValue),
+    [selectedDepartments]
+  );
+
+  const selectedWarehouseCodes = useMemo(
+    () =>
+      uniqueCodes([
+        ...selectedDCs.map(
+          (item) => item.DC_CODE || ""
+        ),
+        selectedDC?.DC_CODE || "",
+      ]),
+    [selectedDCs, selectedDC]
+  );
+
+  const hasSelectedDepartments =
+    isCenterUser &&
+    normalizedSelectedDepartments.length > 0;
+
+  const hasSelectedWarehouse =
+    selectedWarehouseCodes.length > 0;
+
+  // เลือกเฉพาะคลัง ให้แสดงมุมมองคลัง
+  // หากเลือกฝ่ายร่วมด้วย ให้ใช้เงื่อนไขฝ่ายที่เลือก
+  const isWarehouseView =
+    isCenterUser &&
+    !hasSelectedDepartments &&
+    hasSelectedWarehouse;
+
+  const activeDepartments = useMemo(() => {
+    // เลือกฝ่าย เช่น KEY_ACCOUNT ให้ใช้ฝ่ายที่เลือก
+    if (hasSelectedDepartments) {
+      return normalizedSelectedDepartments;
+    }
+
+    // เลือกเฉพาะคลัง ไม่ใช้ IMP เดิมปน
+    if (isWarehouseView) {
+      return [];
+    }
+
+    // ไม่เลือกอะไร กลับไปใช้ฝ่ายเดิมจาก user
+    return normalizedDepartment
+      ? [normalizedDepartment]
+      : [];
   }, [
-    normalizedWarehouse,
-    normalizedTeam,
+    hasSelectedDepartments,
+    normalizedSelectedDepartments,
+    isWarehouseView,
+    normalizedDepartment,
   ]);
 
-  /*
-   * รายการฝ่ายส่วนกลางที่เลือก
-   * เช่น ["TCAS", "FBP"]
-   */
-  const normalizedSelectedDepartments =
-    useMemo(() => {
-      return selectedDepartments
-        .map((item) =>
-          normalizeValue(item.value)
-        )
-        .filter(Boolean);
-    }, [selectedDepartments]);
-
-  /*
-   * แสดงข้อมูลตรง Team
-   */
   const displayTeam = useMemo(() => {
-    /*
-     * CENTER ต้องตรวจสอบก่อน team
-     * เพราะค่า team ของ User เป็น CENTER
-     */
     if (isCenterUser) {
-      if (selectedDepartments.length > 0) {
-        return selectedDepartments
-          .map((item) => item.value)
-          .filter(Boolean)
-          .join(", ");
+      const codes = uniqueCodes([
+        ...selectedDepartments.map(
+          (item) => item.value
+        ),
+        ...selectedWarehouseCodes,
+      ]);
+
+      if (codes.length > 0) {
+        return codes.join(", ");
       }
 
       return (
-        userInfo?.department ||
-        userInfo?.DEPARTMENT ||
+        originalDepartment ||
+        originalTeam ||
+        originalWarehouse ||
         "CENTER"
       );
     }
 
-    /*
-     * Warehouse หรือ GM แสดง DC ที่เลือก
-     */
-    if (
-      (normalizedWarehouse ===
-        "WAREHOUSE" ||
-        normalizedWarehouse === "GM") &&
-      selectedDC?.DC_CODE
-    ) {
-      return selectedDC.DC_CODE;
-    }
-
     return (
-      userInfo?.team ||
-      userInfo?.TEAM ||
-      userInfo?.department ||
-      userInfo?.DEPARTMENT ||
-      userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
+      selectedWarehouseCodes.join(", ") ||
+      originalTeam ||
+      originalDepartment ||
+      originalWarehouse ||
       "-"
     );
   }, [
-    userInfo,
     isCenterUser,
-    normalizedWarehouse,
-    selectedDC,
     selectedDepartments,
+    selectedWarehouseCodes,
+    originalDepartment,
+    originalTeam,
+    originalWarehouse,
   ]);
 
-  /*
-   * ตัวอักษรหน้ารูป User
-   */
-  const displayInitials = useMemo(() => {
-    if (
-      !displayName ||
-      displayName === "User"
-    ) {
-      return "U";
-    }
+  const displayInitials =
+    displayName === "User"
+      ? "U"
+      : displayName
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((name) => Array.from(name)[0])
+          .join("")
+          .toUpperCase();
 
-    return displayName
-      .split(" ")
-      .filter(Boolean)
-      .map((name) => name[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
-  }, [displayName]);
+  const isIMP = activeDepartments.includes("IMP");
+  const isFBP = activeDepartments.includes("FBP");
+
+  // Role ยังคงมาจากบัญชีจริง
+  const isAdmin = normalizedUserType === "ADMIN";
+  const isSuperadmin =
+    normalizedUserType === "SUPERADMIN";
 
   const menuItems = useMemo<MenuItem[]>(() => {
-    const items: MenuItem[] = [];
+    const items: MenuItem[] = [
+      {
+        label: "Dashboard",
+        path: PATHS.main.dashboard,
+        icon: LayoutDashboard,
+      },
+      {
+        label: "ขอเพิ่มกองรถ",
+        path: PATHS.main.addFleet,
+        icon: Truck,
+      },
+    ];
 
-    const activeDepartments =
-      isCenterUser &&
-        normalizedSelectedDepartments.length > 0
-        ? normalizedSelectedDepartments
-        : normalizedDepartment
-          ? [normalizedDepartment]
-          : [];
+    if (isWarehouseView) {
+      return items;
+    }
 
-    const isIMP =
-      activeDepartments.includes("IMP");
-
-    const isFBP =
-      activeDepartments.includes("FBP");
-
-    const isAdmin =
-      normalizedUserType === "ADMIN";
-
-    const isSuperadmin =
-      normalizedUserType === "SUPERADMIN";
-
-    // ทุกคนเห็น
-    items.push({
-      label: "ขอเพิ่มกองรถ",
-      path: PATHS.main.addFleet,
-      icon: Truck,
-    });
-
-    // ฝ่าย IMP หรือผู้ใช้ warehouse = GM
-    if (
-      isIMP ||
-      normalizedWarehouse === "GM"
-    ) {
+    if (isIMP || normalizedWarehouse === "GM") {
       items.push({
         label: "คำขอจากคลัง",
         path: PATHS.main.gm,
@@ -494,7 +464,6 @@ export default function Sidebar(
       });
     }
 
-    // ฝ่าย IMP หรือ FBP
     if (isIMP || isFBP) {
       items.push({
         label: "รอประเมินกองรถ",
@@ -503,152 +472,67 @@ export default function Sidebar(
       });
     }
 
-    // user_type admin หรือ superadmin
     if (isAdmin || isSuperadmin) {
       items.push({
-        label: "ติดตามกองรถออกใหม่/ทดแทน",
+        label: "ติดตามกองรถ",
         path: PATHS.main.trackFleet,
         icon: Route,
+        children: [
+          {
+            label: "รถออกใหม่/ทดแทน",
+            path: PATHS.main.trackFleet,
+          },
+          {
+            label: "รถเสริม",
+            disabled: true,
+            tooltip: "กำลังพัฒนา",
+          },
+        ],
       });
     }
 
-    // ฝ่าย IMP หรือ superadmin
     if (isIMP || isSuperadmin) {
-      items.push({
-        label: "จัดการกระบวนการทำงาน",
-        path: PATHS.main.manageProcess,
-        icon: Settings,
-      });
-
-      items.push({
-        label: "จัดการการใช้งาน",
-        path: PATHS.main.manageUser,
-        icon: Shield,
-      });
+      items.push(
+        {
+          label: "จัดการกระบวนการทำงาน",
+          path: PATHS.main.manageProcess,
+          icon: Settings,
+        },
+        {
+          label: "จัดการการใช้งาน",
+          path: PATHS.main.manageUser,
+          icon: Shield,
+        }
+      );
     }
-
-    console.log("MENU PERMISSION:", {
-      isCenterUser,
-      userDepartment: normalizedDepartment,
-      selectedDepartments:
-        normalizedSelectedDepartments,
-      activeDepartments,
-      isIMP,
-      isFBP,
-      isAdmin,
-      isSuperadmin,
-      menus: items.map((item) => item.label),
-    });
 
     return items;
   }, [
-    isCenterUser,
-    normalizedSelectedDepartments,
-    normalizedDepartment,
+    isWarehouseView,
+    isIMP,
+    isFBP,
+    isAdmin,
+    isSuperadmin,
     normalizedWarehouse,
-    normalizedUserType,
   ]);
 
-  const canChangeWarehouse = useMemo(() => {
-    return normalizedDepartment === "IMP";
-  }, [normalizedDepartment]);
+  // ใช้ฝ่ายต้นฉบับ เพื่อให้เปลี่ยนกลับได้
+  // แม้เลือกฝ่ายอื่นหรือเลือกคลังอยู่
+  const canChangeWarehouse =
+    normalizedDepartment === "IMP";
 
-  useEffect(() => {
-    if (!userInfo) {
-      return;
-    }
-
-    console.log("SIDEBAR ACCESS:", {
-      role: normalizedRole,
-      userType: normalizedUserType,
-      department:
-        normalizedDepartment,
-      warehouse:
-        normalizedWarehouse,
-      team: normalizedTeam,
-      isCenterUser,
-      selectedDC,
-      selectedDepartments,
-      selectedDepartmentCodes:
-        normalizedSelectedDepartments,
-      menuItems: menuItems.map(
-        (item) => item.label
-      ),
-    });
-  }, [
-    userInfo,
-    normalizedRole,
-    normalizedUserType,
-    normalizedDepartment,
-    normalizedWarehouse,
-    normalizedTeam,
-    isCenterUser,
-    selectedDC,
-    selectedDepartments,
-    normalizedSelectedDepartments,
-    menuItems,
-  ]);
-
-  /*
-   * เปลี่ยน DC หรือฝ่าย
-   */
   const handleChangeWarehouse = () => {
-    localStorage.removeItem("selected_dc");
-
-    localStorage.removeItem(
-      "selected_dcs"
-    );
-
-    localStorage.removeItem(
-      "selected_departments"
-    );
-
-    localStorage.removeItem(
-      "selected_department_codes"
-    );
-
-    setSelectedDC(null);
-    setSelectedDepartments([]);
-
-    window.dispatchEvent(
-      new Event("selectedDCChanged")
-    );
-
-    router.push(
-      PATHS.auth.selectDC
-    );
+    router.push(PATHS.auth.selectDC);
   };
 
-  /*
-   * Logout
-   */
   const handleLogout = () => {
-    localStorage.removeItem("user");
+    STORAGE_KEYS.forEach((key) => {
+      localStorage.removeItem(key);
+    });
 
-    localStorage.removeItem(
-      "selected_dc"
-    );
+    setSidebarData(EMPTY_DATA);
 
-    localStorage.removeItem(
-      "selected_dcs"
-    );
-
-    localStorage.removeItem(
-      "selected_departments"
-    );
-
-    localStorage.removeItem(
-      "selected_department_codes"
-    );
-
-    setUserInfo(null);
-    setSelectedDC(null);
-    setSelectedDepartments([]);
-
-    window.dispatchEvent(
-      new Event("userChanged")
-    );
-
+    window.dispatchEvent(new Event("userChanged"));
     window.dispatchEvent(
       new Event("selectedDCChanged")
     );
@@ -656,120 +540,811 @@ export default function Sidebar(
     router.push("/");
   };
 
+  const handleGroupClick = (path: string) => {
+    if (collapsed) {
+      setOpenGroups((previous) => ({
+        ...previous,
+        [path]: true,
+      }));
+
+      onToggle();
+      return;
+    }
+
+    setOpenGroups((previous) => ({
+      ...previous,
+      [path]: !previous[path],
+    }));
+  };
+
   return (
-    <aside className="flex h-screen w-[220px] flex-col overflow-hidden border-r border-white/10 bg-gradient-to-b from-slate-950 via-blue-950 to-slate-950 text-white shadow-xl">
-      {/* ข้อมูลผู้ใช้งาน */}
-      <div className="p-3">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 text-xs font-bold text-white">
-              {displayInitials}
-            </div>
+    <div
+      className="fleet-sidebar"
+      data-collapsed={collapsed ? "true" : "false"}
+      style={{ width: collapsed ? 72 : 240 }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-controls="fleet-sidebar-content"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "ขยายเมนู" : "ย่อเมนู"}
+        title={collapsed ? "ขยายเมนู" : "ย่อเมนู"}
+        className="sidebar-toggle"
+      >
+        <span className="toggle-arrow">
+          <ChevronLeft size={16} />
+        </span>
+      </button>
 
-            <div className="min-w-0">
-              <p className="truncate text-[13px] font-semibold text-white">
-                {displayName}
-              </p>
-
-              <p className="truncate text-[10px] text-blue-200/70">
-                {displayPosition}
-              </p>
-            </div>
-          </div>
-
-          {/* Team / DC / Department */}
-          <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-blue-500/10 px-2.5 py-1.5 text-[10px] text-blue-100">
-            <div
-              className="min-w-0 flex-1"
-              title={displayTeam}
-            >
-              <span className="text-blue-200/70">
-                Team:{" "}
-              </span>
-
-              <span className="font-semibold text-blue-50">
-                {displayTeam}
-              </span>
-            </div>
-
-            {canChangeWarehouse && (
-              <button
-                type="button"
-                onClick={
-                  handleChangeWarehouse
-                }
-                title={
-                  isCenterUser
-                    ? "เลือกฝ่ายใหม่"
-                    : "เลือก Warehouse / DC ใหม่"
-                }
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/10 text-blue-100 transition hover:bg-white/20 hover:text-white"
+      <aside
+        id="fleet-sidebar-content"
+        aria-label="เมนูหลัก"
+        className="sidebar-surface"
+      >
+        <header className="profile-header">
+          <div className="profile-card">
+            <div className="profile-top">
+              <div
+                className="profile-avatar"
+                title={`${displayName} · ${displayPosition} · ${displayTeam}`}
               >
-                <Settings size={13} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+                {displayInitials}
+              </div>
 
-      {/* หัวข้อเมนู */}
-      <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-300/45">
-        Main Menu
-      </div>
-
-      {/* รายการเมนู */}
-      <div className="flex-1 overflow-y-auto px-2.5 py-2">
-        <div className="flex flex-col gap-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-
-            const isActive =
-              pathname === item.path ||
-              pathname.startsWith(
-                `${item.path}/`
-              );
-
-            return (
-              <Link
-                key={item.path}
-                href={item.path}
-                className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] transition ${isActive
-                    ? "bg-white text-blue-900"
-                    : "text-blue-100 hover:bg-white/[0.08] hover:text-white"
-                  }`}
+              <div
+                className="profile-info fade-content"
+                aria-hidden={collapsed}
               >
-                <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${isActive
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-white/[0.06] text-blue-200"
-                    }`}
+                <p
+                  className="profile-name"
+                  title={displayName}
                 >
-                  <Icon size={14} />
-                </div>
+                  {displayName}
+                </p>
 
-                <span className="font-semibold">
+                <p
+                  className="profile-position"
+                  title={displayPosition}
+                >
+                  {displayPosition}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="profile-team fade-content"
+              aria-hidden={collapsed}
+            >
+              <p
+                className="profile-team-text"
+                title={displayTeam}
+              >
+                <span className="profile-team-label">
+                  Team:{" "}
+                </span>
+                <span className="profile-team-value">
+                  {displayTeam}
+                </span>
+              </p>
+
+              {canChangeWarehouse && (
+                <button
+                  type="button"
+                  onClick={handleChangeWarehouse}
+                  disabled={collapsed}
+                  aria-label="เปลี่ยนฝ่ายหรือ Warehouse"
+                  title="เปลี่ยนฝ่าย / Warehouse"
+                  className="profile-settings"
+                >
+                  <Settings size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <div className="sidebar-divider" />
+
+        <div className="menu-caption">
+          <span
+            className="fade-content"
+            aria-hidden={collapsed}
+          >
+            MAIN MENU
+          </span>
+          <span className="caption-mark" />
+        </div>
+
+        <nav className="sidebar-nav">
+          {menuItems.map((item, index) => {
+            const Icon = item.icon;
+            const isActive = matchesPath(
+              pathname,
+              item.path
+            );
+
+            const isGroupOpen =
+              !collapsed &&
+              Boolean(openGroups[item.path]);
+
+            const submenuId = `sidebar-submenu-${index}`;
+
+            const content = (
+              <span className="menu-content">
+                <span className="menu-icon">
+                  <Icon size={17} />
+                </span>
+
+                <span
+                  className="menu-label fade-content"
+                  aria-hidden={collapsed}
+                >
                   {item.label}
                 </span>
-              </Link>
+
+                {item.children && (
+                  <span
+                    className={`group-arrow fade-content ${
+                      isGroupOpen ? "is-open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <ChevronDown size={14} />
+                  </span>
+                )}
+              </span>
+            );
+
+            return (
+              <div
+                key={item.path}
+                className="menu-group"
+              >
+                {item.children ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleGroupClick(item.path)
+                    }
+                    aria-label={item.label}
+                    aria-expanded={isGroupOpen}
+                    aria-controls={submenuId}
+                    title={
+                      collapsed
+                        ? item.label
+                        : undefined
+                    }
+                    className={`menu-item ${
+                      isActive ? "is-active" : ""
+                    }`}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <Link
+                    href={item.path}
+                    aria-label={item.label}
+                    aria-current={
+                      isActive ? "page" : undefined
+                    }
+                    title={
+                      collapsed
+                        ? item.label
+                        : undefined
+                    }
+                    className={`menu-item ${
+                      isActive ? "is-active" : ""
+                    }`}
+                  >
+                    {content}
+                  </Link>
+                )}
+
+                {item.children && (
+                  <div
+                    id={submenuId}
+                    aria-hidden={!isGroupOpen}
+                    className={`submenu-motion ${
+                      isGroupOpen ? "is-open" : ""
+                    }`}
+                  >
+                    <div className="submenu-clip">
+                      <div className="submenu-list">
+                        {item.children.map((child) => {
+                          if (
+                            child.disabled ||
+                            !child.path
+                          ) {
+                            return (
+                              <div
+                                key={child.label}
+                                className="disabled-item-wrap"
+                              >
+                                <button
+                                  type="button"
+                                  tabIndex={
+                                    isGroupOpen ? 0 : -1
+                                  }
+                                  aria-disabled="true"
+                                  title={
+                                    child.tooltip ||
+                                    "กำลังพัฒนา"
+                                  }
+                                  className="submenu-item is-disabled"
+                                >
+                                  <span className="submenu-dot" />
+                                  {child.label}
+                                </button>
+
+                                <span
+                                  role="tooltip"
+                                  className="dev-tooltip"
+                                >
+                                  {child.tooltip ||
+                                    "กำลังพัฒนา"}
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          const isChildActive =
+                            matchesPath(
+                              pathname,
+                              child.path
+                            );
+
+                          return (
+                            <Link
+                              key={child.label}
+                              href={child.path}
+                              tabIndex={
+                                isGroupOpen ? 0 : -1
+                              }
+                              aria-current={
+                                isChildActive
+                                  ? "page"
+                                  : undefined
+                              }
+                              className={`submenu-item ${
+                                isChildActive
+                                  ? "is-active"
+                                  : ""
+                              }`}
+                            >
+                              <span className="submenu-dot" />
+                              {child.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
-        </div>
-      </div>
+        </nav>
 
-      {/* Logout */}
-      <div className="border-t border-white/10 p-2.5">
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12px] font-semibold text-red-100 transition hover:bg-red-500/10"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/10">
-            <LogOut size={14} />
-          </div>
+        <footer className="sidebar-footer">
+          <button
+            type="button"
+            onClick={handleLogout}
+            aria-label="ออกจากระบบ"
+            title={
+              collapsed ? "ออกจากระบบ" : undefined
+            }
+            className="menu-item logout-item"
+          >
+            <span className="menu-content">
+              <span className="menu-icon">
+                <LogOut size={17} />
+              </span>
 
-          Logout
-        </button>
-      </div>
-    </aside>
+              <span
+                className="menu-label fade-content"
+                aria-hidden={collapsed}
+              >
+                ออกจากระบบ
+              </span>
+            </span>
+          </button>
+        </footer>
+      </aside>
+
+      <style jsx>{`
+        .fleet-sidebar {
+          --sidebar-ease: cubic-bezier(0.22, 1, 0.36, 1);
+          position: relative;
+          z-index: 40;
+          height: 100%;
+          min-width: 0;
+          flex: 0 0 auto;
+          transition: width 380ms var(--sidebar-ease);
+        }
+
+        .sidebar-surface {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          height: 100%;
+          overflow: hidden;
+          border-right: 1px solid rgba(255, 255, 255, 0.1);
+          background: linear-gradient(
+            180deg,
+            #020617 0%,
+            #172554 52%,
+            #020617 100%
+          );
+          color: white;
+          box-shadow: 5px 0 22px rgba(15, 23, 42, 0.08);
+        }
+
+        .sidebar-toggle {
+          position: absolute;
+          top: 28px;
+          right: -14px;
+          z-index: 50;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border: 1px solid #dbeafe;
+          border-radius: 50%;
+          background: white;
+          color: #1d4ed8;
+          box-shadow: 0 3px 12px rgba(15, 23, 42, 0.14);
+          cursor: pointer;
+          transition: transform 180ms ease;
+        }
+
+        .sidebar-toggle:hover {
+          background: #eff6ff;
+          transform: scale(1.08);
+        }
+
+        .toggle-arrow {
+          display: flex;
+          transition: transform 380ms var(--sidebar-ease);
+        }
+
+        [data-collapsed="true"] .toggle-arrow {
+          transform: rotate(180deg);
+        }
+
+        .profile-header {
+          flex-shrink: 0;
+          padding: 14px 8px 12px;
+        }
+
+        .profile-card {
+          position: relative;
+          width: 100%;
+          height: 118px;
+          overflow: hidden;
+          border-radius: 18px;
+          background: rgba(255, 255, 255, 0.055);
+          box-shadow: inset 0 0 0 1px
+            rgba(255, 255, 255, 0.12);
+        }
+
+        .profile-top {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          width: 224px;
+          height: 64px;
+          padding: 14px 14px 9px;
+          box-sizing: border-box;
+        }
+
+        .profile-avatar {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex: 0 0 40px;
+          height: 40px;
+          border-radius: 13px;
+          background: linear-gradient(
+            135deg,
+            #60a5fa,
+            #2563eb
+          );
+          color: white;
+          font-size: 12px;
+          font-weight: 700;
+          transition: transform 380ms var(--sidebar-ease);
+        }
+
+        .profile-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .profile-name,
+        .profile-position {
+          margin: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .profile-name {
+          color: white;
+          font-size: 13px;
+          font-weight: 600;
+          line-height: 20px;
+        }
+
+        .profile-position {
+          margin-top: 1px;
+          color: #93b4e2;
+          font-size: 10px;
+          line-height: 16px;
+        }
+
+        .profile-team {
+          position: absolute;
+          top: 64px;
+          left: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          width: 196px;
+          height: 40px;
+          padding: 0 11px;
+          box-sizing: border-box;
+          border-radius: 13px;
+          background: rgba(59, 94, 174, 0.18);
+        }
+
+        .profile-team-text {
+          min-width: 0;
+          margin: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 10px;
+          line-height: 18px;
+        }
+
+        .profile-team-label {
+          color: #93b4e2;
+        }
+
+        .profile-team-value {
+          color: #eff6ff;
+          font-weight: 600;
+        }
+
+        .profile-settings {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex: 0 0 27px;
+          height: 27px;
+          border: 0;
+          border-radius: 9px;
+          background: rgba(148, 180, 235, 0.13);
+          color: #dbeafe;
+          cursor: pointer;
+        }
+
+        .profile-settings:hover {
+          background: rgba(148, 180, 235, 0.25);
+        }
+
+        [data-collapsed="true"] .profile-card {
+          background: transparent;
+          box-shadow: none;
+        }
+
+        [data-collapsed="true"] .profile-avatar {
+          transform: translateX(-6px);
+        }
+
+        .fade-content {
+          opacity: 1;
+          transform: translateX(0);
+          visibility: visible;
+          transition:
+            opacity 180ms ease 90ms,
+            transform 300ms var(--sidebar-ease),
+            visibility 0s;
+        }
+
+        [data-collapsed="true"] .fade-content {
+          opacity: 0;
+          transform: translateX(-6px);
+          visibility: hidden;
+          pointer-events: none;
+          transition:
+            opacity 100ms ease,
+            transform 180ms ease,
+            visibility 0s linear 100ms;
+        }
+
+        .sidebar-divider {
+          height: 1px;
+          margin: 0 16px;
+          flex-shrink: 0;
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .menu-caption {
+          position: relative;
+          height: 38px;
+          margin: 0 12px;
+          flex-shrink: 0;
+          overflow: hidden;
+        }
+
+        .menu-caption > .fade-content {
+          position: absolute;
+          top: 14px;
+          left: 12px;
+          white-space: nowrap;
+          font-size: 9px;
+          font-weight: 600;
+          letter-spacing: 0.16em;
+          color: rgba(147, 197, 253, 0.45);
+        }
+
+        .caption-mark {
+          position: absolute;
+          top: 18px;
+          left: 16px;
+          width: 16px;
+          height: 3px;
+          border-radius: 4px;
+          background: rgba(147, 197, 253, 0.25);
+          opacity: 0;
+        }
+
+        [data-collapsed="true"] .caption-mark {
+          opacity: 1;
+        }
+
+        .sidebar-nav {
+          min-height: 0;
+          flex: 1;
+          overflow-x: hidden;
+          overflow-y: auto;
+          padding: 0 12px 16px;
+          scrollbar-width: thin;
+          scrollbar-color: #1e40af transparent;
+        }
+
+        .menu-group + .menu-group {
+          margin-top: 6px;
+        }
+
+        .fleet-sidebar :global(.menu-item) {
+          display: flex;
+          align-items: center;
+          width: 100%;
+          height: 44px;
+          padding: 0;
+          overflow: hidden;
+          border: 0;
+          border-radius: 12px;
+          background: transparent;
+          color: #dbeafe;
+          text-decoration: none;
+          text-align: left;
+          cursor: pointer;
+          transition:
+            background-color 180ms ease,
+            color 180ms ease;
+        }
+
+        .fleet-sidebar :global(.menu-item:hover) {
+          background: rgba(255, 255, 255, 0.08);
+          color: white;
+        }
+
+        .fleet-sidebar :global(.menu-item.is-active) {
+          background: white;
+          color: #1e3a8a;
+          box-shadow: 0 3px 12px rgba(2, 6, 23, 0.1);
+        }
+
+        .menu-content {
+          display: flex;
+          flex: 0 0 216px;
+          align-items: center;
+          gap: 10px;
+          width: 216px;
+          height: 44px;
+          padding: 0 8px;
+          box-sizing: border-box;
+        }
+
+        .menu-icon {
+          display: flex;
+          flex: 0 0 32px;
+          align-items: center;
+          justify-content: center;
+          height: 32px;
+          border-radius: 9px;
+          background: rgba(255, 255, 255, 0.06);
+          color: #bfdbfe;
+        }
+
+        .fleet-sidebar
+          :global(.menu-item.is-active)
+          .menu-icon {
+          background: #dbeafe;
+          color: #1d4ed8;
+        }
+
+        .menu-label {
+          min-width: 0;
+          flex: 1;
+          white-space: nowrap;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .group-arrow {
+          display: flex;
+          margin-right: 4px;
+          flex-shrink: 0;
+        }
+
+        .group-arrow :global(svg) {
+          transition: transform 280ms var(--sidebar-ease);
+        }
+
+        .group-arrow.is-open :global(svg) {
+          transform: rotate(180deg);
+        }
+
+        .submenu-motion {
+          display: grid;
+          grid-template-rows: 0fr;
+          opacity: 0;
+          visibility: hidden;
+          transition:
+            grid-template-rows 300ms var(--sidebar-ease),
+            opacity 160ms ease,
+            visibility 0s linear 300ms;
+        }
+
+        .submenu-motion.is-open {
+          grid-template-rows: 1fr;
+          opacity: 1;
+          visibility: visible;
+          transition:
+            grid-template-rows 340ms var(--sidebar-ease),
+            opacity 220ms ease,
+            visibility 0s;
+        }
+
+        .submenu-clip {
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .submenu-list {
+          width: 174px;
+          margin: 8px 0 4px 40px;
+          padding-left: 12px;
+          box-sizing: border-box;
+          border-left: 1px solid
+            rgba(191, 219, 254, 0.16);
+        }
+
+        .fleet-sidebar :global(.submenu-item) {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          min-height: 38px;
+          margin-top: 3px;
+          padding: 8px 10px;
+          box-sizing: border-box;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: rgba(191, 219, 254, 0.75);
+          font-size: 11px;
+          font-weight: 500;
+          white-space: nowrap;
+          text-align: left;
+          text-decoration: none;
+        }
+
+        .fleet-sidebar :global(.submenu-item:hover) {
+          background: rgba(255, 255, 255, 0.06);
+          color: white;
+        }
+
+        .fleet-sidebar :global(.submenu-item.is-active) {
+          background: rgba(96, 165, 250, 0.15);
+          color: #dbeafe;
+          box-shadow: inset 0 0 0 1px
+            rgba(147, 197, 253, 0.12);
+        }
+
+        .submenu-dot {
+          width: 5px;
+          height: 5px;
+          flex-shrink: 0;
+          border-radius: 50%;
+          background: rgba(147, 197, 253, 0.4);
+        }
+
+        .disabled-item-wrap {
+          position: relative;
+        }
+
+        .fleet-sidebar :global(.submenu-item.is-disabled) {
+          background: transparent;
+          color: #64748b;
+          cursor: not-allowed;
+        }
+
+        .dev-tooltip {
+          position: absolute;
+          right: 0;
+          bottom: 100%;
+          z-index: 20;
+          margin-bottom: 4px;
+          padding: 7px 10px;
+          border-radius: 8px;
+          background: #1e293b;
+          color: white;
+          font-size: 10px;
+          white-space: nowrap;
+          pointer-events: none;
+          opacity: 0;
+        }
+
+        .disabled-item-wrap:hover .dev-tooltip,
+        .disabled-item-wrap:focus-within .dev-tooltip {
+          opacity: 1;
+        }
+
+        .sidebar-footer {
+          flex-shrink: 0;
+          padding: 12px;
+          border-top: 1px solid
+            rgba(255, 255, 255, 0.1);
+        }
+
+        .fleet-sidebar :global(.logout-item) {
+          color: #fee2e2;
+        }
+
+        .fleet-sidebar :global(.logout-item:hover) {
+          background: rgba(239, 68, 68, 0.1);
+          color: #fecaca;
+        }
+
+        .logout-item .menu-icon {
+          background: rgba(239, 68, 68, 0.1);
+          color: #fecaca;
+        }
+
+        .fleet-sidebar :global(button:focus-visible),
+        .fleet-sidebar :global(a:focus-visible) {
+          outline: 2px solid #60a5fa;
+          outline-offset: -2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .fleet-sidebar,
+          .fleet-sidebar *,
+          .fleet-sidebar :global(a),
+          .fleet-sidebar :global(svg) {
+            transition-duration: 0ms !important;
+            transition-delay: 0ms !important;
+          }
+        }
+      `}</style>
+    </div>
   );
 }

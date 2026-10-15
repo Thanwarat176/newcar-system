@@ -1,6 +1,5 @@
 "use client";
-
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
@@ -11,7 +10,6 @@ import {
 } from "lucide-react";
 import FleetModalDetail from "./components/FleetModalDetail";
 import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
-
 interface SelectedDC {
   DC_CODE?: string;
   DC_NAME?: string;
@@ -20,13 +18,11 @@ interface SelectedDC {
   dc_name?: string;
   dc_type?: string;
 }
-
 interface RequestDetailItem {
   id?: string | number;
   request_id?: string | number;
   status?: string | null;
 }
-
 interface RequestItem {
   id: number | null;
   running_doc: string;
@@ -63,18 +59,15 @@ interface RequestItem {
     reason: string;
   }[];
 }
-
 interface UserInfo {
   warehouse?: string;
   WAREHOUSE?: string;
   team?: string;
   TEAM?: string;
 }
-
 type StatusFilter = "all" | "fbp_pending" | "reject_by_fbp" | "approved";
 type SortKey = "request_date" | "running_doc" | "usage_date";
 type SortDirection = "asc" | "desc";
-
 export default function WaitingFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -106,39 +99,46 @@ export default function WaitingFleetPage() {
   const [requestDatePickerPosition, setRequestDatePickerPosition] = useState({
     top: 0, left: 0,
   });
-
-  const fetchRequests = async () => {
+  const requestsFetchIdRef = useRef(0);
+  const previousDetailOpenRef = useRef(openDetailModal);
+  const fetchRequests = useCallback(async () => {
+    const fetchId = ++requestsFetchIdRef.current;
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true);
-      setError("");
       const res = await fetch(
-        "http://192.168.158.210/api_new_truck/api/waiting_fleet_get.php",
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        },
+        `http://192.168.158.210/api_new_truck/api/waiting_fleet_get.php?_refresh=${Date.now()}-${fetchId}`,
+        { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store" },
       );
       if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลได้");
       const data = await res.json();
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data.data)
-          ? data.data
-          : Array.isArray(data.result)
-            ? data.result
-            : [];
-      setRequests(list);
+      if (data?.status === "error" || data?.success === false) {
+        throw new Error(data.message || "ไม่สามารถดึงข้อมูลได้");
+      }
+      const list = Array.isArray(data) ? data
+        : Array.isArray(data.data) ? data.data
+        : Array.isArray(data.result) ? data.result : null;
+      if (!list) throw new Error("รูปแบบข้อมูลจาก API ไม่ถูกต้อง");
+      // A previous refresh must never overwrite the latest refresh.
+      if (fetchId === requestsFetchIdRef.current) setRequests(list);
+      return true;
     } catch (err) {
       console.error(err);
-      setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
+      if (fetchId === requestsFetchIdRef.current) {
+        setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (fetchId === requestsFetchIdRef.current) setLoading(false);
     }
-  };
-
-  useEffect(() => { void fetchRequests(); }, []);
-
+  }, []);
+  useEffect(() => { void fetchRequests(); }, [fetchRequests]);
+  // Reload for every transition from open to closed, including X and Escape.
+  useEffect(() => {
+    const wasOpen = previousDetailOpenRef.current;
+    previousDetailOpenRef.current = openDetailModal;
+    if (wasOpen && !openDetailModal) void fetchRequests();
+  }, [openDetailModal, fetchRequests]);
   useEffect(() => {
     const loadSelectedDC = () => {
       const savedSelectedDC = localStorage.getItem("selected_dc");
@@ -155,7 +155,6 @@ export default function WaitingFleetPage() {
     window.addEventListener("selectedDCChanged", loadSelectedDC);
     return () => window.removeEventListener("selectedDCChanged", loadSelectedDC);
   }, []);
-
   useEffect(() => {
     if (!showRequestDatePicker) return;
     const handleClickOutside = (event: MouseEvent) => {
@@ -167,7 +166,6 @@ export default function WaitingFleetPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showRequestDatePicker]);
-
   useEffect(() => {
     const savedUser = localStorage.getItem("user_info") ||
       localStorage.getItem("user") || localStorage.getItem("userInfo");
@@ -179,7 +177,6 @@ export default function WaitingFleetPage() {
       setUserInfo(null);
     }
   }, []);
-
   const selectedDcFromSidebar = useMemo(() => String(
     selectedDC?.DC_CODE || selectedDC?.dc_code || "",
   ).trim().toUpperCase(), [selectedDC]);
@@ -194,7 +191,6 @@ export default function WaitingFleetPage() {
     userInfo?.team || userInfo?.TEAM || "",
   ).trim().toUpperCase(), [userInfo]);
   const isCenterUser = userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
-
   const handleSort = (key: SortKey) => {
     setSortConfig((current) => ({
       key,
@@ -205,7 +201,6 @@ export default function WaitingFleetPage() {
     if (sortConfig.key !== key) return <ArrowUpDown size={13} className="opacity-50" />;
     return sortConfig.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
   };
-
   const sidebarFilteredRequests = useMemo(() => {
     if (isCenterUser) return requests;
     if (selectedDcFromSidebar) {
@@ -216,7 +211,6 @@ export default function WaitingFleetPage() {
     }
     return [];
   }, [requests, selectedDcFromSidebar, isCenterUser, userWarehouse]);
-
   const normalizeDateKey = (value?: string) => {
     if (!value) return "ไม่ระบุวันที่";
     const raw = String(value).trim();
@@ -273,7 +267,6 @@ export default function WaitingFleetPage() {
     const numberValue = Number(value);
     return Number.isNaN(numberValue) ? String(value) : numberValue.toLocaleString("en-US");
   };
-
   const normalizeStatus = (status?: string) => {
     const value = String(status || "").trim().toLowerCase();
     if (value === "fbp_pending" || value === "partial_approved" || value === "รอทีม FBP ประเมินข้อมูล") return "fbp_pending";
@@ -289,7 +282,7 @@ export default function WaitingFleetPage() {
       const approvedQty = Math.max(Number(item.summary.total_approved || 0), 0);
       const notApprovedQty = Math.max(Number(item.summary.total_rejected || 0), 0);
       return { requestedQty, approvedQty, notApprovedQty,
-        pendingQty: normalizeStatus(item.status) === "fbp_pending" ? requestedQty : 0 };
+        pendingQty: normalizeStatus(item.status) === "fbp_pending" ? Math.max(requestedQty - approvedQty - notApprovedQty, 0) : 0 };
     }
     const originalQty = Math.max(Number(item.qty || 0), 0);
     const gmApprovedQty = Math.max(Number(item.approve_qty_gm || 0), 0);
@@ -298,9 +291,15 @@ export default function WaitingFleetPage() {
     if (details.length > 0) {
       return {
         requestedQty,
-        approvedQty: details.filter((detail) => getDetailStatus(detail) === "progress").length,
+        approvedQty: details.filter((detail) => normalizeStatus(getDetailStatus(detail)) === "approved").length,
         notApprovedQty: details.filter((detail) => getDetailStatus(detail) === "reject_by_fbp").length,
-        pendingQty: details.filter((detail) => getDetailStatus(detail) === "fbp_pending").length,
+        pendingQty: details.filter((detail) => {
+          const status = normalizeStatus(getDetailStatus(detail));
+          return status === "fbp_pending" || (
+            normalizeStatus(item.status) === "fbp_pending" &&
+            !["approved", "reject_by_fbp", "rejected", "cancelled", "canceled"].includes(status)
+          );
+        }).length,
       };
     }
     const rawApprVal = Number(item.approved_qty || 0);
@@ -312,28 +311,23 @@ export default function WaitingFleetPage() {
   };
   const isFbpPendingItem = (item: RequestItem) => {
     const { requestedQty, approvedQty } = getQtySummary(item);
-  
     if (requestedQty > 0 && approvedQty === requestedQty) {
       return false;
     }
-  
     const parentPending = normalizeStatus(item.status) === "fbp_pending";
-  
     if (
       isReplacementRequest(item) &&
       Array.isArray(item.details) &&
       item.details.length > 0
     ) {
       return item.details.some((detail) => {
-        const detailStatus = getDetailStatus(detail);
-  
+        const detailStatus = normalizeStatus(getDetailStatus(detail));
         return (
           detailStatus === "fbp_pending" ||
-          (detailStatus === "" && parentPending)
+          (parentPending && !["approved", "reject_by_fbp", "rejected", "cancelled", "canceled"].includes(detailStatus))
         );
       });
     }
-  
     return parentPending;
   };
   const isFbpRejectedItem = (item: RequestItem) => {
@@ -376,7 +370,6 @@ export default function WaitingFleetPage() {
     }
     return [];
   };
-
   const statusCounts = useMemo(() => {
     const allItems = sidebarFilteredRequests.filter((item) => isFbpPendingItem(item) || isFbpRejectedItem(item) || isApprovedItem(item));
     const pendingItems = sidebarFilteredRequests.filter(isFbpPendingItem);
@@ -407,7 +400,6 @@ export default function WaitingFleetPage() {
   const dcOptions = useMemo(() => Array.from(new Set(sidebarFilteredRequests
     .filter((item) => dcTypeFilter === "all" || String(item.dc_type || "").trim().toUpperCase() === dcTypeFilter.trim().toUpperCase())
     .map((item) => String(item.dc_code || "").trim()).filter(Boolean))).sort(), [sidebarFilteredRequests, dcTypeFilter]);
-
   const filteredRequests = useMemo(() => {
     let list = sidebarFilteredRequests;
     if (statusFilter === "all") list = list.filter((item) => isFbpPendingItem(item) || isFbpRejectedItem(item) || isApprovedItem(item));
@@ -443,7 +435,6 @@ export default function WaitingFleetPage() {
     return list;
   }, [sidebarFilteredRequests, statusFilter, requestTypeFilter, truckTypeFilter,
     dcTypeFilter, dcFilter, searchText, hasRequestDateRange, requestDateRange]);
-
   const pageTitle = useMemo(() => {
     const dcSuffix = isCenterUser && dcFilter !== "all" ? `ของ ${dcFilter}`
       : !isCenterUser && selectedDcFromSidebar ? `ของ ${selectedDcFromSidebar}` : "";
@@ -452,7 +443,6 @@ export default function WaitingFleetPage() {
     if (statusFilter === "approved") return `รายการอนุมัติแล้ว${dcSuffix}`;
     return `รายการรอประเมินกองรถ${dcSuffix}`;
   }, [statusFilter, dcFilter, isCenterUser, selectedDcFromSidebar]);
-
   const sortedRequests = useMemo(() => {
     return [...filteredRequests].sort((a, b) => {
       let comparison = 0;
@@ -474,25 +464,20 @@ export default function WaitingFleetPage() {
       return sortConfig.direction === "asc" ? comparison : -comparison;
     });
   }, [filteredRequests, sortConfig]);
-
   // แบ่งหน้าหลังกรองและเรียงข้อมูลแล้ว
   const totalPages = Math.max(1, Math.ceil(sortedRequests.length / pageSize));
   const activePage = Math.min(Math.max(currentPage, 1), totalPages);
   const pageStart = (activePage - 1) * pageSize;
-
   useEffect(() => {
     setCurrentPage(1);
   }, [statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter,
     dcFilter, hasRequestDateRange, requestDateRange, selectedDcFromSidebar,
     userWarehouse, sortConfig, pageSize]);
-
   useEffect(() => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
   }, [totalPages]);
-
   const paginatedRequests = useMemo(() => sortedRequests.slice(pageStart, pageStart + pageSize),
     [sortedRequests, pageStart, pageSize]);
-
   const groupedByRequestDate = useMemo(() => {
     return paginatedRequests.reduce<Record<string, RequestItem[]>>((groups, item) => {
       const dateKey = getRequestDateKey(item);
@@ -501,7 +486,6 @@ export default function WaitingFleetPage() {
       return groups;
     }, {});
   }, [paginatedRequests]);
-
   const sortedDates = useMemo(() => {
     const dates = Object.keys(groupedByRequestDate);
     if (sortConfig.key !== "request_date") return dates;
@@ -512,7 +496,6 @@ export default function WaitingFleetPage() {
       return sortConfig.direction === "asc" ? comparison : -comparison;
     });
   }, [groupedByRequestDate, sortConfig]);
-
   // ลำดับต่อเนื่อง แม้มีหลายกลุ่มวันที่ในหน้าเดียวกัน
   const dateGroupOffsets = useMemo(() => {
     const offsets: Record<string, number> = {};
@@ -523,7 +506,6 @@ export default function WaitingFleetPage() {
     }
     return offsets;
   }, [sortedDates, groupedByRequestDate]);
-
   const selectedDcLabel = useMemo(() => {
     if (selectedDcFromSidebar === "CENTER") return "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด";
     if (!selectedDcFromSidebar) return "ไม่ได้เลือก DC จาก Sidebar / แสดงทั้งหมด";
@@ -555,7 +537,6 @@ export default function WaitingFleetPage() {
     setRequestDatePickerPosition({ top, left });
     setShowRequestDatePicker((prev) => !prev);
   };
-
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
       <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
@@ -587,7 +568,6 @@ export default function WaitingFleetPage() {
           </div>
         </div>
         {error && <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600 shadow-[0_10px_30px_rgba(239,68,68,0.1)]">{error}</div>}
-
         {/* STATUS CARDS */}
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {([
@@ -636,7 +616,6 @@ export default function WaitingFleetPage() {
             );
           })}
         </div>
-
         {/* FILTER */}
         <div className="relative z-30 mb-3 rounded-[24px] bg-gradient-to-b from-slate-50/90 to-white px-4 pb-4 pt-4 sm:px-5">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -721,7 +700,6 @@ export default function WaitingFleetPage() {
             </div>
           </div>
         </div>
-
         {/* TABLE */}
         <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -794,7 +772,6 @@ export default function WaitingFleetPage() {
                 </tbody>
               </table>
             </div>
-
             {/* PAGINATION: อยู่นอกพื้นที่เลื่อนตาราง */}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -817,14 +794,12 @@ export default function WaitingFleetPage() {
             </div>
           </div>
         </div>
-
         <ExportWaitingFleetModal open={openExportModal} onClose={() => setOpenExportModal(false)} requests={sidebarFilteredRequests} dcLabel={selectedDcLabel} />
-        {openDetailModal && selectedRequest && <FleetModalDetail open={openDetailModal} onClose={handleCloseDetail} data={selectedRequest} allRequests={requests} onSuccess={fetchRequests} />}
+        {openDetailModal && selectedRequest && <FleetModalDetail open={openDetailModal} onClose={handleCloseDetail} data={selectedRequest} allRequests={requests} onSuccess={async () => { if (!(await fetchRequests())) throw new Error("โหลดรายการล่าสุดไม่สำเร็จ"); }} />}
       </main>
     </div>
   );
 }
-
 function getLicenseText(licenseReplace?: string[] | string | null): string {
   if (Array.isArray(licenseReplace)) return licenseReplace.join(", ");
   if (typeof licenseReplace === "string") {

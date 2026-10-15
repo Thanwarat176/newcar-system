@@ -1,5 +1,20 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FlowAssessmentModal from "../trackFleet/component/FlowAssessmentModal";
+
+interface UserInfo {
+  warehouse?: string;
+  WAREHOUSE?: string;
+  team?: string;
+  TEAM?: string;
+}
+
+interface SelectedDC {
+  DC_CODE?: string;
+  DC_NAME?: string;
+  DC_TYPE?: string;
+}
+
 type FleetId = number | string | null;
 interface WarehouseRecord {
   request_id?: FleetId;
@@ -19,6 +34,8 @@ interface ProcessDefinition {
 }
 interface FleetRequest {
   id: FleetId;
+  vehicle_no?: FleetId;
+  unit_code?: string | null;
   dc_code: string | null;
   dc_type?: string | null;
   fleet_type?: string | null;
@@ -65,14 +82,39 @@ interface Props {
   apiUrl?: string;
   dashboardApiUrl?: string;
 }
-const FLEET_STATUSES = [
-  { key: "success", label: "เสร็จสิ้น", color: "#059669" },
-  { key: "progress", label: "คำขอรอพิจารณา", color: "#2563eb" },
-  { key: "cancel", label: "ไม่ผ่านกระบวนการ", color: "#e11d48" },
-  { key: "partial_approved", label: "อนุมัติบางส่วน", color: "#d97706" },
-  { key: "fbp_pending", label: "FBP จัดรถเรียบร้อยแล้ว", color: "#7c3aed" },
-  { key: "reject_by_fbp", label: "FBP ไม่อนุมัติ", color: "#dc2626" },
+type DashboardSummaryKey = "all" | "gm" | "fbp" | "tcas" | "success" | "cancel";
+type DashboardSummary = Record<DashboardSummaryKey, { qty: number; items: number }>;
+const DASHBOARD_SUMMARY_CARDS = [
+  { key: "all", label: "ทั้งหมด", detail: "คำขอทุกสถานะ", color: "#2563eb", tint: "#eff6ff" },
+  { key: "gm", label: "GM พิจารณาใบตำขอ", detail: "GM พิจารณาตามความเหมาะสม", color: "#d97706", tint: "#fffbeb" },
+  { key: "fbp", label: "ประเมินกองรถ (FBP)", detail: "พิจารณาจากส่วนการ", color: "#7c3aed", tint: "#f5f3ff" },
+  { key: "tcas", label: "ติดตามกองรถออกใหม่/\n รถทดแทน (TCAS)", detail: "อยู่ระหว่างดำเนินการตามกระบวนการออกรถ", color: "#0891b2", tint: "#ecfeff" },
+  { key: "success", label: "ส่งมอบเข้าคลังแล้ว", detail: "ส่งมอบรถเข้าคลังแล้ว", color: "#059669", tint: "#ecfdf5" },
+  { key: "cancel", label: "ยกเลิกหนังสือ", detail: "รายการคำขอที่โดนยกเลิกทุกสถานะ", color: "#e11d48", tint: "#fff1f2" },
 ] as const;
+function matchesDashboardStatus(value: string | null, filter: string): boolean {
+  return filter === "all" || dashboardStatusGroup(value) === filter;
+}
+function DashboardStatusIcon({ status }: { status: DashboardSummaryKey }) {
+  const paths: Record<DashboardSummaryKey, string> = {
+    all: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+    gm: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M16 11l2 2 4-4",
+    fbp: "M3 7h12v10H3z M15 10h4l3 4v3h-7 M5 17v1a2 2 0 0 0 4 0v-1 M16 17v1a2 2 0 0 0 4 0v-1 M6 4h6",
+    tcas: "M20 7a9 9 0 0 0-15-2L2 8 M2 3v5h5 M4 17a9 9 0 0 0 15 2l3-3 M22 21v-5h-5 M12 8v4l3 2",
+    success: "M22 11v1a10 10 0 1 1-6-9 M22 4l-10 10-3-3",
+    cancel: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M8 8l8 8 M16 8l-8 8",
+  };
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[status]} /></svg>;
+}
+const FLEET_STATUSES = DASHBOARD_SUMMARY_CARDS.filter(card => card.key !== "all");
+function dashboardStatusGroup(value: string | null): string {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "gm_pending") return "gm";
+  if (status === "fbp_pending" || status === "partial_approved") return "fbp";
+  if (status === "process" || status === "progress") return "tcas";
+  if (["cancel", "reject_by_gm", "reject_by_fbp"].includes(status)) return "cancel";
+  return status;
+}
 const MONTH_NAMES = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
@@ -95,6 +137,7 @@ function calendarDate(value: string | null | undefined): string | null {
     ? day
     : null;
 }
+
 function vehicleKey(
   requestId: FleetId | undefined,
   vehicleNo: number | string | null,
@@ -127,7 +170,7 @@ function groupFleetByDc(requests: FleetRequest[]): DcSummary[] {
     groups.set(dcCode, current);
   }
   return Array.from(groups.values()).sort((a, b) =>
-    a.dcCode.localeCompare(b.dcCode, "th"),
+    b.red - a.red || a.dcCode.localeCompare(b.dcCode, "th"),
   );
 }
 function isRequest(value: unknown): value is FleetRequest {
@@ -159,12 +202,13 @@ function normalizeFleetRow(value: unknown): FleetRequest {
     ? vehicleNo : null;
   const plan = infoRow.warehouse_plan_date ?? row.warehouse_plan_date;
   const level = String(row.latest_process_level ?? "").trim();
-  const status = level === "8" ? "success"
-    : level === "9" || level === "10" ? "cancel"
-    : level ? "progress" : String(row.status ?? row.request_status ?? "progress");
+  // API request status is authoritative; a process level must not overwrite it.
+  const status = String(row.request_status ?? row.status ?? "").trim().toLowerCase();
   return {
     // Dashboard records are joined by the original request ID, not incoming_truck_id.
     id: requestId,
+    vehicle_no: validVehicleNo,
+    unit_code: row.unit_code == null ? null : String(row.unit_code).trim(),
     dc_code: row.dc_code == null ? null : String(row.dc_code),
     dc_type: row.dc_type == null ? null : String(row.dc_type),
     fleet_type: row.fleet_type == null ? null : String(row.fleet_type),
@@ -224,17 +268,15 @@ function readFleetRawRows(value: unknown): Record<string, unknown>[] {
   throw new Error("รูปแบบข้อมูล API ไม่ตรงกับที่รองรับ");
 }
 
-async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal): Promise<FleetRequest[]> {
+async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal, onFleetTypes?: (types: string[]) => void): Promise<FleetRequest[]> {
   const baseUrl = new URL(apiUrl, window.location.href);
-  const paginated = baseUrl.searchParams.get("group_mode") === "incoming" &&
-    !baseUrl.pathname.endsWith("/dashboard_fleet_get.php");
   const results: FleetRequest[] = [];
   const seen = new Set<string>();
   let page = 1;
   while (true) {
     signal.throwIfAborted();
     const url = new URL(baseUrl.toString());
-    if (paginated) {
+    {
       url.searchParams.set("page", String(page));
       // Keep the supported page size and load every page, rather than assuming limit=0 means all.
       url.searchParams.set("limit", baseUrl.searchParams.get("limit") || "20");
@@ -242,7 +284,13 @@ async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal): Promi
     const response = await fetch(url.toString(), { method: "GET", cache: "no-store", signal });
     if (!response.ok) throw new Error(`ไม่สามารถดึงข้อมูลหน้า ${page} ได้ (HTTP ${response.status})`);
     const payload: unknown = await response.json();
-    if (!paginated) return readFleetRequests(payload);
+    if (typeof payload === "object" && payload !== null) {
+      const filters = (payload as Record<string, unknown>).filters;
+      if (typeof filters === "object" && filters !== null) {
+        const types = (filters as Record<string, unknown>).fleet_types;
+        if (Array.isArray(types)) onFleetTypes?.(types.filter((v): v is string => typeof v === "string").map(v => v.trim()).filter(Boolean));
+      }
+    }
     const rows = readFleetRawRows(payload);
     if (rows.length === 0) break;
     let added = 0;
@@ -261,7 +309,7 @@ async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal): Promi
     const pagination = typeof root.pagination === "object" && root.pagination !== null
       ? root.pagination as Record<string, unknown> : {};
     const totalPages = Number(pagination.total_pages);
-    if (Number.isInteger(totalPages) && totalPages >= 1 && page >= totalPages) break;
+    if (!Number.isInteger(totalPages) || totalPages < 1 || page >= totalPages) break;
     page += 1;
   }
   return results;
@@ -502,6 +550,78 @@ function FleetStatusByDc({
   dashboardApiUrl = "http://192.168.158.210/api_new_truck/api/get_dashboard.php",
 }: Props = {}) {
   const [requests, setRequests] = useState<FleetRequest[]>([]);
+  const [warehouseScope, setWarehouseScope] = useState<{
+    ready: boolean;
+    showAll: boolean;
+    codes: string[];
+  }>({ ready: false, showAll: false, codes: [] });
+
+  useEffect(() => {
+    const normalizeCode = (value: unknown) =>
+      String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+    const readJSON = (key: string): unknown => {
+      try {
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : null;
+      } catch {
+        return null;
+      }
+    };
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      value !== null && typeof value === "object" && !Array.isArray(value);
+
+    const loadScope = () => {
+      const single = readJSON("selected_dc");
+      const multiple = readJSON("selected_dcs");
+      const selectedCodes = [
+        ...new Set(
+          [
+            ...(Array.isArray(multiple)
+              ? multiple.filter(isObject).map(item => item.DC_CODE)
+              : []),
+            isObject(single) ? single.DC_CODE : "",
+          ].map(normalizeCode).filter(code => code && code !== "-")
+        ),
+      ];
+      if (selectedCodes.length > 0) {
+        setWarehouseScope({
+          ready: true,
+          showAll: selectedCodes.includes("CENTER"),
+          codes: selectedCodes.filter(code => code !== "CENTER"),
+        });
+      } else {
+        const candidates = ["user", "user_info", "userInfo"].map(readJSON);
+        const user = candidates.find(isObject);
+        const originalWarehouse = [
+          user?.warehouse, user?.WAREHOUSE, user?.team, user?.TEAM,
+        ].map(normalizeCode).find(code => code && code !== "-") || "";
+        setWarehouseScope({
+          ready: true,
+          showAll: originalWarehouse === "CENTER",
+          codes: originalWarehouse && originalWarehouse !== "CENTER"
+            ? [originalWarehouse] : [],
+        });
+      }
+      // Clear local DC filters when switching the selected working scope.
+      setAreaFilter("all");
+      setDcFilter("all");
+      setVendorTooltip(null);
+      setHoveredMonth(null);
+    };
+
+    loadScope();
+    const events = ["selectedDCChanged", "selectedDepartmentsChanged", "userChanged", "storage"];
+    events.forEach(event => window.addEventListener(event, loadScope));
+    return () => {
+      events.forEach(event => window.removeEventListener(event, loadScope));
+    };
+  }, []);
+
+  const [apiFleetTypes, setApiFleetTypes] = useState<string[]>([]);
+  const [selectedSummaryMonths, setSelectedSummaryMonths] = useState<number[]>(() => {
+    const end = new Date().getMonth();
+    return Array.from({ length: 6 }, (_, i) => ((end - 5 + i + 12) % 12)).sort((a,b) => a-b);
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
@@ -557,8 +677,10 @@ function FleetStatusByDc({
               : `โหลด Dashboard ไม่สำเร็จ (HTTP ${response.status})`;
           throw new Error(message);
         }
-        const records = readDashboardRecords(payload);
-        if (!controller.signal.aborted) setDashboardRecords(records);
+        const records = needsDashboard ? readDashboardRecords(payload) : null;
+        if (!controller.signal.aborted) {
+          if (records) setDashboardRecords(records);
+        }
       } catch (err) {
         if (!controller.signal.aborted) {
           setDashboardError(
@@ -580,7 +702,9 @@ function FleetStatusByDc({
       setLoading(true);
       setError("");
       try {
-        const list = await fetchAllFleetRequests(apiUrl, signal);
+        const fleetTypes = new Set<string>();
+        const list = await fetchAllFleetRequests(apiUrl, signal, types => types.forEach(type => fleetTypes.add(type)));
+        if (!signal.aborted) setApiFleetTypes(Array.from(fleetTypes));
         if (!signal.aborted) setRequests(list);
       } catch (err) {
         if (!signal.aborted) {
@@ -602,7 +726,18 @@ function FleetStatusByDc({
     void fetchRequests(controller.signal);
     return () => controller.abort();
   }, [fetchRequests, suppliedRequests, reloadKey]);
-  const sourceRequests = suppliedRequests ?? requests;
+  // Scope the common source before calculating cards, charts, tables and SLA.
+  const sourceRequests = useMemo(() => {
+    if (!warehouseScope.ready) return [];
+    const allRows = suppliedRequests ?? requests;
+    if (warehouseScope.showAll) return allRows;
+    const allowedCodes = new Set(warehouseScope.codes);
+    return allRows.filter(row =>
+      allowedCodes.has(
+        String(row.dc_code ?? "").trim().replace(/\s+/g, " ").toUpperCase()
+      )
+    );
+  }, [suppliedRequests, requests, warehouseScope]);
   const filterOptions = useMemo(() => {
     const values = (key: "area" | "fbp" | "new_truck_type" | "status") => Array.from(new Set(sourceRequests.map(row => String(row[key] ?? "").trim()).filter(Boolean))).sort();
     const years = sourceRequests.flatMap(row => { const day = calendarDate(row.request_date); return day ? [Number(day.slice(0,4))] : []; });
@@ -619,18 +754,14 @@ function FleetStatusByDc({
   const dcTypeOptions = useMemo(() => Array.from(new Set(sourceRequests.map(row => String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง"))).sort(), [sourceRequests]);
   const typeRequests = useMemo(() => sourceRequests.filter(row =>
     (dcTypeFilter === "all" || (String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง") === dcTypeFilter) &&
-    (requestTypeFilter === "all" || String(row.fleet_type ?? "").trim() === requestTypeFilter)
+    (requestTypeFilter === "all" || (String(row.fleet_type ?? "").trim() || "ไม่ระบุประเภทคำขอ") === requestTypeFilter)
   ), [sourceRequests, dcTypeFilter, requestTypeFilter]);
   const requestTypeOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          sourceRequests
-            .map(item => String(item.fleet_type || "").trim())
-            .filter(Boolean),
-        ),
-      ).sort(),
-    [sourceRequests],
+    () => Array.from(new Set([
+      ...apiFleetTypes,
+      ...sourceRequests.map(item => String(item.fleet_type ?? "").trim() || "ไม่ระบุประเภทคำขอ"),
+    ])).sort((a,b) => a.localeCompare(b, "th")),
+    [sourceRequests, apiFleetTypes],
   );
   const filteredRequests = useMemo(
     () => typeRequests.filter(item => {
@@ -639,23 +770,57 @@ function FleetStatusByDc({
         (monthFilter === "all" || date.slice(5,7) === monthFilter) &&
         (areaFilter === "all" || String(item.dc_code ?? "").trim() === areaFilter) &&
         (fbpFilter === "all" || String(item.approved_company_id ?? "").trim() === fbpFilter) &&
-        (statusFilter === "all" || item.status === statusFilter) &&
+        matchesDashboardStatus(item.status, statusFilter) &&
         (truckTypeFilter === "all" || item.new_truck_type === truckTypeFilter);
     }),
     [typeRequests, selectedYear, monthFilter, areaFilter, fbpFilter, statusFilter, truckTypeFilter],
   );
+  // Use the same filtered vehicle rows as the charts and tables.
+  // Incoming API rows normalize to qty=1; grouped request rows retain their qty.
+  const filteredCardSummary = useMemo(() => {
+    const totals = Object.fromEntries(
+      DASHBOARD_SUMMARY_CARDS.map(({ key }) => [key, { qty: 0, items: 0 }]),
+    ) as DashboardSummary;
+    for (const row of filteredRequests) {
+      const qty = Number(row.qty);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      totals.all.qty += qty;
+      totals.all.items += 1;
+      const key = dashboardStatusGroup(row.status);
+      if (key !== "all" && Object.prototype.hasOwnProperty.call(totals, key)) {
+        totals[key as DashboardSummaryKey].qty += qty;
+        totals[key as DashboardSummaryKey].items += 1;
+      }
+    }
+    return totals;
+  }, [filteredRequests]);
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const monthScrollRef = useRef<HTMLDivElement>(null);
+  const monthPickerDialogRef = useRef<HTMLDialogElement>(null);
   const [showClosedSteps, setShowClosedSteps] = useState(false);
   const stageColumns = useMemo(() => {
     const columns = new Map<string, { key: string; level: string; name: string }>();
     for (const row of typeRequests) {
       const level = String(row.latest_process_level ?? "").trim();
       const name = String(row.latest_process_name ?? "").trim() || "ไม่ระบุชื่อขั้นตอน";
-      // Include both level and name so different processes sharing a level remain separate.
       const key = JSON.stringify([level, name]);
       columns.set(key, { key, level, name });
     }
+
+    // Always include steps 1–8, even when no vehicle currently occupies them.
+    // Keep the original level/name key so existing vehicle counts still match.
+    for (let step = 1; step <= 8; step++) {
+      const exists = Array.from(columns.values()).some(
+        column => Number(column.level) === step
+      );
+      if (!exists) {
+        const level = String(step);
+        const name = `ขั้นตอนที่ ${step}`;
+        const key = JSON.stringify([level, name]);
+        columns.set(key, { key, level, name });
+      }
+    }
+
     return Array.from(columns.values()).sort((a, b) => {
       const left = a.level && Number.isFinite(Number(a.level)) ? Number(a.level) : Infinity;
       const right = b.level && Number.isFinite(Number(b.level)) ? Number(b.level) : Infinity;
@@ -665,24 +830,26 @@ function FleetStatusByDc({
 
   const visibleStageColumns = stageColumns.filter(column => {
     const level = Number(column.level);
-    return (level >= 1 && level <= 8) || (showClosedSteps && (level === 9 || level === 10));
+    return (level >= 1 && level <= 8) ||
+      (showClosedSteps && (level === 9 || level === 10));
   });
 
-  const sixMonthSummary = useMemo(() => {
-    const endMonth = monthFilter !== "all" ? Number(monthFilter) - 1
-      : selectedYear === currentYear ? new Date().getMonth() : 11;
-    return Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(selectedYear, endMonth - 5 + index, 1);
-      return { key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
-        label: `${MONTH_SHORT_NAMES[date.getMonth()]}-${String(date.getFullYear() + 543).slice(-2)}` };
-    });
-  }, [selectedYear, currentYear, monthFilter]);
+  const sixMonthSummary = useMemo(() => selectedSummaryMonths.map(month => ({
+    key: `${selectedYear}-${String(month + 1).padStart(2, "0")}`,
+    label: `${MONTH_SHORT_NAMES[month]}-${String(selectedYear + 543).slice(-2)}`,
+  })), [selectedSummaryMonths, selectedYear]);
+  const toggleSummaryMonth = (month: number) => {
+    setSelectedSummaryMonths(current => current.includes(month)
+      ? (current.length > 1 ? current.filter(value => value !== month) : current)
+      : (current.length < 6 ? [...current, month].sort((a,b) => a-b) : current));
+    setVendorTooltip(null);
+  };
   const monthlyTruckCounts = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();
     for (const row of typeRequests) {
       if ((areaFilter !== "all" && String(row.dc_code ?? "").trim() !== areaFilter) ||
           (fbpFilter !== "all" && String(row.approved_company_id ?? "").trim() !== fbpFilter) ||
-          (statusFilter !== "all" && row.status !== statusFilter) ||
+          !matchesDashboardStatus(row.status, statusFilter) ||
           (truckTypeFilter !== "all" && row.new_truck_type !== truckTypeFilter)) continue;
       const day = calendarDate(row.request_date), level = Number(row.latest_process_level), qty = Number(row.qty);
       if (!day || !Number.isInteger(level) || level < 2 || level > 7 || !Number.isFinite(qty) || qty <= 0) continue;
@@ -734,7 +901,7 @@ function FleetStatusByDc({
   const activeYear = selectedYear;
   const dailyTimeline = useMemo(
     () =>
-      suppliedTimeline ??
+      (statusFilter === "all" ? suppliedTimeline : undefined) ??
       buildDeliveryTimeline(
         filteredRequests,
         warehouseRecords,
@@ -743,6 +910,7 @@ function FleetStatusByDc({
       ),
     [
       suppliedTimeline,
+      statusFilter,
       filteredRequests,
       warehouseRecords,
       flowRecords,
@@ -789,7 +957,7 @@ function FleetStatusByDc({
       ) {
         continue;
       }
-      const status = String(item.status ?? "").trim();
+      const status = dashboardStatusGroup(item.status);
       const row = rows.find(row => row.key === status) ?? rows[rows.length - 1];
       row.qty += qty;
     }
@@ -843,633 +1011,121 @@ function FleetStatusByDc({
       aria-busy={isLoading || timelineLoading}
     >
       <style>{`
-        .fleet-dashboard {
-          --ink: #16243a;
-          --muted: #62738a;
-          --line: #e4eaf2;
-          box-sizing: border-box;
-          padding: 28px;
-          border: 1px solid var(--line);
-          border-radius: 24px;
-          background: #f5f7fb;
-          color: var(--ink);
-          font-family: inherit;
-          font-size: 14px;
-          line-height: 1.6;
-        }
-        .fleet-dashboard * { box-sizing: border-box; }
-        .fleet-dashboard h2,
-        .fleet-dashboard h3,
-        .fleet-dashboard p { margin: 0; }
-        .fleet-dashboard button,
-        .fleet-dashboard input,
-        .fleet-dashboard select { font: inherit; }
-        .fleet-dashboard button { cursor: pointer; }
-        .fleet-dashboard button:disabled {
-          cursor: default;
-          opacity: .55;
-        }
-        .fleet-dashboard :is(button, input, select):focus-visible {
-          outline: 3px solid #93c5fd;
-          outline-offset: 3px;
-        }
-        .fleet-heading {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 24px;
-        }
-        .fleet-eyebrow {
-          margin-bottom: 5px;
-          color: #2563eb;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 2px;
-        }
-        .fleet-dashboard h2 {
-          font-size: clamp(21px, 2.5vw, 28px);
-          font-weight: 750;
-        }
-        .fleet-subtitle {
-          margin-top: 5px !important;
-          color: var(--muted);
-          font-size: 13px;
-        }
-        .fleet-button {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 44px;
-          padding: 9px 15px;
-          border: 1px solid var(--line);
-          border-radius: 11px;
-          background: white;
-          color: #41536d;
-          font-weight: 600;
-        }
-        .fleet-button:hover { background: #edf3ff; }
-        .fleet-button-primary {
-          border-color: #2563eb;
-          background: #2563eb;
-          color: white;
-        }
-        .fleet-button-primary:hover { background: #1d4ed8; }
-        .fleet-filters {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          align-items: end;
-          gap: 14px;
-          margin-bottom: 20px;
-          padding: 18px;
-          border: 1px solid var(--line);
-          border-radius: 16px;
-          background: white;
-        }
-        .fleet-label {
-          display: block;
-          margin-bottom: 6px;
-          color: #53647b;
-          font-size: 12px;
-          font-weight: 600;
-        }
-        .fleet-field {
-          width: 100%;
-          min-height: 44px;
-          padding: 10px 12px;
-          border: 1px solid #dce4ef;
-          border-radius: 10px;
-          background: #f9fbfd;
-          color: var(--ink);
-        }
-        .fleet-filter-note {
-          margin-bottom: 18px !important;
-          color: var(--muted);
-          font-size: 12px;
-        }
-        .fleet-delivery-summary {
-          display: grid;
-          grid-template-columns: 160px minmax(0, 1fr);
-          align-items: center;
-          gap: 28px;
-          margin-bottom: 24px;
-          padding: 22px;
-          border: 1px solid var(--line);
-          border-radius: 18px;
-          background: white;
-        }
-        .fleet-incoming-card {
-          padding: 20px 12px;
-          border: 2px solid #16394b;
-          border-radius: 12px;
-          background: white;
-          text-align: center;
-        }
-        .fleet-incoming-card h3 {
-          font-size: 20px;
-          line-height: 1.3;
-        }
-        .fleet-incoming-value {
-          margin-top: 14px;
-          font-size: 32px;
-          font-weight: 750;
-        }
-        .fleet-delivery-heading {
-          margin-bottom: 14px !important;
-          text-align: center;
-          font-size: 22px;
-          font-weight: 750;
-        }
-        .fleet-delivery-cards {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-        }
-        .fleet-delivery-card {
-          min-width: 0;
-          padding: 18px 16px;
-          border: 1px solid #c7dbf7;
-          border-radius: 12px;
-          background: white;
-          box-shadow: 3px 4px 8px #16243a18;
-          text-align: center;
-        }
-        .fleet-delivery-label {
-          font-size: 13px;
-          font-weight: 650;
-        }
-        .fleet-delivery-label small {
-          display: block;
-          color: var(--muted);
-          font-size: 11px;
-          font-weight: 400;
-        }
-        .fleet-delivery-number {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin-top: 12px;
-        }
-        .fleet-delivery-number svg {
-          width: 34px;
-          height: 34px;
-          flex-shrink: 0;
-        }
-        .fleet-delivery-number strong {
-          font-size: clamp(24px, 2.4vw, 34px);
-          line-height: 1.1;
-          overflow-wrap: anywhere;
-        }
-        .fleet-delivery-unit {
-          color: var(--muted);
-          font-size: 11px;
-        }
-        .fleet-delivery-progress-row {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 12px;
-        }
-        .fleet-delivery-progress-track {
-          flex: 1;
-          height: 12px;
-          overflow: hidden;
-          border-radius: 99px;
-          background: #dedede;
-        }
-        .fleet-delivery-progress-track span {
-          display: block;
-          height: 100%;
-          border-radius: inherit;
-        }
-        .fleet-delivery-percent {
-          color: var(--muted);
-          font-size: 12px;
-          font-weight: 650;
-        }
-        .fleet-delivery-note {
-          margin-top: 12px !important;
-          color: var(--muted);
-          font-size: 10px;
-        }
-        .fleet-panels {
-          display: grid;
-          grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-          align-items: start;
-          gap: 20px;
-        }
-        .fleet-panel {
-          min-width: 0;
-          overflow: hidden;
-          border: 1px solid var(--line);
-          border-radius: 18px;
-          background: white;
-          box-shadow: 0 4px 16px #182c4d03;
-        }
-        .fleet-panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 20px 22px;
-          border-bottom: 1px solid #edf1f6;
-        }
-        .fleet-panel h3 { font-size: 15px; font-weight: 700; }
-        .fleet-panel-description {
-          margin-top: 3px !important;
-          color: var(--muted);
-          font-size: 12px;
-        }
-        .fleet-panel-content { padding: 20px 22px; }
-        .fleet-timeline { grid-column: auto; }
-        .fleet-year-select {
-          flex-shrink: 0;
-          width: 110px;
-        }
-        .fleet-chart-scroll { overflow-x: auto; }
-        .fleet-chart {
-          display: block;
-          width: 100%;
-          min-width: 640px;
-          height: auto;
-        }
-        .fleet-legend {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 18px;
-          margin-top: 14px;
-          color: var(--muted);
-          font-size: 12px;
-        }
-        .fleet-legend span {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-        }
-        .fleet-legend i {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          border-radius: 3px;
-        }
-        .fleet-empty {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          min-height: 220px;
-          padding: 24px;
-          color: var(--muted);
-          text-align: center;
-        }
-        .fleet-warehouse-list {
-          max-height: 400px;
-          overflow: auto;
-          padding-right: 5px;
-        }
-        .fleet-warehouse {
-          padding: 13px 0;
-          border-bottom: 1px solid #f0f3f7;
-        }
-        .fleet-warehouse:last-child { border-bottom: 0; }
-        .fleet-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          margin-bottom: 8px;
-        }
-        .fleet-warehouse-name { font-size: 13px; font-weight: 650; }
-        .fleet-row-meta {
-          color: var(--muted);
-          font-size: 12px;
-          font-variant-numeric: tabular-nums;
-        }
-        .fleet-bar {
-          display: flex;
-          height: 10px;
-          overflow: hidden;
-          border-radius: 99px;
-          background: #eef2f7;
-        }
-        .fleet-bar > span { height: 100%; min-width: 0; }
-        .fleet-warehouse-detail {
-          display: flex;
-          justify-content: space-between;
-          gap: 8px;
-          margin-top: 7px;
-          color: var(--muted);
-          font-size: 11px;
-        }
-        .fleet-table { width: 100%; border-collapse: collapse; }
-        .fleet-table th {
-          padding: 0 0 12px;
-          border-bottom: 1px solid var(--line);
-          color: var(--muted);
-          font-size: 11px;
-          font-weight: 500;
-          text-align: left;
-        }
-        .fleet-table td {
-          padding: 13px 0;
-          border-bottom: 1px solid #edf1f6;
-          font-size: 13px;
-        }
-        .fleet-table :is(th, td):last-child {
-          text-align: right;
-          font-variant-numeric: tabular-nums;
-          white-space: nowrap;
-        }
-        .fleet-status {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .fleet-status i {
-          display: inline-block;
-          flex-shrink: 0;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-        }
-        .fleet-status-share {
-          max-width: 150px;
-          height: 3px;
-          margin-top: 6px;
-          overflow: hidden;
-          border-radius: 99px;
-          background: #f1f5f9;
-        }
-        .fleet-status-share span {
-          display: block;
-          height: 100%;
-          border-radius: 99px;
-        }
-        .fleet-table tfoot td {
-          padding-top: 18px;
-          border: 0;
-          font-weight: 750;
-        }
-        .fleet-error {
-          margin-bottom: 20px;
-          padding: 14px 18px;
-          border: 1px solid #fecdd3;
-          border-radius: 12px;
-          background: #fff1f2;
-          color: #be123c;
-        }
-        .fleet-footer {
-          display: flex;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 18px;
-          color: var(--muted);
-          font-size: 11px;
-        }
-        @media (max-width: 1000px) {
-          .fleet-delivery-summary {
-            grid-template-columns: 1fr;
-            gap: 18px;
-          }
-          .fleet-incoming-card {
-            width: 160px;
-            justify-self: center;
-          }
-        }
-        @media (max-width: 900px) {
-          .fleet-dashboard { padding: 20px; }
-          .fleet-filters {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-          .fleet-panels { grid-template-columns: 1fr; }
-          .fleet-timeline { grid-column: auto; }
-        }
-        @media (max-width: 540px) {
-          .fleet-dashboard { padding: 14px; border-radius: 16px; }
-          .fleet-heading { align-items: flex-start; flex-direction: column; }
-          .fleet-filters { grid-template-columns: 1fr; padding: 14px; }
-          .fleet-delivery-summary { padding: 16px; }
-          .fleet-delivery-heading { font-size: 18px; }
-          .fleet-delivery-cards { grid-template-columns: 1fr; }
-          .fleet-delivery-number strong { font-size: 34px; }
-          .fleet-panel-header,
-          .fleet-panel-content { padding: 16px; }
-          .fleet-row-meta { font-size: 11px; }
-        }
+.fleet-dashboard{--ink:#243650;--muted:#73839a;--line:#e0e7f0;--blue:#285fac;--surface:#fff;box-sizing:border-box;width:100%;min-width:0;padding:18px;background:#f1f5fa;border:1px solid #e3eaf3;border-radius:20px;color:var(--ink);font-family:inherit;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums}
+.fleet-dashboard *{box-sizing:border-box}.fleet-dashboard :is(h2,h3,p){margin:0}.fleet-dashboard :is(button,input,select){font:inherit}.fleet-dashboard button{cursor:pointer}.fleet-dashboard button:disabled{opacity:.5;cursor:default}.fleet-dashboard :is(button,input,select):focus-visible{outline:2px solid #3979d7;outline-offset:3px}.fleet-dashboard :is(input,select){min-width:0}.fleet-dashboard svg{flex-shrink:0}
+.fleet-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;margin-bottom:16px;background:linear-gradient(110deg,#173153,#25517f);border-radius:15px;color:#fff}.fleet-eyebrow{font-size:9px;font-weight:750;letter-spacing:1.8px;color:#a9cef8;margin-bottom:3px}.fleet-dashboard h2{font-size:22px;line-height:1.35;letter-spacing:-.4px}.fleet-subtitle{font-size:11px;color:#bdd0e8;margin-top:5px!important}
+.fleet-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:33px;padding:6px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#4c6382;font-size:11px;font-weight:650;white-space:nowrap;transition:background .15s,border-color .15s}.fleet-button:hover{background:#eef4fc;border-color:#b7cce8}.fleet-button-primary{background:var(--blue);border-color:var(--blue);color:#fff}.fleet-button-primary:hover{background:#214e8b;color:#fff}.fleet-heading .fleet-button{background:#ffffff16;border-color:#ffffff36;color:#fff}.fleet-heading .fleet-button:hover{background:#ffffff29}
+.fleet-filter-heading,.fleet-summary-heading-line{display:flex;align-items:center;gap:8px}.fleet-filter-heading{margin:0 2px 8px}.fleet-filter-heading h3,.fleet-api-summary-heading{font-size:12px;font-weight:750;color:#355174}.fleet-section-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:#e1eafb;color:#456f9f;font-size:9px;font-weight:800;flex-shrink:0}.fleet-filter-context{margin-left:auto;font-size:10px;color:var(--muted)}
+.fleet-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end;gap:10px;padding:13px 15px;background:#fff;border:1px solid var(--line);border-radius:13px}.fleet-label{display:block;font-size:10px;font-weight:650;color:#718299;margin-bottom:5px}.fleet-field{display:block;width:100%;height:34px;padding:5px 9px;border:1px solid #dce5f0;border-radius:8px;background:#f7f9fc;color:#304c70;font-size:11px;transition:border-color .15s,box-shadow .15s}.fleet-field:hover:not(:disabled){border-color:#a2bbda}.fleet-field:focus{border-color:#6f9ad3;box-shadow:0 0 0 3px #3979d710;outline:none}.fleet-field:disabled{color:#9aa7b9}.fleet-filter-note{margin:6px 2px 0!important;font-size:10px;color:#8291a6}
+.fleet-api-summary{margin:17px 0 0}.fleet-api-summary-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.fleet-api-summary-subtitle{font-size:10px;color:#8192a9;margin-top:2px!important}.fleet-api-summary-badge{font-size:10px;color:#7190b6;border:1px solid #dde6f4;border-radius:999px;padding:5px 9px;white-space:nowrap}.fleet-api-summary-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.fleet-api-summary-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:151px;padding:14px 13px;border:1px solid #dce6f2;border-radius:14px;box-shadow:0 3px 9px #26466a06;text-align:left;isolation:isolate;overflow:hidden;transition:transform .15s,box-shadow .15s}.fleet-api-summary-card:after{content:"";position:absolute;right:-22px;top:-30px;width:95px;height:95px;border:18px solid currentColor;border-radius:50%;opacity:.035;z-index:-1}.fleet-api-summary-card:before{content:"";position:absolute;bottom:0;left:14px;right:14px;height:3px;background:currentColor;opacity:.35;border-radius:4px 4px 0 0}.fleet-api-summary-card.is-total{border-color:#315eaf}.fleet-api-summary-card.is-total:before{background:white;opacity:.2}.fleet-api-summary-card:hover{transform:translateY(-2px);box-shadow:0 7px 18px #26466a13}.fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:1px}.fleet-api-summary-card.is-total.is-selected{outline-color:#4776dc}.fleet-api-summary-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;min-height:47px}.fleet-api-summary-label{font-size:10.5px;line-height:1.55;font-weight:700;color:#49607e;white-space:pre-line;overflow-wrap:anywhere}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#e4eeff}.fleet-api-summary-icon{display:flex;align-items:center;justify-content:center;width:29px;height:29px;border-radius:9px;background:#ffffffaa;flex-shrink:0}.fleet-api-summary-icon svg{width:18px;height:18px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff22}.fleet-api-summary-number{display:flex;align-items:baseline;gap:6px;margin:7px 0}.fleet-api-summary-number strong{font-size:29px;line-height:1.2;font-weight:800;letter-spacing:-1px}.fleet-api-summary-number span{font-size:9px;opacity:.7}.fleet-api-summary-detail{display:block;min-height:30px;font-size:9.5px;line-height:1.5;opacity:.8}.fleet-api-summary-note{font-size:10px;color:#8091a8;margin:8px 2px 0!important}
+.fleet-delivery-summary{margin:17px 0 12px}.fleet-delivery-heading{font-size:12px;color:#3d587c;margin-bottom:9px!important}.fleet-delivery-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}.fleet-delivery-card{padding:12px 17px;min-width:0}.fleet-delivery-card+.fleet-delivery-card{border-left:1px solid #e7edf5}.fleet-delivery-label{font-size:11px;font-weight:650;color:#5b7392}.fleet-delivery-label small{font-size:9px;font-weight:500;margin-left:5px;color:#95a2b5}.fleet-delivery-number{display:flex;align-items:center;gap:9px;margin-top:7px;color:#416999}.fleet-delivery-number svg{width:27px;height:27px;padding:4px;background:#eff4fb;border-radius:8px}.fleet-delivery-number strong{font-size:26px;line-height:1.2;font-weight:800}.fleet-delivery-unit{font-size:9px;display:inline;margin-left:6px;color:var(--muted)}.fleet-delivery-note{font-size:9px;color:#91a0b3;margin-top:7px!important}.fleet-delivery-progress-row{display:flex;align-items:center;gap:8px;margin-top:8px}.fleet-delivery-progress-track{height:5px;border-radius:99px;overflow:hidden;flex:1;background:#eef2f7}.fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-delivery-percent{font-size:10px;color:#7990aa}
+.fleet-panels{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(270px,1fr);gap:0;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:hidden}.fleet-panel{min-width:0;background:#fff;overflow:hidden}.fleet-panels>.fleet-panel+.fleet-panel{border-left:1px solid #e5ecf4}.fleet-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;min-height:65px;border-bottom:1px solid #e9eef6;background:linear-gradient(100deg,#fafcff,#fff)}.fleet-panel h3{font-size:12px;font-weight:750;color:#324f73}.fleet-panel-description{font-size:10px;color:#8a9aaf;margin-top:3px!important;line-height:1.5}.fleet-panel-header>span{font-size:10px;color:#7890af;white-space:nowrap}.fleet-panel-content{padding:13px 15px}.fleet-year-select{width:100px;flex-shrink:0}.fleet-chart-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.fleet-chart{display:block;width:100%;min-width:520px;height:260px}.fleet-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:10px;color:#7c8da6;margin-top:9px}.fleet-legend>span{display:inline-flex;align-items:center;gap:6px}.fleet-legend i{display:inline-block;width:7px;height:7px;border-radius:2px}
+.fleet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:180px;padding:20px;color:#8192a8;font-size:11px;text-align:center;background:linear-gradient(180deg,#fff,#fafcff)}.fleet-error{display:block;margin:12px 0;padding:12px 14px;background:#fff2f3;color:#a83e55;border:1px solid #f1d8de;border-left:3px solid #d64f6c;border-radius:10px;font-size:11px;overflow-wrap:anywhere}.fleet-error p{margin-top:4px}.fleet-warehouse-list{max-height:260px;overflow:auto;scrollbar-width:thin;padding-right:5px}.fleet-warehouse{padding:9px 0;border-bottom:1px solid #eef2f8}.fleet-warehouse:last-child{border-bottom:0}.fleet-row{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5px}.fleet-warehouse-name{font-size:11px;font-weight:750;color:#456185}.fleet-row-meta{font-size:10px;color:#8799b0}.fleet-bar{display:flex;width:100%;height:7px;background:#edf2f8;border-radius:99px;overflow:hidden}.fleet-bar>span{height:100%;display:block}.fleet-warehouse-detail{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:5px;color:#8190a5}
+.fleet-stage-layout{display:grid;grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);gap:0;margin-top:16px;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:auto;scrollbar-width:thin;align-items:start}.fleet-stage-layout>.fleet-panel+.fleet-panel{border-left:1px solid #e2eaf4}.fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:78px;min-height:78px;max-height:78px;padding:11px 14px}.fleet-stage-layout .fleet-panel-description{max-height:30px;overflow:hidden}.fleet-stage-scroll{height:400px;max-height:400px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable;background:#fff}.fleet-stage-table{width:100%;min-width:640px;table-layout:auto;border-collapse:separate;border-spacing:0;font-size:10px}.fleet-stage-table :is(th,td){padding:5px 8px;border-bottom:1px solid #e9eff6;text-align:center;font-variant-numeric:tabular-nums}.fleet-stage-table thead th{position:sticky;top:0;z-index:5;height:58px;min-width:118px;max-width:170px;background:#3c5473;color:#fff;font-size:10px;font-weight:650;line-height:1.5;border-right:1px solid #ffffff18}.fleet-stage-table .fleet-step-name{display:block;font-size:10px;line-height:1.5;max-width:170px;color:inherit}.fleet-header-unit{display:block;font-size:8px;opacity:.65;margin-top:3px}.fleet-step-label{display:inline-block;font-size:8px;background:#ffffff20;color:inherit;border-radius:4px;padding:1px 5px}.fleet-stage-table .fleet-truck-row{height:38px}.fleet-stage-table .fleet-truck-row :is(th,td){height:38px;white-space:nowrap;background:#fff}.fleet-stage-table .fleet-truck-row th{text-align:left;font-weight:500;color:#506a8c}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#edf5ff}.fleet-stage-table .fleet-dc-group{height:32px}.fleet-stage-table .fleet-dc-group :is(th,td){height:32px;background:#edf2f9;color:#456183;white-space:nowrap;font-weight:750;text-align:left}.fleet-truck-label{display:inline-block;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:#e5edf9;padding:5px 7px;font-size:10px;font-weight:750;color:#4d719d}.fleet-dc-merged{vertical-align:middle;background:#f5f8fc!important}.fleet-warehouse-marker{display:inline-block;width:4px;height:12px;border-radius:3px;background:#7395c3;margin-right:7px;vertical-align:middle}.fleet-group-quantity{float:right;font-size:9px;color:#899bb2}.fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;padding:2px 6px;border:1px solid #dce7f6;border-radius:6px;background:#edf3fb;color:#406b9e;font-size:10px;font-weight:750}.fleet-count-button:hover{background:#dbeafa;border-color:#9fbee3}.fleet-stage-completed .fleet-count-button{background:#e7f6ed;color:#16805b;border-color:#cfe8da}.fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0f1;color:#b35464;border-color:#eed3d9}.fleet-stage-table .fleet-stage-total{background:#f1f5fc!important;font-weight:800;color:#3a6497}.fleet-cell-empty{color:#c1ccdc}.fleet-month-table{min-width:360px;table-layout:fixed}.fleet-month-table thead th{min-width:60px;white-space:nowrap}.fleet-month-table .fleet-truck-row td{font-weight:650;color:#557399}.fleet-locked-table{--dc-lock-width:72px}.fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width);max-width:var(--dc-lock-width);z-index:3;background:#f4f7fc}.fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:160px;max-width:180px;z-index:3;background:#fff;box-shadow:3px 0 7px #203d6008}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{z-index:7;background:#3c5473}.fleet-lock-warehouse{max-width:230px;overflow:hidden;text-overflow:ellipsis}.fleet-step-toggle{border:0;background:transparent;color:#7d92ae;padding:4px 5px;border-radius:6px;flex-shrink:0;font-size:10px;white-space:nowrap}.fleet-step-toggle:hover{background:#edf3fb;color:#456c9c}
+.fleet-vendor-tooltip{position:fixed;z-index:10000;pointer-events:none;width:288px;max-width:calc(100vw - 24px);max-height:220px;overflow:auto;padding:12px 14px;border:1px solid #dce6f3;border-radius:11px;background:#fff;color:#496482;box-shadow:0 12px 36px #162e5424}.fleet-vendor-tooltip-heading{font-size:10px;color:#7c90ac;font-weight:750;border-bottom:1px solid #e9eef5;padding-bottom:7px;margin-bottom:7px}.fleet-vendor-tooltip-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:4px 0;font-size:11px}.fleet-vendor-tooltip-row span{overflow-wrap:anywhere}.fleet-vendor-tooltip-row strong{white-space:nowrap;color:#3d679a}.fleet-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:9px;color:#8c9bb0;margin-top:13px}
+.fleet-month-counter{font-size:10px;white-space:nowrap;color:#507caf;background:#edf4ff;border:1px solid #dbe7f8;padding:6px 9px;border-radius:8px}.fleet-month-open:hover{background:#dfebfd}.fleet-month-dialog{position:fixed;inset:0;margin:auto;width:min(410px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:0;border:1px solid #dce6f3;border-radius:18px;background:#fff;color:#304c70;box-shadow:0 22px 70px #17305240}.fleet-month-dialog::backdrop{background:#1a305660;backdrop-filter:blur(3px)}.fleet-month-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 19px;background:#f7faff}.fleet-month-dialog-heading h3{font-size:14px}.fleet-month-dialog-heading p{font-size:11px;color:#8195af;margin-top:5px!important}.fleet-month-close{width:29px;height:29px;border:0;background:#eaf0f9;color:#637d9f;border-radius:8px;font-size:22px!important}.fleet-month-picker{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:16px 19px}.fleet-month-chip{padding:9px 5px;border:1px solid #dfe7f3;border-radius:9px;color:#6f86a5;background:#f8faff;font-size:11px;font-weight:650}.fleet-month-chip.is-selected{background:#2e61b6;border-color:#2e61b6;color:#fff}.fleet-month-chip:hover:not(:disabled):not(.is-selected){background:#edf3ff}.fleet-month-picker-note{padding:0 19px 15px;font-size:10px;line-height:1.6;color:#8b9bb1}.fleet-month-dialog-footer{display:flex;justify-content:flex-end;padding:12px 19px;background:#f8faff;border-top:1px solid #e8eef7}
+.sla-overdue-embed{margin:17px 0;padding:0;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:0 3px 12px #29476c03}.sla-shell{width:100%}.sla-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:13px 15px;border-bottom:1px solid #edf1f7;background:linear-gradient(100deg,#fff8f5,#fff 60%)}.sla-eyebrow{font-size:9px!important;font-weight:800;letter-spacing:1.3px;color:#bc7153}.sla-heading h3{font-size:13px;color:#3e5472;margin-top:2px!important}.sla-description{font-size:10px;color:#8a9bb2;margin-top:4px!important}.sla-refresh{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;background:#fff;border:1px solid #dbe5f2;border-radius:8px;color:#53749d;font-size:10px!important}.sla-refresh:hover{background:#f2f6fd}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 15px;border-bottom:1px solid #e8eef6}.sla-kpi{display:flex;align-items:center;gap:10px;padding:12px 14px}.sla-kpi+.sla-kpi{border-left:1px solid #e8eef6}.sla-kpi-icon{display:flex;align-items:center;justify-content:center;width:31px;height:31px;border-radius:9px;flex-shrink:0}.sla-kpi-icon.rose{background:#fff0f3;color:#bf4765}.sla-kpi-icon.amber{background:#fff5df;color:#b27d21}.sla-kpi-icon.blue{background:#edf4ff;color:#477db7}.sla-kpi-label{font-size:10px;color:#8a9ab0}.sla-kpi-value{font-size:19px;font-weight:800;line-height:1.3;margin-top:2px!important;color:#3e5778}.sla-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:11px 15px}.sla-search{position:relative;flex:1;min-width:220px}.sla-search svg{position:absolute;left:10px;top:9px;color:#9baabd}.sla-control{height:33px;padding:5px 10px;border:1px solid #dce5f2;background:#f9fbfe;border-radius:8px;font-size:11px!important;color:#536e91;max-width:100%}.sla-search input{width:100%;padding-left:32px}.sla-clear{border:0;background:transparent;color:#4073b6;font-size:10px!important}.sla-clear:hover{text-decoration:underline}.sla-table-scroll{max-height:330px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable}.sla-table{width:100%;min-width:1040px;text-align:left;border-spacing:0;border-collapse:separate;font-size:11px}.sla-table thead{position:sticky;top:0;z-index:2;background:#3c5473;color:#fff}.sla-table th{white-space:nowrap;padding:10px 12px;font-size:10px;font-weight:650;border-right:1px solid #ffffff18}.sla-table td{padding:10px 12px;border-bottom:1px solid #e9eff6;vertical-align:top;line-height:1.5}.sla-table tbody tr:nth-child(even){background:#fafcff}.sla-table tbody tr:hover{background:#eff5ff}.sla-table td p{margin-top:3px;font-size:10px;color:#8b9bb1}.sla-strong{font-weight:650;color:#4c6383}.sla-id{font-size:9px!important;color:#a2b0c3!important}.sla-days{background:#fff3f5;color:#b34360;white-space:nowrap;text-align:right}.sla-days>span{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:800}.sla-days p{color:#b96e82!important;font-size:9px!important}.sla-limit{white-space:nowrap;text-align:right;color:#6b829f}.sla-action{min-width:180px;max-width:320px;white-space:pre-line;font-size:10px;color:#b5536e;font-weight:650}.sla-state-message{position:sticky;left:12px;display:block;width:min(650px,calc(100vw - 85px));text-align:center}.sla-state{height:135px;text-align:center;color:#8c9ab0;padding:22px!important}.sla-table .sla-state{background:#fafcff;text-align:center}.sla-error{display:flex;gap:9px;align-items:flex-start;margin:0 15px 12px;padding:12px;border:1px solid #f0d8df;border-radius:9px;background:#fff4f6;color:#ae4964;font-size:11px}.sla-error svg{flex-shrink:0}.sla-error p{margin-top:4px!important;overflow-wrap:anywhere}.sla-error-api{font-size:10px;opacity:.7}.sla-table-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:9px 15px;font-size:9px;color:#8d9eb4;border-top:1px solid #e9eff6}.sla-spin{animation:fleet-spin 1s linear infinite}@keyframes fleet-spin{to{transform:rotate(360deg)}}
+@media(min-width:1350px){.fleet-filters{grid-template-columns:repeat(8,minmax(0,1fr))}}
+@media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card{min-height:137px}.fleet-api-summary-top{min-height:35px}.fleet-panels{grid-template-columns:minmax(0,1.6fr) minmax(240px,1fr)}}
+@media(max-width:850px){.fleet-dashboard{padding:13px}.fleet-panels{grid-template-columns:1fr}.fleet-panels>.fleet-panel+.fleet-panel{border-left:0;border-top:1px solid var(--line)}.fleet-chart{height:250px}.fleet-warehouse-list{max-height:230px}.fleet-heading h2{font-size:20px}.fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(330px,1fr)}}
+@media(max-width:560px){.fleet-dashboard{padding:10px;border-radius:14px}.fleet-heading{padding:14px;align-items:flex-start;flex-wrap:wrap;gap:10px}.fleet-heading h2{font-size:18px}.fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:9px}.fleet-field{height:36px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.fleet-api-summary-card{min-height:147px;padding:12px 11px}.fleet-api-summary-top{min-height:46px}.fleet-api-summary-number strong{font-size:27px}.fleet-api-summary-badge{display:none}.fleet-delivery-card{padding:10px 9px}.fleet-delivery-number{gap:5px}.fleet-delivery-number svg{display:none}.fleet-delivery-number strong{font-size:22px}.fleet-delivery-label{font-size:10px}.fleet-delivery-label small{display:none}.sla-heading{padding:12px}.sla-kpis{margin:0 8px}.sla-kpi{padding:10px 7px;gap:5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:16px}.sla-kpi-label{font-size:9px}.sla-toolbar{padding:10px 12px}.sla-search{flex-basis:100%;min-width:0}.sla-toolbar select{flex:1;min-width:0}.sla-table-footer{padding:9px 12px}.fleet-footer{font-size:9px}.fleet-chart{height:230px}}
+@media(prefers-reduced-motion:reduce){.fleet-dashboard *{animation:none!important;transition:none!important}.fleet-api-summary-card:hover{transform:none}}
 
-        .fleet-dc-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
-        .fleet-dc-tab{padding:10px 20px;border:1px solid #dce4ef;border-radius:10px;background:white;color:#53647b;font-weight:700}
-        .fleet-dc-tab.active{background:#41536d;border-color:#41536d;color:white}
-        .fleet-stage-panel{margin-top:22px;margin-bottom:22px}
-        .fleet-stage-scroll{overflow:auto;max-height:600px}
-        .fleet-stage-table{width:100%;border-collapse:separate;border-spacing:0;min-width:700px}
-        .fleet-stage-table th,.fleet-stage-table td{padding:12px 14px;border-right:1px solid #dce4ef;border-bottom:1px solid #dce4ef;text-align:center;font-size:12px}
-        .fleet-stage-table thead th{position:sticky;top:0;z-index:2;background:#41536d;color:white;min-width:150px;vertical-align:middle}
-        .fleet-stage-table thead th:first-child{min-width:180px;text-align:left}
-        .fleet-stage-table .fleet-dc-group td{background:#d5dce5;font-weight:750;text-align:left;color:#16243a}
-        .fleet-stage-table .fleet-dc-merged{background:#e8eef6;vertical-align:middle;text-align:center;font-weight:750;min-width:85px}
-        .fleet-stage-table tbody th{background:white;text-align:left;white-space:nowrap;font-weight:500}
-        .fleet-stage-table .fleet-stage-total{background:#eef2f7;font-weight:750}
-        .fleet-stage-table .fleet-stage-completed{background:#e1f2dd;color:#059669;font-weight:750}
-        .fleet-vendor-chip{display:inline-block;padding:2px 9px;margin:2px 4px 2px 0;border-radius:99px;background:#fff0b5;color:#655626;font-size:10px}
-        .fleet-stage-count{display:block;margin-top:3px;font-weight:750;font-size:14px}
+.fleet-dashboard{background:#edf1f7;border-radius:18px;padding:18px;border-color:#dce4ef}
+.fleet-heading{background:#fff;color:#223754;box-shadow:none;border:1px solid #dfe6f0;border-bottom:3px solid #243f6b;border-radius:14px;padding:16px 18px;min-height:90px;margin-bottom:17px}
+.fleet-brand{display:flex;align-items:center;gap:13px;min-width:0}.fleet-brand-icon{display:flex;align-items:center;justify-content:center;width:46px;height:46px;background:#213b63;border-radius:13px;color:#cce2ff;box-shadow:0 5px 13px #1d335815;flex-shrink:0}
+.fleet-heading h2{font-size:23px;color:#213b63;line-height:1.25}.fleet-heading .fleet-eyebrow{color:#6a84a7;font-size:9px;letter-spacing:2px}.fleet-heading .fleet-subtitle{color:#7e91ac;font-size:11px}.fleet-heading .fleet-button{background:#243f6b;border-color:#243f6b;color:#fff;min-height:35px}.fleet-heading .fleet-button:hover{background:#162e52}
+.fleet-filter-heading{margin-bottom:8px}.fleet-filters{border:1px solid #dbe4f0;border-radius:12px;background:#f9fbfe;padding:12px 14px}.fleet-field{background:#fff;height:34px;border-color:#d6e1ef}.fleet-filter-context{color:#3a6498;background:#dfe9f9;border-radius:6px;padding:3px 8px;font-weight:650}
+.fleet-api-summary{margin-top:17px}.fleet-api-summary-grid{gap:0;border:1px solid #dce4ee;border-radius:15px;overflow:hidden;background:#fff;box-shadow:0 5px 14px #19365d05;grid-template-columns:1.05fr repeat(5,minmax(0,1fr))}.fleet-api-summary-card{border:0;border-radius:0;padding:15px 15px 13px;min-height:150px;box-shadow:none;transition:background .15s;overflow:hidden}.fleet-api-summary-card+.fleet-api-summary-card{border-left:1px solid #e6ecf4}.fleet-api-summary-card:after{display:none}.fleet-api-summary-card:before{left:15px;right:15px;bottom:11px;height:2px;opacity:.3}.fleet-api-summary-card:hover{transform:none;box-shadow:inset 0 0 0 999px #5579aa06}.fleet-api-summary-card.is-selected{outline:0;box-shadow:inset 0 0 0 2px currentColor;background:#f8fbff!important}.fleet-api-summary-card.is-total.is-selected{background:#1d3358!important;box-shadow:none}.fleet-api-summary-card.is-total{border:0}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#d6e5fc}.fleet-api-summary-icon{width:30px;height:30px;border:1px solid #e8edf4;background:#f7f9fc;border-radius:9px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff15;border-color:#ffffff20;color:#b6d3ff}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-number{margin:8px 0 7px}.fleet-api-summary-number strong{font-size:32px}.fleet-api-summary-detail{padding-bottom:10px;min-height:32px;font-size:9px}.fleet-api-summary-card.is-total .fleet-api-summary-number{color:#fff}
+.sla-overdue-embed{border-radius:15px;border:1px solid #dfdfe8;background:#fff;box-shadow:0 5px 17px #1d335806;margin-top:18px}.sla-heading{background:#fff;border-bottom:1px solid #e7eaf1;padding:13px 16px;position:relative}.sla-heading:before{content:"";position:absolute;left:0;top:15px;bottom:15px;width:4px;background:#d66355;border-radius:0 4px 4px 0}.sla-eyebrow{font-size:8px!important;letter-spacing:1.6px;color:#bc776a}.sla-heading h3{font-size:14px;color:#293f61}.sla-description{font-size:10px}.sla-workspace{display:grid;grid-template-columns:183px minmax(0,1fr);align-items:stretch}.sla-kpis{display:flex;flex-direction:column;margin:0;padding:6px 12px;background:linear-gradient(160deg,#f8f4f3,#f4f7fc);border:0;border-right:1px solid #e6e9f0}.sla-kpi{padding:17px 3px;gap:9px;flex:1;align-items:flex-start}.sla-kpi+.sla-kpi{border-left:0;border-top:1px solid #e0e5ed}.sla-kpi-icon{width:29px;height:29px;border:1px solid #e9e2e4;border-radius:9px}.sla-kpi-label{font-size:10px;line-height:1.5;color:#8592a5}.sla-kpi-value{font-size:25px;line-height:1.3;color:#304867;margin-top:5px!important}.sla-kpi:first-child .sla-kpi-value{color:#b84c5a}.sla-kpi:nth-child(2) .sla-kpi-value{color:#a1742d}.sla-kpi:nth-child(3) .sla-kpi-value{color:#4776aa}.sla-table-section{min-width:0}.sla-toolbar{padding:11px 12px;border-bottom:1px solid #edf0f6;background:#fbfcff}.sla-control{background:#fff;height:33px;font-size:10px!important}.sla-table th{background:#edf2fa;color:#4d688d;border-bottom:1px solid #d9e3f1;border-right:0;font-weight:750;font-size:9px;padding:9px 11px}.sla-table td{padding:10px 11px}.sla-table thead{background:#edf2fa}.sla-table-scroll{max-height:320px}.sla-error{margin:10px 12px;padding:9px 11px;font-size:10px;border-left:3px solid #ce7182;background:#fff6f7}.sla-error-api{font-size:9px}.sla-state{height:125px}.sla-state-message{width:min(650px,calc(100vw - 300px));font-size:10px}.sla-table-footer{padding:8px 12px;background:#fbfcff;font-size:9px}
+.fleet-delivery-heading{font-size:13px;color:#334f76}.fleet-delivery-cards{background:#fff;border:1px solid #dce4ef;border-radius:13px}.fleet-delivery-card{position:relative;padding:13px 17px}.fleet-delivery-card:after{content:"";position:absolute;right:17px;top:16px;width:7px;height:7px;border-radius:50%;background:#7498c8}.fleet-delivery-card:nth-child(2):after{background:#17a776}.fleet-delivery-card:nth-child(3):after{background:#e3944b}.fleet-delivery-label{font-size:11px;color:#58759a}.fleet-delivery-number strong{font-size:27px}.fleet-panels{grid-template-columns:minmax(0,1.65fr) minmax(285px,1fr);border-radius:14px;border-color:#dce4ef}.fleet-panel-header{background:#f9fbfe;padding:13px 16px}.fleet-panel-header h3{font-size:13px}.fleet-stage-layout{border-radius:14px;border-color:#dce4ef;margin-top:18px}.fleet-stage-layout .fleet-panel-header{background:#f8faff}.fleet-stage-table thead th{background:#2c4569;font-weight:650}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{background:#2c4569}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#eaf3ff}
+@media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card:nth-child(n+4){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(4){border-left:0}.fleet-api-summary-card{min-height:140px}.sla-workspace{grid-template-columns:160px minmax(0,1fr)}.sla-kpis{padding:5px 9px}.sla-kpi{gap:6px}}
+@media(max-width:850px){.fleet-panels{grid-template-columns:1fr}.sla-workspace{grid-template-columns:1fr}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 10px;background:#f8faff;border-right:0;border-bottom:1px solid #e6e9f0}.sla-kpi{padding:11px 7px;align-items:center}.sla-kpi+.sla-kpi{border-top:0;border-left:1px solid #e6e9f0}.sla-kpi-value{font-size:22px}.sla-state-message{width:min(650px,calc(100vw - 85px))}}
+@media(max-width:560px){.fleet-heading{padding:13px;gap:11px}.fleet-brand{gap:10px}.fleet-brand-icon{width:35px;height:35px;border-radius:10px}.fleet-brand-icon svg{width:21px;height:21px}.fleet-heading h2{font-size:18px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fleet-api-summary-card{padding:13px 11px;min-height:150px}.fleet-api-summary-card:nth-child(n+3){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(odd){border-left:0}.fleet-api-summary-card:nth-child(4){border-left:1px solid #e6ecf4}.fleet-api-summary-number strong{font-size:29px}.sla-kpi{padding:11px 5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:18px}.sla-kpi-label{font-size:9px}.sla-table-footer{font-size:9px}.fleet-heading .fleet-button{min-height:32px;font-size:10px}.fleet-api-summary-top{min-height:47px}}
 
-        /* Compact dashboard */
-        .fleet-dashboard{padding:18px;border-radius:16px;background:#f6f8fc;font-size:13px;line-height:1.5}
-        .fleet-heading{gap:12px;margin-bottom:16px}
-        .fleet-eyebrow{font-size:10px;letter-spacing:1.5px;margin-bottom:3px}
-        .fleet-dashboard h2{font-size:21px;letter-spacing:-.4px}
-        .fleet-subtitle{font-size:12px;margin-top:3px!important}
-        .fleet-button{min-height:36px;padding:7px 12px;border-radius:8px;font-size:12px}
-        .fleet-filters{grid-template-columns:repeat(8,minmax(0,1fr)) auto;gap:10px;padding:12px;margin-bottom:12px;border-radius:12px;box-shadow:0 1px 3px #16243a04}
-        .fleet-label{font-size:11px;margin-bottom:4px}
-        .fleet-field{min-height:36px;padding:7px 9px;border-radius:8px;font-size:12px}
-        .fleet-field:disabled{background:#f1f4f8;color:#8a97aa}
-        .fleet-filter-note{font-size:11px;margin-bottom:10px!important}
-        .fleet-delivery-summary{display:block;padding:14px;margin-bottom:14px;border-radius:12px}
-        .fleet-delivery-heading{text-align:left;font-size:15px;margin-bottom:10px!important}
-        .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-        .fleet-delivery-card{position:relative;padding:12px 14px;border:1px solid #e1e8f2;border-radius:10px;box-shadow:none;text-align:left;background:linear-gradient(135deg,#fff,#f8faff)}
-        .fleet-delivery-label{font-size:12px}
-        .fleet-delivery-label small{display:inline;margin-left:5px;font-size:10px}
-        .fleet-delivery-number{justify-content:flex-start;gap:10px;margin-top:8px}
-        .fleet-delivery-number svg{width:26px;height:26px}
-        .fleet-delivery-number strong{font-size:27px;font-variant-numeric:tabular-nums}
-        .fleet-delivery-unit{display:inline;margin-left:5px;font-size:10px}
-        .fleet-delivery-progress-row{margin-top:8px;gap:8px}
-        .fleet-delivery-progress-track{height:6px}
-        .fleet-delivery-percent{font-size:11px}
-        .fleet-delivery-note{margin-top:8px!important;font-size:10px}
-        .fleet-panels{grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:stretch}
-        .fleet-panel{border-radius:12px;box-shadow:0 2px 7px #16243a04}
-        .fleet-panel-header{gap:10px;padding:12px 14px}
-        .fleet-panel h3{font-size:13px}
-        .fleet-panel-description{font-size:11px;line-height:1.45}
-        .fleet-panel-content{padding:12px 14px}
-        .fleet-chart{min-width:520px;width:100%;height:290px}
-        .fleet-chart-scroll{overflow-x:auto}
-        .fleet-legend{font-size:10px;gap:12px;margin-top:8px}
-        .fleet-legend i{width:7px;height:7px}
-        .fleet-empty{min-height:190px;padding:18px;font-size:12px}
-        .fleet-warehouse-list{max-height:290px;padding-right:4px;scrollbar-width:thin}
-        .fleet-warehouse{padding:9px 0}
-        .fleet-row{gap:8px;margin-bottom:5px}
-        .fleet-warehouse-name{font-size:12px}
-        .fleet-row-meta{font-size:10px}
-        .fleet-bar{height:7px}
-        .fleet-warehouse-detail{font-size:10px;margin-top:5px}
-        .fleet-stage-panel{margin-top:14px;margin-bottom:12px}
-        .fleet-stage-scroll{max-height:480px;scrollbar-width:thin}
-        .fleet-stage-table{min-width:640px}
-        .fleet-stage-table th,.fleet-stage-table td{padding:7px 9px;font-size:11px;border-color:#e4eaf2}
-        .fleet-stage-table thead th{min-width:115px;line-height:1.45;font-size:10px;background:#334761}
-        .fleet-stage-table thead th:first-child{min-width:70px;text-align:center}
-        .fleet-stage-table thead th:nth-child(2){min-width:155px;text-align:left}
-        .fleet-stage-table .fleet-dc-merged{min-width:70px;background:#eef3f9;font-size:12px}
-        .fleet-stage-table .fleet-dc-group td{padding:7px 9px;background:#e7edf5;font-size:11px}
-        .fleet-stage-table tbody tr:hover td,.fleet-stage-table tbody tr:hover th:not(.fleet-dc-merged){background:#f3f7ff}
-        .fleet-vendor-chip{padding:1px 7px;margin:1px 3px 1px 0;font-size:9px;background:#fff2c6}
-        .fleet-stage-count{font-size:12px;margin-top:2px}
-        .fleet-footer{margin-top:10px;font-size:10px;gap:8px}
-        @media(max-width:1200px){.fleet-filters{grid-template-columns:repeat(4,minmax(0,1fr))}.fleet-chart{height:270px}.fleet-row{align-items:flex-start;flex-wrap:wrap}}
-        @media(max-width:900px){.fleet-dashboard{padding:14px}.fleet-panels{grid-template-columns:1fr}.fleet-delivery-summary{display:block}.fleet-chart{height:280px}.fleet-warehouse-list{max-height:240px}}
-        @media(max-width:540px){.fleet-dashboard{padding:10px;border-radius:12px}.fleet-dashboard h2{font-size:18px}.fleet-heading{gap:10px}.fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px}.fleet-delivery-cards{grid-template-columns:1fr;gap:8px}.fleet-delivery-card{padding:10px 12px}.fleet-delivery-number strong{font-size:25px}.fleet-panel-header,.fleet-panel-content{padding:10px 12px}.fleet-chart{height:260px}.fleet-delivery-heading{font-size:14px}}
+/* Separate status cards with oversized background icons. */
+.fleet-api-summary-grid{gap:11px;grid-template-columns:repeat(6,minmax(0,1fr));border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
+.fleet-api-summary-card{position:relative;isolation:isolate;min-height:155px;border:1px solid #dce5f1!important;border-radius:15px!important;padding:15px 14px;box-shadow:0 4px 13px #1d335807;overflow:hidden;transition:transform .16s,box-shadow .16s,border-color .16s}
+.fleet-api-summary-card:before,.fleet-api-summary-card:after{display:none}
+.fleet-api-summary-card.is-total{border-color:#1d3358!important}
+.fleet-api-summary-top{display:block;min-height:42px;padding-right:4px}
+.fleet-api-summary-label{position:relative;z-index:1;max-width:100%;font-size:10.5px;line-height:1.6;white-space:pre-line}
+.fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{position:absolute;right:-17px;bottom:-15px;top:auto;width:110px;height:110px;border:0;border-radius:0;background:transparent;color:inherit;opacity:.085;pointer-events:none;z-index:-1;transform:rotate(-12deg);box-shadow:none}
+.fleet-api-summary-icon svg{width:105px;height:105px;stroke-width:1.2}
+.fleet-api-summary-card.is-total .fleet-api-summary-icon{opacity:.11;color:#dceaff}
+.fleet-api-summary-number{position:relative;z-index:1;margin:10px 0 8px}
+.fleet-api-summary-number strong{font-size:32px;letter-spacing:-.8px}
+.fleet-api-summary-detail{position:relative;z-index:1;max-width:92%;font-size:9.5px;line-height:1.5;padding:0;min-height:29px;opacity:.85}
+.fleet-api-summary-card:hover{transform:translateY(-3px);box-shadow:0 9px 23px #1d335814}
+.fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:2px;box-shadow:0 5px 16px #1d33580c;background:#fff!important}
+.fleet-api-summary-card.is-total.is-selected{outline:2px solid #5074aa;outline-offset:2px;background:#1d3358!important}
+.fleet-api-summary-card:focus-visible{outline:3px solid #3979d7;outline-offset:3px}
+@media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card{min-height:145px}.fleet-api-summary-top{min-height:35px}}
+@media(max-width:560px){.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.fleet-api-summary-card{padding:13px 12px;min-height:150px}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{width:95px;height:95px;bottom:-14px;right:-12px}.fleet-api-summary-icon svg{width:95px;height:95px}.fleet-api-summary-number strong{font-size:28px}.fleet-api-summary-detail{font-size:9px}}
 
-        /* Refined, compact visual hierarchy */
-        .fleet-dashboard{background:#f4f7fb;border-color:#e1e8f0;color:#1d2d44;box-shadow:0 8px 28px #18345406}
-        .fleet-heading{padding:2px 0 4px}
-        .fleet-eyebrow{color:#527294;font-weight:750;letter-spacing:1.8px}
-        .fleet-button-primary{background:#244e78;border-color:#244e78;box-shadow:0 2px 5px #244e7818}
-        .fleet-button-primary:hover{background:#193f66}
-        .fleet-filters{background:#fff;border:1px solid #e1e8f0}
-        .fleet-field{background:#f8fafc;border-color:#dfe7f0;transition:border-color .15s,box-shadow .15s}
-        .fleet-field:hover:not(:disabled){border-color:#9eb7ce}
-        .fleet-field:focus{border-color:#648bab;box-shadow:0 0 0 3px #648bab14}
-        .fleet-delivery-summary{border:0;background:transparent;padding:0;box-shadow:none}
-        .fleet-delivery-heading{font-size:13px;color:#53677f;margin-bottom:8px!important}
-        .fleet-delivery-card{background:#fff;border-color:#e1e8f0;box-shadow:0 3px 10px #18345404;overflow:hidden}
-        .fleet-delivery-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#6887a8}
-        .fleet-delivery-card:nth-child(2):before{background:#10b981}
-        .fleet-delivery-card:nth-child(3):before{background:#f59e0b}
-        .fleet-delivery-number svg{padding:4px;width:30px;height:30px;border-radius:8px;background:#f1f5fa}
-        .fleet-panel-header{background:#fcfdff;border-bottom-color:#e8edf4}
-        .fleet-panel h3{color:#233d58;letter-spacing:.1px}
-        .fleet-stage-table thead th{background:#2c435e;font-weight:650;border-color:#465b73}
-        .fleet-stage-table thead th:first-child{border-top-left-radius:0}
-        .fleet-stage-table .fleet-dc-group td{background:#edf2f8;color:#344e69}
-        .fleet-stage-table .fleet-dc-merged{background:#f4f7fb;color:#335677;letter-spacing:.5px}
-        .fleet-stage-table .fleet-stage-total{background:#f1f5fa;color:#244e78}
-        .fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:30px;min-height:26px;padding:2px 7px;border:1px solid transparent;border-radius:6px;background:#edf3fa;color:#315879;font-size:12px;font-weight:750;cursor:pointer;font-variant-numeric:tabular-nums}
-        .fleet-count-button:hover,.fleet-count-button:focus-visible{background:#dbe9f7;border-color:#aac7e2;color:#163f67}
-        .fleet-stage-completed .fleet-count-button{background:#e2f4e9;color:#078456}
-        .fleet-cell-empty{color:#bac5d2}
-        .fleet-vendor-tooltip{position:fixed;z-index:10000;width:288px;max-width:calc(100vw - 24px);max-height:220px;overflow:auto;padding:12px 14px;border:1px solid #dce6f1;border-radius:10px;background:#fff;color:#334a63;box-shadow:0 10px 32px #172d4d26;pointer-events:none}
-        .fleet-vendor-tooltip-heading{font-size:11px;font-weight:750;color:#6b7e93;margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid #edf1f6}
-        .fleet-vendor-tooltip-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:4px 0;font-size:12px;line-height:1.5}
-        .fleet-vendor-tooltip-row span{overflow-wrap:anywhere}
-        .fleet-vendor-tooltip-row strong{white-space:nowrap;color:#244e78;font-size:12px}
+/* Reference-inspired soft filter panel. */
+.fleet-filter-shell{background:#fff;border:1px solid #e2e9f4;border-radius:19px;overflow:hidden;box-shadow:0 5px 20px #24436905;margin-bottom:15px}
+.fleet-filter-shell .fleet-filter-heading{margin:0;padding:13px 18px;min-height:64px;gap:11px;border-bottom:1px solid #edf2f9;background:linear-gradient(100deg,#f6f9ff,#fdfefe)}
+.fleet-filter-shell .fleet-filter-heading h3{font-size:13px;color:#213a60;font-weight:800}
+.fleet-filter-emblem{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:36px;height:36px;border-radius:12px;background:linear-gradient(140deg,#2968ff,#5c38ff);color:#fff;box-shadow:0 5px 12px #4549ed25}
+.fleet-filter-emblem svg{width:21px;height:21px}
+.fleet-filter-shell .fleet-filter-context{margin-left:auto;background:#fff;color:#617ea4;border:1px solid #edf1f8;box-shadow:0 2px 4px #243e6009;border-radius:999px;font-size:10px;padding:5px 10px;white-space:nowrap}
+.fleet-filter-shell .fleet-filters{grid-template-columns:repeat(4,minmax(0,1fr));border:0;box-shadow:none;border-radius:0;background:#fff;padding:15px 18px 10px;gap:13px 16px}
+.fleet-filter-shell .fleet-label{font-size:10px;color:#8c9fbd;font-weight:750;margin:0 0 7px;letter-spacing:.1px}
+.fleet-filter-input{display:block;position:relative;width:100%;min-width:0}
+.fleet-filter-input-icon{position:absolute;z-index:1;left:12px;top:50%;transform:translateY(-50%);color:#438bff;pointer-events:none;display:flex;align-items:center}
+.fleet-filter-shell .fleet-field{appearance:none;-webkit-appearance:none;background:#fff;height:40px;min-height:40px;border:1px solid #dce5f2;border-radius:12px;padding:7px 30px 7px 38px;font-size:11px;box-shadow:0 2px 4px #213e6410;color:#233f66;transition:border-color .15s,box-shadow .15s}
+.fleet-filter-shell .fleet-field:hover:not(:disabled){border-color:#a9c3ed;box-shadow:0 3px 8px #213e6410}
+.fleet-filter-shell .fleet-field:focus{border-color:#76a5f5;box-shadow:0 0 0 3px #3882ff15;outline:0}
+.fleet-filter-shell .fleet-field:disabled{background:#fafcff;color:#b0bed0}
+.fleet-filter-chevron{position:absolute;right:13px;top:50%;transform:translateY(-50%);font-size:12px;color:#8ca4c4;pointer-events:none}
+.fleet-filter-shell .fleet-filters>.fleet-button{height:40px;border-radius:12px;background:#fff;border:1px solid #dce5f2;box-shadow:0 2px 4px #213e6410;color:#6b83a4;gap:7px;font-size:11px}
+.fleet-filter-shell .fleet-filters>.fleet-button:hover:not(:disabled){background:#f6f9ff;color:#3f70b5;border-color:#b0c8ec}
+.fleet-filter-shell .fleet-filter-note{font-size:9px;color:#96a7be;margin:0!important;padding:0 18px 10px}
+.fleet-filter-shell .fleet-filter-note+.fleet-filter-note{padding-top:0}
+@media(min-width:1500px){.fleet-filter-shell .fleet-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:850px){.fleet-filter-shell .fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:13px;gap:12px}.fleet-filter-shell .fleet-filter-heading{padding:12px 13px}.fleet-filter-shell .fleet-filter-note{padding-left:13px;padding-right:13px}}
+@media(max-width:560px){.fleet-filter-shell{border-radius:16px}.fleet-filter-emblem{width:32px;height:32px;border-radius:10px}.fleet-filter-shell .fleet-filter-heading{gap:8px}.fleet-filter-shell .fleet-filter-heading h3{font-size:12px}.fleet-filter-shell .fleet-filter-context{font-size:9px;padding:4px 7px}.fleet-filter-shell .fleet-field{height:39px;min-height:39px;font-size:10px;padding-left:32px;padding-right:24px}.fleet-filter-input-icon{left:10px}.fleet-filter-input-icon svg{width:15px;height:15px}.fleet-filter-chevron{right:10px}.fleet-filter-shell .fleet-filters{gap:11px 9px}.fleet-filter-shell .fleet-filters>.fleet-button{height:39px;font-size:10px}}
 
-        /* Calm color-coded stage table */
-        .fleet-stage-panel{border:1px solid #dce5f0;border-radius:14px;box-shadow:0 4px 16px #19345106}
-        .fleet-stage-panel>.fleet-panel-header{padding:14px 16px;background:#fff;border-bottom:1px solid #e5ebf3}
-        .fleet-stage-panel h3{font-size:14px;font-weight:750;color:#203b58}
-        .fleet-stage-scroll{background:#fff;max-height:520px}
-        .fleet-stage-table{table-layout:auto;border-collapse:separate;border-spacing:0}
-        .fleet-stage-table th,.fleet-stage-table td{padding:9px 10px;border-right:0;border-bottom:1px solid #edf1f6}
-        .fleet-stage-table thead th{background:#f1f5fa;color:#425b76;border-bottom:2px solid #dce5f0;min-width:135px;padding:13px 10px;font-size:11px;line-height:1.5}
-        .fleet-stage-table thead th:first-child{min-width:80px;width:80px;background:#eaf0f7}
-        .fleet-stage-table thead th:nth-child(2){min-width:165px;background:#f1f5fa}
-        .fleet-step-label{display:inline-flex;margin-bottom:7px;padding:2px 8px;border-radius:6px;background:#dfeaf7;color:#3e6791;font-size:9px;font-weight:800;letter-spacing:.6px}
-        .fleet-step-name{display:block;max-width:175px;margin:0 auto;font-weight:650;color:#354d67}
-        .fleet-stage-table thead th[data-stage="8"]{background:#edf8f2;border-bottom-color:#b9e3cc}
-        .fleet-stage-table th[data-stage="8"] .fleet-step-label{background:#d2efdf;color:#08774e}
-        .fleet-stage-table thead th[data-stage="9"],.fleet-stage-table thead th[data-stage="10"]{background:#fff3f2;border-bottom-color:#f0d2cf}
-        .fleet-stage-table th[data-stage="9"] .fleet-step-label,.fleet-stage-table th[data-stage="10"] .fleet-step-label{background:#fbe0dc;color:#a9473d}
-        .fleet-stage-table .fleet-total-heading{background:#edf1fa;color:#395a85;min-width:80px}
-        .fleet-header-unit{display:block;font-size:9px;font-weight:500;color:#7f91a8;margin-top:3px}
-        .fleet-stage-table .fleet-dc-group td{padding:9px 12px;background:#f3f6fb;color:#36516f;border-top:1px solid #e2eaf3;border-bottom:1px solid #e2eaf3;font-weight:750;font-size:11px}
-        .fleet-warehouse-marker{display:inline-block;width:5px;height:13px;margin-right:8px;vertical-align:middle;border-radius:3px;background:#829fc0}
-        .fleet-group-quantity{float:right;color:#7c8fa5;font-size:10px;font-weight:500}
-        .fleet-stage-table .fleet-dc-merged{background:#f7f9fc;border-right:1px solid #e5ebf3;vertical-align:middle;text-align:center;padding:12px 8px}
-        .fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;min-width:46px;padding:6px 9px;border-radius:8px;background:#e5edf8;color:#365f8c;font-size:11px;font-weight:800;letter-spacing:.4px}
-        .fleet-stage-table .fleet-truck-row th{padding-left:16px;font-size:11px;font-weight:600;background:#fff;color:#4d627b}
-        .fleet-truck-label{display:inline-block;max-width:190px;white-space:normal;line-height:1.45}
-        .fleet-stage-table .fleet-truck-row td{background:#fff}
-        .fleet-stage-table .fleet-truck-row:hover td,.fleet-stage-table .fleet-truck-row:hover th{background:#f5f9ff}
-        .fleet-stage-table .fleet-truck-row td.fleet-stage-completed{background:#f5fbf7}
-        .fleet-count-button{min-width:32px;min-height:28px;border-radius:7px;border:1px solid #e1eaf5;background:#edf3fa;color:#345f8b;box-shadow:none;font-size:12px;font-weight:750;transition:background .15s,border-color .15s}
-        .fleet-count-button:hover{background:#dceafb;border-color:#a9c8e8}
-        .fleet-stage-completed .fleet-count-button{background:#e2f4e9;border-color:#cce7d6;color:#08774e}
-        .fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0ed;border-color:#f1d9d3;color:#aa5345}
-        .fleet-stage-table .fleet-truck-row td.fleet-stage-total{background:#f3f6fc;color:#355c89;border-left:1px solid #e5ebf3;font-size:12px;font-weight:800}
-        .fleet-cell-empty{font-size:11px;color:#c7d0dc}
-        @media(prefers-reduced-motion:reduce){.fleet-count-button{transition:none}}
+/* Shorter status cards and a single horizontal filter toolbar. */
+.fleet-api-summary-card{min-height:119px!important;padding:11px 12px!important}
+.fleet-api-summary-top{min-height:32px!important}
+.fleet-api-summary-label{font-size:10px;line-height:1.45}
+.fleet-api-summary-number{margin:5px 0 4px}
+.fleet-api-summary-number strong{font-size:27px}
+.fleet-api-summary-detail{min-height:24px;font-size:9px;line-height:1.4;padding:0}
+.fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{width:88px;height:88px;right:-12px;bottom:-14px}
+.fleet-api-summary-icon svg{width:88px;height:88px}
+.fleet-filter-shell .fleet-filter-heading{min-height:54px;padding:10px 15px}
+.fleet-filter-emblem{width:31px;height:31px;border-radius:10px}
+.fleet-filter-shell .fleet-filters{display:flex;flex-wrap:nowrap;align-items:flex-end;gap:10px;padding:12px 15px 10px;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#c4d5ed transparent}
+.fleet-filter-shell .fleet-filters>label{flex:1 0 128px;min-width:128px}
+.fleet-filter-shell .fleet-filters>label:first-child{flex:.65 0 90px;min-width:90px}
+.fleet-filter-shell .fleet-filters>label:nth-child(6),.fleet-filter-shell .fleet-filters>label:nth-child(7){flex:1.3 0 156px;min-width:156px}
+.fleet-filter-shell .fleet-filters>.fleet-button{flex:0 0 113px;min-width:113px}
+.fleet-filter-shell .fleet-field{height:36px;min-height:36px;font-size:10.5px;padding-top:5px;padding-bottom:5px;border-radius:10px}
+.fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px;font-size:10px;border-radius:10px}
+.fleet-filter-shell .fleet-label{font-size:9px;margin-bottom:5px}
+@media(max-width:560px){.fleet-api-summary-card{min-height:123px!important;padding:10px 11px!important}.fleet-api-summary-top{min-height:35px!important}.fleet-api-summary-number strong{font-size:25px}.fleet-api-summary-detail{font-size:8.5px}.fleet-filter-shell .fleet-filters{padding:10px 12px;gap:9px}.fleet-filter-shell .fleet-field{font-size:10px;height:36px;min-height:36px}.fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px}}
 
-        .fleet-stage-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(360px,1fr);gap:16px;align-items:start;margin-top:14px;margin-bottom:12px}
-        .fleet-stage-layout .fleet-stage-panel{margin:0}
-        .fleet-step-toggle{flex-shrink:0;border:0;background:transparent;color:#8593a5;font-size:11px!important;padding:4px 6px;border-radius:5px;cursor:pointer;white-space:nowrap}
-        .fleet-step-toggle:hover{background:#f1f5f9;color:#53677f}
-        .fleet-six-month-panel .fleet-panel-header{padding:16px}
-        .fleet-six-month-unit{font-size:11px;color:#8796a8}
-        .fleet-six-month-scroll{overflow:auto;padding:0 12px 12px}
-        .fleet-six-month-table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
-        .fleet-six-month-table th,.fleet-six-month-table td{padding:11px 6px;text-align:center;border-bottom:1px solid #edf1f6;white-space:nowrap}
-        .fleet-six-month-table thead th{background:#f7f9fc;color:#60748c;font-size:10px;font-weight:600}
-        .fleet-six-month-table thead th span{display:block;font-size:8px;color:#94a3b8}
-        .fleet-six-month-table th:first-child{text-align:left}
-        .fleet-six-month-table tbody th{font-weight:500;color:#53677f}
-        .fleet-six-month-table tbody tr:hover{background:#f8fbff}
-        .fleet-six-month-total{font-weight:700;color:#355e8a;background:#f6f9fe}
-        .fleet-six-month-table tfoot{background:#edf4fc;color:#355e8a;font-weight:750}
-        .fleet-six-month-note{font-size:10px;color:#91a0b1;margin-top:10px!important}
-        @media(max-width:1100px){.fleet-stage-layout{grid-template-columns:1fr}.fleet-six-month-panel{width:100%}}
-
-        .fleet-stage-layout{display:block}
-        .fleet-stage-table .fleet-month-column{min-width:75px;background:#f8fbff;color:#486888}
-        .fleet-stage-table thead th.fleet-month-column{background:#eef4fb}
-        .fleet-stage-table .fleet-month-start{border-left:3px solid #ccd9e8}
-
-        .fleet-stage-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(350px,1fr);gap:14px;align-items:start}
-        .fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:92px;padding:14px 16px}
-        .fleet-stage-layout .fleet-panel-description{max-height:38px;overflow:hidden}
-        .fleet-stage-layout .fleet-stage-scroll{height:480px;max-height:480px;overflow:auto}
-        .fleet-stage-layout .fleet-stage-table thead tr{height:108px}
-        .fleet-stage-layout .fleet-stage-table thead th{height:108px;max-width:160px}
-        .fleet-stage-layout .fleet-stage-table .fleet-truck-row{height:44px}
-        .fleet-stage-layout .fleet-stage-table .fleet-truck-row>th,.fleet-stage-layout .fleet-stage-table .fleet-truck-row>td{height:44px;padding:6px 9px;white-space:nowrap}
-        .fleet-stage-layout .fleet-stage-table .fleet-dc-group{height:36px}
-        .fleet-stage-layout .fleet-stage-table .fleet-dc-group>td{height:36px;padding:6px 9px;white-space:nowrap}
-        .fleet-stage-layout .fleet-month-table{min-width:420px;table-layout:fixed}
-        .fleet-stage-layout .fleet-month-table thead th{min-width:70px;text-align:center}
-        .fleet-month-table .fleet-truck-row td{color:#486888;font-weight:650}
-        @media(max-width:800px){.fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(350px,1fr);overflow-x:auto}}
-
-        .fleet-locked-table{--dc-lock-width:82px}
-        .fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width)!important;max-width:var(--dc-lock-width);z-index:4;background:#f4f7fb}
-        .fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:170px!important;z-index:3;background:#fff;box-shadow:3px 0 5px #233a5710}
-        .fleet-locked-table thead th.fleet-lock-dc,.fleet-locked-table thead th.fleet-lock-truck{top:0;z-index:6;background:#f7f9fc}
-        .fleet-locked-table .fleet-dc-group th.fleet-lock-warehouse{height:36px;padding:6px 9px;background:#edf2f8;color:#344e69;font-weight:750;white-space:nowrap}
-        .fleet-locked-table .fleet-dc-group .fleet-lock-warehouse{max-width:220px;overflow:hidden;text-overflow:ellipsis}
-
-        .fleet-stage-layout .fleet-stage-table thead tr,.fleet-stage-layout .fleet-stage-table thead th{height:62px}
-        .fleet-stage-layout .fleet-stage-table thead th{background:#40556d!important;color:#fff;border-right:1px solid #93a2b4;border-bottom:1px solid #b9c4d0;border-radius:0;padding:8px 9px;font-size:11px;line-height:1.45;font-weight:650}
-        .fleet-stage-layout .fleet-stage-table thead .fleet-step-name{color:#fff;font-size:11px;font-weight:650;margin:0;line-height:1.45}
-        .fleet-stage-layout .fleet-stage-table thead .fleet-header-unit{color:#dbe4ee}
-        .fleet-stage-layout .fleet-month-table thead th{white-space:nowrap}
+.sla-table th:last-child{position:sticky;right:0;z-index:3;min-width:128px;background:#edf2fa;text-align:center;box-shadow:-4px 0 7px #243b5a06}
+.sla-table .sla-detail-cell{position:sticky;right:0;z-index:1;min-width:128px;background:#fff;vertical-align:middle;text-align:center;box-shadow:-4px 0 7px #243b5a06}
+.sla-table tbody tr:nth-child(even) .sla-detail-cell{background:#fafcff}
+.sla-table tbody tr:hover .sla-detail-cell{background:#eff5ff}
+.sla-detail-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 9px;border:1px solid #d4e3fa;border-radius:9px;background:#edf4ff;color:#3768ad;font-size:10px!important;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s}
+.sla-detail-button:hover{background:#dceaff;border-color:#a6c4ee}
+.sla-detail-button:focus-visible{outline:2px solid #3979d7;outline-offset:2px}
+.sla-kpi:nth-child(2) .sla-kpi-value{color:#4776aa}
+@media(max-width:850px){.sla-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
       `}</style>
       <header className="fleet-heading">
-        <div>
+        <div className="fleet-brand"><span className="fleet-brand-icon" aria-hidden="true"><SlaInlineIcon type="truck" size={24} /></span><div>
           <div className="fleet-eyebrow">FLEET OVERVIEW</div>
           <h2>{displayTitle}</h2>
           <p className="fleet-subtitle">
             ภาพรวมคำขอและการส่งมอบกองรถ แยกตามคลัง
           </p>
-        </div>
+        </div></div>
         {(suppliedRequests === undefined || needsDashboard) && (
           <button
             type="button"
@@ -1481,16 +1137,16 @@ function FleetStatusByDc({
           </button>
         )}
       </header>
+      <section className="fleet-filter-shell" aria-label="ตัวกรองข้อมูล"><div className="fleet-filter-heading"><span className="fleet-filter-emblem" aria-hidden="true"><FleetFilterGlyph kind="sliders" /></span><h3>ตัวกรองข้อมูล</h3><span className="fleet-filter-context">{selectedYear + 543} · {monthFilter === "all" ? "ทุกเดือน" : MONTH_NAMES[Number(monthFilter) - 1]}</span></div>
       <div className="fleet-filters">
-        <label><span className="fleet-label">ปี</span><select className="fleet-field" value={selectedYear} onChange={e => { setSelectedYear(Number(e.target.value)); setHoveredMonth(null); }}>{yearOptions.map(year => <option key={year} value={year}>{year}</option>)}</select></label>
-        <label><span className="fleet-label">เดือน</span><select className="fleet-field" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">ทุกเดือน</option>{MONTH_NAMES.map((month,index) => <option key={month} value={String(index+1).padStart(2,"0")}>{month}</option>)}</select></label>
-        <label><span className="fleet-label">กลุ่ม DC</span><select className="fleet-field" value={dcTypeFilter} onChange={e => setDcTypeFilter(e.target.value)}><option value="all">ทุกกลุ่ม DC</option>{dcTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
-        <label><span className="fleet-label">พื้นที่</span><select className="fleet-field" value={areaFilter} disabled={filterOptions.areas.length === 0} onChange={e => setAreaFilter(e.target.value)}><option value="all">{filterOptions.areas.length ? "ทุกพื้นที่" : "ไม่พบพื้นที่"}</option>{filterOptions.areas.map(area => <option key={area} value={area}>{area}</option>)}</select></label>
-        <label><span className="fleet-label">FBP</span><select className="fleet-field" value={fbpFilter} disabled={filterOptions.fbps.length === 0} onChange={e => setFbpFilter(e.target.value)}><option value="all">{filterOptions.fbps.length ? "ทุก FBP" : "ไม่พบ FBP"}</option>{filterOptions.fbps.map(fbp => <option key={fbp.id} value={fbp.id}>{fbp.name}</option>)}</select></label>
-        <label><span className="fleet-label">สถานะงาน</span><select className="fleet-field" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">ทุกสถานะ</option>{filterOptions.statuses.map(status => <option key={status} value={status}>{FLEET_STATUSES.find(item => item.key === status)?.label ?? status}</option>)}</select></label>
-        <label><span className="fleet-label">ประเภทรถ</span><select className="fleet-field" value={truckTypeFilter} onChange={e => setTruckTypeFilter(e.target.value)}><option value="all">ทุกประเภทรถ</option>{filterOptions.trucks.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
-        <label><span className="fleet-label">ประเภทคำขอ</span><select className="fleet-field" value={requestTypeFilter} onChange={e => setRequestTypeFilter(e.target.value)}><option value="all">ทุกประเภทคำขอ</option>{requestTypeFilter !== "all" && !requestTypeOptions.includes(requestTypeFilter) && <option value={requestTypeFilter}>{requestTypeFilter}</option>}{requestTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
-        <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}>ล้างตัวกรอง</button>
+        <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={selectedYear} onChange={e => { setSelectedYear(Number(e.target.value)); setHoveredMonth(null); }}>{yearOptions.map(year => <option key={year} value={year}>{year}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">ทุกเดือน</option>{MONTH_NAMES.map((month,index) => <option key={month} value={String(index+1).padStart(2,"0")}>{month}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={dcTypeFilter} onChange={e => setDcTypeFilter(e.target.value)}><option value="all">ทุกกลุ่ม DC</option>{dcTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><select className="fleet-field" value={areaFilter} disabled={filterOptions.areas.length === 0} onChange={e => setAreaFilter(e.target.value)}><option value="all">{filterOptions.areas.length ? "ทุกพื้นที่" : "ไม่พบพื้นที่"}</option>{filterOptions.areas.map(area => <option key={area} value={area}>{area}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><select className="fleet-field" value={fbpFilter} disabled={filterOptions.fbps.length === 0} onChange={e => setFbpFilter(e.target.value)}><option value="all">{filterOptions.fbps.length ? "ทุก FBP" : "ไม่พบ FBP"}</option>{filterOptions.fbps.map(fbp => <option key={fbp.id} value={fbp.id}>{fbp.name}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={requestTypeFilter} onChange={e => setRequestTypeFilter(e.target.value)}><option value="all">ทุกประเภทคำขอ</option>{requestTypeFilter !== "all" && !requestTypeOptions.includes(requestTypeFilter) && <option value={requestTypeFilter}>{requestTypeFilter}</option>}{requestTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><select className="fleet-field" value={truckTypeFilter} onChange={e => setTruckTypeFilter(e.target.value)}><option value="all">ทุกประเภทรถ</option>{filterOptions.trucks.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+        <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}><FleetFilterGlyph kind="clear" />ล้างตัวกรอง</button>
       </div>
       <p className="fleet-filter-note">ปีและเดือนกรองตามวันที่สร้างคำขอ (request_date) · กราฟแสดง ม.ค.–ธ.ค. ของปีที่เลือก</p>
       {hasFilters && (
@@ -1498,12 +1154,39 @@ function FleetStatusByDc({
           แสดงผลตามตัวกรองที่เลือก · {dcSummary.length} คลัง
         </p>
       )}
+      </section>
       {activeError && (
         <div className="fleet-error" role="alert">
           <strong>โหลดข้อมูลไม่สำเร็จ</strong>
           <p>{activeError}</p>
         </div>
       )}
+      <section className="fleet-api-summary" aria-label="สรุปสถานะคำขอตามตัวกรอง" aria-busy={isLoading}>
+        <div className="fleet-api-summary-header">
+          <div className="fleet-summary-heading-line"><span className="fleet-section-mark" aria-hidden="true">02</span><div><h3 className="fleet-api-summary-heading">สรุปสถานะคำขอ</h3><p className="fleet-api-summary-subtitle">ภาพรวมการจัดรถในแต่ละขั้นตอน</p></div></div>
+          <span className="fleet-api-summary-badge">6 กลุ่มสถานะ</span>
+        </div>
+        <div className="fleet-api-summary-grid">
+          {DASHBOARD_SUMMARY_CARDS.map(card => (
+            <button type="button" aria-pressed={statusFilter === card.key} onClick={() => setStatusFilter(current => current === card.key ? "all" : card.key)} className={`fleet-api-summary-card${card.key === "all" ? " is-total" : ""}${statusFilter === card.key ? " is-selected" : ""}`} key={card.key}
+              style={{ color: card.key === "all" ? "#fff" : card.color, background: card.key === "all" ? "#1d3358" : "#fff" }}>
+              <div className="fleet-api-summary-top">
+                <div className="fleet-api-summary-label">{card.label}</div>
+                <span className="fleet-api-summary-icon"><DashboardStatusIcon status={card.key} /></span>
+              </div>
+              <div className="fleet-api-summary-number">
+                <strong>{isLoading || activeError ? "—" : filteredCardSummary[card.key].qty.toLocaleString("th-TH")}</strong>
+                <span>คัน</span>
+              </div>
+              <span className="fleet-api-summary-detail">{card.detail}</span>
+            </button>
+          ))}
+        </div>
+        <p className="fleet-api-summary-note" role="status">
+          {isLoading ? "กำลังโหลดสรุปสถานะ…" : activeError ? `โหลดสรุปสถานะไม่สำเร็จ: ${activeError}` : "ยอดตามตัวกรองด้านบนและสถานะที่เลือก · คลิกการ์ดเดิมอีกครั้งเพื่อแสดงทุกสถานะ"}
+        </p>
+      </section>
+      <SlaOverduePanel requests={filteredRequests} parentLoading={isLoading} parentError={activeError} reloadKey={reloadKey} />
       <div className="fleet-delivery-summary">
         <div>
           <h3 className="fleet-delivery-heading">
@@ -1764,7 +1447,7 @@ function FleetStatusByDc({
                         <text x={x + 16} y="114" fill={gap !== null && gap < 0 ? "#ea580c" : "#059669"} fontSize="13">{gapLabel}</text>
                         <line x1={x + 16} x2={x + 294} y1="125" y2="125" stroke="#e4eaf2" />
                         <text x={x + 16} y="145" fill="#16243a" fontSize="13" fontWeight="700">จำนวนรถในแต่ละสถานะ</text>
-                        <text x={x + 16} y="163" fill="#62738a" fontSize="10">สถานะปัจจุบันตามตัวกรอง ไม่ใช่ประวัติของเดือน</text>
+                        <text x={x + 16} y="163" fill="#62738a" fontSize="10">สถานะปัจจุบันตามกลุ่มการ์ด</text>
                         {summary.map((row, index) => <g key={row.key}>
                           <circle cx={x + 20} cy={181 + index * 18} r="3" fill={row.color} />
                           <text x={x + 30} y={185 + index * 18} fill="#41536d" fontSize="11">{row.label}</text>
@@ -1921,11 +1604,11 @@ function FleetStatusByDc({
       </article>
 
       <article className="fleet-panel fleet-month-panel">
-        <div className="fleet-panel-header"><div><h3>สรุป 6 เดือน</h3><p className="fleet-panel-description">STEP 2–7 · ตามวันที่สร้างคำขอ</p></div></div>
+        <div className="fleet-panel-header"><div><h3>สรุป 6 เดือน</h3><p className="fleet-panel-description">STEP 2–7 · ตามวันที่สร้างคำขอ · ปี {selectedYear + 543}</p></div><button type="button" className="fleet-month-counter fleet-month-open" aria-haspopup="dialog" onClick={() => monthPickerDialogRef.current?.showModal()}>เลือกเดือน · {selectedSummaryMonths.length}/6 ▾</button></div>
         {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={event => { setVendorTooltip(null); if (stageScrollRef.current && stageScrollRef.current.scrollTop !== event.currentTarget.scrollTop) stageScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
           <table className="fleet-stage-table fleet-month-table"><thead><tr>{sixMonthSummary.map(month => <th key={month.key} scope="col"><span className="fleet-step-name">{month.label}</span></th>)}</tr></thead>
           <tbody>{stageGroups.map(([key,group]) => <Fragment key={key}>
-            <tr className="fleet-dc-group"><td colSpan={6}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
+            <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
             {Array.from(group.trucks.values()).sort((a,b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">{sixMonthSummary.map(month => {
               const count = monthlyTruckCounts.get(JSON.stringify([group.dcType,group.dcCode,truck.truckType]))?.get(month.key) ?? 0;
               return <td key={month.key} title={`${group.dcCode} · ${truck.truckType} · ${month.label}: ${count} คัน`}>{count ? formatNumber(count) : <span className="fleet-cell-empty">—</span>}</td>;
@@ -1936,8 +1619,24 @@ function FleetStatusByDc({
 
       </div>
 
+      <dialog ref={monthPickerDialogRef} className="fleet-month-dialog" aria-labelledby="fleet-month-dialog-title">
+        <div className="fleet-month-dialog-heading">
+          <div><h3 id="fleet-month-dialog-title">เลือกเดือนที่ต้องการดู</h3><p>ปี {selectedYear + 543} · เลือกแล้ว {selectedSummaryMonths.length}/6 เดือน</p></div>
+          <button type="button" className="fleet-month-close" aria-label="ปิดตัวเลือกเดือน" onClick={() => monthPickerDialogRef.current?.close()}>×</button>
+        </div>
+        <div className="fleet-month-picker" aria-label="เลือกเดือนสำหรับสรุป สูงสุด 6 เดือน">
+          {MONTH_SHORT_NAMES.map((label, month) => {
+            const selected = selectedSummaryMonths.includes(month);
+            const disabled = (!selected && selectedSummaryMonths.length >= 6) || (selected && selectedSummaryMonths.length === 1);
+            return <button key={month} type="button" className={`fleet-month-chip${selected ? " is-selected" : ""}`} aria-pressed={selected} disabled={disabled} onClick={() => toggleSummaryMonth(month)}>{selected && <span aria-hidden="true">✓ </span>}{label}</button>;
+          })}
+        </div>
+        <p className="fleet-month-picker-note">เลือกได้ 1–6 เดือน ไม่จำเป็นต้องติดกัน · ใช้ปีที่เลือกด้านบน · ไม่เปลี่ยนตามตัวกรองเดือนของกราฟ</p>
+        <div className="fleet-month-dialog-footer"><button type="button" className="fleet-button fleet-button-primary" onClick={() => monthPickerDialogRef.current?.close()}>เสร็จสิ้น</button></div>
+      </dialog>
+
       {vendorTooltip && <div className="fleet-vendor-tooltip" role="tooltip" style={{ left: vendorTooltip.left, top: vendorTooltip.top }}>
-        <div className="fleet-vendor-tooltip-heading">บริษัทขนส่ง · จำนวนรถ</div>
+        <div className="fleet-vendor-tooltip-heading">บริษัทประกอบรถ · จำนวนรถ</div>
         {vendorTooltip.entries.map(([name, count]) => <div className="fleet-vendor-tooltip-row" key={name}><span>{name}</span><strong>: {formatNumber(count)} คัน</strong></div>)}
         <div className="fleet-vendor-tooltip-heading" style={{ marginTop: 12 }}>FBP · จำนวนรถ</div>
         {vendorTooltip.companies.map(([name, count]) => <div className="fleet-vendor-tooltip-row" key={name}><span>{name}</span><strong>: {formatNumber(count)} คัน</strong></div>)}
@@ -1957,4 +1656,380 @@ function FleetStatusByDc({
 }
 export default function Page() {
   return <FleetStatusByDc />;
+}
+function SlaInlineIcon({ type, size = 18, className = "" }: { type: string; size?: number; className?: string }) {
+  const paths: Record<string, string> = {
+    alert: "M12 3 2 21h20L12 3z M12 9v5 M12 17h.01",
+    refresh: "M20 7a9 9 0 0 0-15-2L2 8 M2 3v5h5 M4 17a9 9 0 0 0 15 2l3-3 M22 21v-5h-5",
+    search: "M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+    truck: "M2 5h13v12H2z M15 9h4l3 5v3h-7 M4 17v1a2 2 0 0 0 4 0v-1 M16 17v1a2 2 0 0 0 4 0v-1",
+    clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 6v6l4 2",
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true"><path d={paths[type]} /></svg>;
+}
+
+const DASHBOARD_API_URL =
+
+  "http://192.168.158.210/api_new_truck/api/dashboard_sla_overdue.php";
+
+interface OverdueRow {
+  id?: string | number;
+
+  flow_id: string | number;
+
+  request_id: string | number;
+
+  running_doc: string;
+
+  dc_code: string;
+
+  fleet_type: string;
+
+  vehicle_no: string | number;
+
+  unit_code?: string | null;
+
+  license: string;
+
+  truck_type: string;
+
+  process: string;
+
+  process_level: string | number;
+
+  str_date: string;
+
+  days_in_status: number;
+
+  sla_limit: number;
+
+  overdue_days: number;
+
+  detail?: string | null;
+
+  action_required: string | null;
+
+}
+
+function formatDate(value: string) {
+
+  const date = value?.split(/[ T]/)[0];
+
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return "—";
+
+  const [year, month, day] = date.split("-");
+
+  return `${day}/${month}/${year}`;
+
+}
+
+function SlaOverduePanel({ requests: visibleRequests, parentLoading, parentError, reloadKey }: {
+  requests: FleetRequest[];
+  parentLoading: boolean;
+  parentError: string;
+  reloadKey: number;
+}) {
+
+  const [rows, setRows] = useState<OverdueRow[]>([]);
+
+  const [loading, setLoading] = useState(true);
+
+  const [error, setError] = useState("");
+
+  const [asOf, setAsOf] = useState("");
+
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [search, setSearch] = useState("");
+
+  const [dc, setDc] = useState("");
+
+  const [fleet, setFleet] = useState("");
+  const [openDetailModal, setOpenDetailModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<OverdueRow | null>(null);
+  const handleOpenDetail = (row: OverdueRow) => {
+    setSelectedRequest(row);
+    setOpenDetailModal(true);
+  };
+  const handleCloseDetail = () => {
+    setOpenDetailModal(false);
+    setSelectedRequest(null);
+  };
+
+  useEffect(() => {
+
+    const controller = new AbortController();
+
+    setLoading(true);
+
+    setError("");
+
+    async function loadDashboard() {
+
+      try {
+
+        const response = await fetch(DASHBOARD_API_URL, {
+
+          method: "GET",
+
+          headers: { Accept: "application/json" },
+
+          cache: "no-store",
+
+          signal: controller.signal,
+
+        });
+
+        const raw = await response.text();
+
+        let result;
+
+        try { result = JSON.parse(raw); }
+
+        catch { throw new Error(`API ไม่ได้ส่ง JSON กลับมา (HTTP ${response.status}) กรุณาตรวจสอบตำแหน่งไฟล์ dashboard_sla_overdue.php`); }
+
+        if (!response.ok || result.status !== "success") {
+
+          throw new Error(result.message || `โหลดข้อมูลไม่สำเร็จ (HTTP ${response.status})`);
+
+        }
+
+        if (!Array.isArray(result.data)) throw new Error("รูปแบบข้อมูล API ไม่ถูกต้อง: ไม่พบรายการ data");
+
+        const normalized: OverdueRow[] = result.data.map((row: OverdueRow) => ({
+
+          ...row,
+
+          days_in_status: Number(row.days_in_status),
+
+          sla_limit: Number(row.sla_limit),
+
+          overdue_days: Number(row.overdue_days),
+
+        }));
+
+        if (!controller.signal.aborted) {
+
+          setRows(normalized.sort((a, b) => b.overdue_days - a.overdue_days || b.days_in_status - a.days_in_status));
+
+          setAsOf(result.as_of_date || "");
+
+        }
+
+      } catch (failure) {
+
+        if (!controller.signal.aborted) {
+
+          setRows([]);
+
+          setError(failure instanceof TypeError
+
+            ? "เชื่อมต่อ API ไม่สำเร็จ กรุณาตรวจสอบว่าเครื่องนี้เข้าถึง 192.168.158.210 ได้ และ API อนุญาต CORS จาก http://localhost:3000"
+
+            : failure instanceof Error ? failure.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล");
+
+        }
+
+      } finally {
+
+        if (!controller.signal.aborted) setLoading(false);
+
+      }
+
+    }
+
+    void loadDashboard();
+
+    return () => controller.abort();
+
+  }, [refreshKey, reloadKey]);
+
+  // Keep vehicle-level scope: one request can contain multiple truck types.
+  const scopedRows = useMemo(() => {
+    const requestIds = new Set<string>();
+    const vehicleKeys = new Set<string>();
+    const unitKeys = new Set<string>();
+    const key = (requestId: FleetId, value: FleetId) =>
+      JSON.stringify([String(requestId ?? "").trim(), String(value ?? "").trim()]);
+    for (const request of visibleRequests) {
+      const id = String(request.id ?? "").trim();
+      if (!id) continue;
+      const units = String(request.unit_code ?? "").trim();
+      const records = asRecords(request.vehicle_warehouse_info ?? request.vehicle_info);
+      const vehicleNo = request.vehicle_no;
+      let hasVehicle = false;
+      if (units) { unitKeys.add(key(id, units)); hasVehicle = true; }
+      if (vehicleNo != null && String(vehicleNo).trim()) {
+        vehicleKeys.add(key(id, vehicleNo)); hasVehicle = true;
+      }
+      for (const record of records) {
+        if (record.vehicle_no != null && String(record.vehicle_no).trim()) {
+          vehicleKeys.add(key(id, record.vehicle_no)); hasVehicle = true;
+        }
+      }
+      // Grouped request data without vehicle identifiers represents the full request.
+      if (!hasVehicle) requestIds.add(id);
+    }
+    return rows.filter(row => requestIds.has(String(row.request_id).trim()) ||
+      vehicleKeys.has(key(row.request_id, row.vehicle_no)) ||
+      (Boolean(row.unit_code) && unitKeys.has(key(row.request_id, row.unit_code ?? null))));
+  }, [rows, visibleRequests]);
+  const dcOptions = useMemo(() => [...new Set(scopedRows.map(row => row.dc_code).filter(Boolean))].sort(), [scopedRows]);
+  const fleetOptions = useMemo(() => [...new Set(scopedRows.map(row => row.fleet_type).filter(Boolean))].sort(), [scopedRows]);
+  const scopeLoading = loading || parentLoading;
+  const scopeError = parentError || error;
+
+  const filtered = useMemo(() => {
+
+    const keyword = search.trim().toLowerCase();
+
+    return scopedRows.filter((row) => (!dc || row.dc_code === dc) && (!fleet || row.fleet_type === fleet) &&
+
+      (!keyword || [row.running_doc, row.request_id, row.unit_code, row.license, row.truck_type, row.process, row.dc_code]
+
+        .some((value) => String(value ?? "").toLowerCase().includes(keyword))));
+
+  }, [scopedRows, dc, fleet, search]);
+
+  const vehicles = new Set(filtered.map((row) => `${row.request_id}:${row.vehicle_no}`)).size;
+
+  const requests = new Set(filtered.map((row) => String(row.request_id))).size;
+
+  const longest = filtered.reduce((max, row) => Math.max(max, row.overdue_days), 0);
+
+  const headers = ["DC Code", "Fleet Type", "Vehicle Type", "Current Status", "Days in Status", "SLA Limit", "Action Required", "Detail"];
+
+  const controlClass = "sla-control";
+
+  return (
+
+    <section className="sla-overdue-embed" aria-label="ติดตามรายการเกิน SLA">
+
+      <div className="sla-shell">
+
+        <header className="sla-heading">
+
+          <div>
+
+            <p className="sla-eyebrow">SLA MONITOR</p>
+
+            <h3 className="sla-title">ติดตามรายการเกิน SLA</h3>
+
+            <p className="sla-description">แสดงรายการตามตัวกรองด้านบน · เรียงวันที่เกินมากที่สุดก่อน</p>
+
+          </div>
+
+          <button type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={scopeLoading}
+
+            className="sla-refresh">
+
+            <SlaInlineIcon type="refresh" size={16} className={scopeLoading ? "sla-spin" : ""} />{scopeLoading ? "กำลังโหลด" : "รีเฟรชข้อมูล"}
+
+          </button>
+
+        </header>
+
+        <div className="sla-workspace">
+        <aside className="sla-kpis">
+
+          {[{label: "คำขอรถที่เกิน SLA", value: `${requests} คำขอ`, icon: <SlaInlineIcon type="alert" size={20} />, color: "rose"},
+            {label: "เกิน SLA มากที่สุด", value: `${longest} วัน`, icon: <SlaInlineIcon type="clock" size={20} />, color: "blue"}]
+            .map((card) => <div key={card.label} className="sla-kpi">
+
+              <span className={`sla-kpi-icon ${card.color}`}>{card.icon}</span>
+
+              <div><p className="sla-kpi-label">{card.label}</p><p className="sla-kpi-value">{scopeLoading || scopeError ? "—" : card.value}</p></div>
+
+            </div>)}
+
+        </aside>
+
+        <section className="sla-table-section">
+
+          <div className="sla-toolbar">
+
+            <label className="sla-search"><SlaInlineIcon type="search" size={16} className="sla-search-icon" />
+
+              <input aria-label="ค้นหารายการ" placeholder="ค้นหาเลขคำขอ ทะเบียน ประเภทรถ หรือขั้นตอน" value={search} onChange={(event) => setSearch(event.target.value)} className={`${controlClass}`} />
+
+            </label>
+
+            <select aria-label="กรอง DC" value={dc} onChange={(event) => setDc(event.target.value)} className={controlClass}><option value="">ทุก DC</option>{dcOptions.map((value) => <option key={value}>{value}</option>)}</select>
+
+            <select aria-label="กรอง Fleet Type" value={fleet} onChange={(event) => setFleet(event.target.value)} className={controlClass}><option value="">ทุก Fleet Type</option>{fleetOptions.map((value) => <option key={value}>{value}</option>)}</select>
+
+            {(search || dc || fleet) && <button type="button" onClick={() => {setSearch("");setDc("");setFleet("");}} className="sla-clear">ล้างตัวกรอง</button>}
+
+          </div>
+
+          {scopeError && <div role="alert" className="sla-error"><SlaInlineIcon type="alert" size={20} className="sla-alert-icon" /><div><p className="sla-strong">โหลดข้อมูลไม่สำเร็จ</p><p className="sla-error-message">{scopeError}</p><p className="sla-error-api">API: {DASHBOARD_API_URL}</p></div></div>}
+
+          <div className="sla-table-scroll">
+
+            <table aria-busy={scopeLoading} className="sla-table">
+
+              <thead className="sla-table-head"><tr>{headers.map((label) => <th key={label} scope="col" className="sla-table-th">{label}</th>)}</tr></thead>
+
+              <tbody className="sla-table-body">
+
+                {!scopeLoading && !scopeError && filtered.map((row) => <tr key={`${row.request_id}-${row.vehicle_no}-${row.flow_id}`} className="sla-table-row">
+
+                  <td className="sla-strong">{row.dc_code || "—"}<p className="sla-secondary">{row.running_doc}</p><p className="sla-id">ID {row.request_id}</p></td>
+
+                  <td className="sla-cell">{row.fleet_type || "—"}</td>
+
+                  <td className="sla-strong">{row.truck_type || "—"}<p className="sla-secondary">{row.license || "—"} · คันที่ {row.vehicle_no}</p></td>
+
+                  <td className="sla-strong">{row.process_level}. {row.process}<p className="sla-secondary">เริ่ม {formatDate(row.str_date)}</p></td>
+
+                  <td className="sla-days"><span className="sla-days-value">{row.days_in_status} วัน<SlaInlineIcon type="alert" size={16} /></span><p className="sla-overdue-days">เกิน SLA {row.overdue_days} วัน</p></td>
+
+                  <td className="sla-limit">{row.sla_limit} วัน</td>
+
+                  <td className="sla-action">{row.detail?.trim() || row.action_required?.trim() || "—"}</td>
+                  <td className="sla-detail-cell">
+                    <button type="button" className="sla-detail-button" onClick={() => handleOpenDetail(row)} aria-label={`เปิดรายละเอียดคำขอ ${row.running_doc || row.request_id} คันที่ ${row.vehicle_no}`}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12s3-7 9-7 9 7 9 7-3 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+                      ดู Flow
+                    </button>
+                  </td>
+
+                </tr>)}
+
+                {(scopeLoading || scopeError || filtered.length === 0) && <tr><td colSpan={8} className="sla-state"><span className="sla-state-message">{scopeLoading ? "กำลังโหลดรายการเกิน SLA จากทุกคำขอ..." : scopeError ? "ยังไม่สามารถแสดงข้อมูลได้ กรุณาตรวจสอบข้อความด้านบน" : scopedRows.length ? "ไม่พบรายการตามตัวกรอง" : "ไม่พบรายการที่เกิน SLA ตามตัวกรองด้านบน"}</span></td></tr>}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+          <div className="sla-table-footer"><p>แสดง {filtered.length} ขั้นตอน · {vehicles} คัน{search || dc || fleet ? " ตามตัวกรอง" : " ตามตัวกรองด้านบน"}</p><p>ข้อมูลวันที่ {formatDate(asOf)} · นับวันเริ่มต้นเป็นวันที่ 1</p></div>
+
+        </section>
+        </div>
+      </div>
+      <FlowAssessmentModal
+        open={openDetailModal}
+        requestId={selectedRequest?.request_id ?? selectedRequest?.id ?? null}
+        vehicleNo={selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null}
+        onClose={handleCloseDetail}
+      />
+    </section>
+
+  );
+
+}
+
+function FleetFilterGlyph({ kind }: { kind: string }) {
+  const paths: Record<string, string> = {
+    sliders: "M4 6h7 M15 6h5 M4 12h3 M11 12h9 M4 18h11 M19 18h1 M11 3v6 M7 9v6 M15 15v6",
+    calendar: "M5 4h14a1 1 0 0 1 1 1v15H4V5a1 1 0 0 1 1-1z M8 2v5 M16 2v5 M4 9h16 M8 13h1 M12 13h1 M16 13h1 M8 17h1 M12 17h1",
+    filter: "M3 4h18l-7 8v7l-4-2v-5L3 4z",
+    warehouse: "M3 21V7l9-4 9 4v14 M7 21V11h10v10 M7 15h10 M7 18h10",
+    user: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2 M12 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8",
+    truck: "M2 6h12v11H2z M14 10h4l4 4v3h-8 M5 17v1a2 2 0 0 0 4 0v-1 M16 17v1a2 2 0 0 0 4 0v-1",
+    clear: "M3 14 12 4l9 8-8 9H9l-6-7z M7 10l10 9 M13 21h8",
+  };
+  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]} /></svg>;
 }

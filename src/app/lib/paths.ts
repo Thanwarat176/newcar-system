@@ -6,7 +6,7 @@ export const PATHS = {
   },
   main: {
     home: "/main/home",
-
+    dashboard: "/main/dashboard",
     addFleet: "/main/addFleet",
     gm: "/main/gm",
     waitingFleet: "/main/waitingFleet",

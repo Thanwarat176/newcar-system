@@ -294,8 +294,7 @@ function getStatusText(status?: string): string {
     [
       "pending_fbp",
       "fbp_pending",
-      "waiting_fbp",
-      "wait_fbp",
+      "partial_approved",
     ].includes(value)
   ) {
     return "รอทีม FBP พิจารณา";

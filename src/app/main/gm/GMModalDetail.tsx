@@ -556,7 +556,7 @@ export default function GMModalDetail({
                     <label className="block">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
                         <span className="text-xs font-medium text-slate-600">
-                          หมายเหตุ / เหตุผล
+                          หมายเหตุ
                         </span>
                         <span className="text-xs font-semibold text-slate-500">
                           ไม่บังคับสำหรับการอนุมัติ

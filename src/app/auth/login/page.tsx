@@ -306,7 +306,7 @@ export default function LoginPage() {
          * User อื่นไปหน้าเพิ่มกองรถ
          */
         router.push(
-          PATHS.main.addFleet
+          PATHS.main.dashboard
         );
       }, 1000);
     } catch (error) {
