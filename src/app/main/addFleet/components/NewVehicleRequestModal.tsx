@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Truck, X, Save } from "lucide-react";
 import { Calendar } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
@@ -1606,13 +1607,24 @@ export default function NewVehicleRequestModal({
 
     return (
         <>
+            <style>{`
+              .new-vehicle-modal { font-family: inherit; font-size: 12px; line-height: 1.55; }
+              .new-vehicle-modal :is(button,input,textarea,select) { font-family: inherit; }
+              .new-vehicle-modal :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select) {
+                font-size: 12px; transition: border-color .15s, box-shadow .15s;
+              }
+              .new-vehicle-modal :is(input,textarea,select):focus { border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe80; }
+              .new-vehicle-modal :is(button,input,textarea,select):focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+              .new-vehicle-modal { scrollbar-color: #cbd5e1 #f8fafc; }
+              @media (prefers-reduced-motion: reduce) { .new-vehicle-modal * { transition: none !important; } }
+            `}</style>
             {error && (
                 <div
                     className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center px-4"
                     role="alert"
                     aria-live="assertive"
                 >
-                    <div className="flex w-full max-w-md items-start rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-2xl sm:items-center">
+                    <div className="flex w-full max-w-md items-start rounded-xl border border-red-200 bg-red-50 p-4 text-[12px] text-red-700 shadow-2xl sm:items-center">
                         <svg
                             className="me-2 mt-0.5 h-5 w-5 shrink-0 sm:mt-0"
                             aria-hidden="true"
@@ -1631,40 +1643,43 @@ export default function NewVehicleRequestModal({
                             />
                         </svg>
                         <p>
-                            <span className="me-1 font-bold">แจ้งเตือน!</span>
+                            <span className="me-1 font-semibold">แจ้งเตือน!</span>
                             {error}
                         </p>
                     </div>
                 </div>
             )}
 
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 text-black">
-            <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
-                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
-                    <div>
-                        <h2 className="text-base font-bold text-slate-800">
+            <div className="new-vehicle-modal fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 text-slate-800">
+            <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-blue-50/70 via-white to-white px-5 py-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-blue-100"><Truck size={18} aria-hidden="true" /></span>
+                        <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-slate-800">
                             คำขอออกรถใหม่
                         </h2>
-                        <p className="mt-0.5 text-xs text-slate-500">
+                        <p className="mt-0.5 text-[11px] text-slate-500">
                             เลขที่เอกสาร: {runningDoc}
                         </p>
+                        </div>
                     </div>
 
                     <button
                         type="button"
                         onClick={handleClose}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                     >
-                        ปิด
+                        <X size={16} aria-hidden="true" /><span className="sr-only">ปิดหน้าต่าง</span>
                     </button>
                 </div>
 
                 <form onSubmit={handleSubmit}>
                     <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
-                        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs md:grid-cols-4">
+                        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-[11px] md:grid-cols-4">
                             {canSelectWarehouse && (
                                 <div className="md:col-span-4" ref={warehouseDropdownRef}>
-                                    <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                    <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                         {isCenterMode
                                             ? "เลือกคลังปลายทาง (DC_NAME)"
                                             : "เลือก Warehouse / DC"}{" "}
@@ -1702,14 +1717,14 @@ export default function NewVehicleRequestModal({
                                                         ? "พิมพ์หรือเลือกชื่อคลังจาก DC_NAME..."
                                                         : "พิมพ์รหัส DC หรือชื่อ Warehouse..."
                                             }
-                                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
+                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 pr-10 text-[12px] font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                                         />
 
                                         <button
                                             type="button"
                                             onClick={() => setShowWarehouseDropdown((prev) => !prev)}
                                             disabled={loadingWarehouses}
-                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-bold text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-400 hover:bg-slate-100 disabled:opacity-50"
                                         >
                                             ▼
                                         </button>
@@ -1744,14 +1759,14 @@ export default function NewVehicleRequestModal({
                                                                 key={code}
                                                                 type="button"
                                                                 onClick={() => handleSelectWarehouse(item)}
-                                                                className={`block w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${selectedWarehouseCode === code
-                                                                    ? "bg-blue-50 font-bold text-blue-700"
+                                                                className={`block w-full px-3 py-2 text-left text-[12px] transition hover:bg-blue-50 ${selectedWarehouseCode === code
+                                                                    ? "bg-blue-50 font-semibold text-blue-700"
                                                                     : "text-slate-700"
                                                                     }`}
                                                             >
-                                                                <div className="font-bold">{name || code}</div>
+                                                                <div className="font-semibold">{name || code}</div>
 
-                                                                <div className="mt-0.5 text-xs font-medium text-slate-500">
+                                                                <div className="mt-0.5 text-[11px] font-medium text-slate-500">
                                                                     DC Code: {code || "-"}
                                                                     {type ? ` • ${type}` : ""}
                                                                 </div>
@@ -1759,7 +1774,7 @@ export default function NewVehicleRequestModal({
                                                         );
                                                     })
                                                 ) : (
-                                                    <div className="px-3 py-3 text-sm font-medium text-slate-400">
+                                                    <div className="px-3 py-3 text-[12px] font-medium text-slate-400">
                                                         ไม่พบ Warehouse / DC ที่ค้นหา
                                                     </div>
                                                 )}
@@ -1785,24 +1800,24 @@ export default function NewVehicleRequestModal({
 
                             <div>
                                 <p className="font-semibold text-slate-400">วันที่สร้างคำขอ</p>
-                                <p className="mt-1 font-bold text-slate-700">
+                                <p className="mt-1 font-semibold text-slate-700">
                                     {formatShowDate(today)}
                                 </p>
                             </div>
 
                             <div>
                                 <p className="font-semibold text-slate-400">DC Code</p>
-                                <p className="mt-1 font-bold text-slate-700">{dcCode || "-"}</p>
+                                <p className="mt-1 font-semibold text-slate-700">{dcCode || "-"}</p>
                             </div>
 
                             <div>
                                 <p className="font-semibold text-slate-400">DC Type</p>
-                                <p className="mt-1 font-bold text-slate-700">{dcType || "-"}</p>
+                                <p className="mt-1 font-semibold text-slate-700">{dcType || "-"}</p>
                             </div>
 
                             <div>
                                 <p className="font-semibold text-slate-400">ผู้ขอ</p>
-                                <p className="mt-1 font-bold text-slate-700">
+                                <p className="mt-1 font-semibold text-slate-700">
                                     {requestBy || "-"}
                                 </p>
                             </div>
@@ -1810,7 +1825,7 @@ export default function NewVehicleRequestModal({
 
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     ประเภทคำขอ <span className="text-red-500">*</span>
                                 </label>
 
@@ -1819,7 +1834,7 @@ export default function NewVehicleRequestModal({
                                     value={formData.fleet_type}
                                     onChange={handleChange}
                                     disabled={loadingMasterTypes}
-                                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-100"
+                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                                 >
                                     <option value="">
                                         {loadingMasterTypes
@@ -1836,7 +1851,7 @@ export default function NewVehicleRequestModal({
                             </div>
 
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     ประเภทกองรถ (Fleet Type){" "}
                                     <span className="text-red-500">*</span>
                                 </label>
@@ -1845,7 +1860,7 @@ export default function NewVehicleRequestModal({
                                     value={formData.fleet_truck_type}
                                     onChange={handleChange}
                                     disabled={!dcCode || loadingTrucks}
-                                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-slate-100"
+                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-blue-500 disabled:bg-slate-100"
                                 >
                                     <option value="">
                                         {loadingTrucks
@@ -1871,7 +1886,7 @@ export default function NewVehicleRequestModal({
                             </div>
 
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     จำนวนรถที่ขอ (คัน) <span className="text-red-500">*</span>
                                 </label>
                                 <input
@@ -1880,13 +1895,13 @@ export default function NewVehicleRequestModal({
                                     value={formData.qty}
                                     min={1}
                                     onChange={handleChange}
-                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-[12px] outline-none focus:border-blue-500"
                                     placeholder="0"
                                 />
                             </div>
 
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     วันที่ใช้งาน <span className="text-red-500">*</span>
                                 </label>
 
@@ -1895,7 +1910,7 @@ export default function NewVehicleRequestModal({
                                     type="button"
                                     onClick={handleToggleCalendar}
                                     disabled={!formData.fleet_type}
-                                    className={`w-full rounded-lg border px-3 py-2 text-left text-sm outline-none transition ${formData.fleet_type
+                                    className={`w-full rounded-xl border px-3 py-2 text-left text-[12px] outline-none transition ${formData.fleet_type
                                         ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:border-blue-500"
                                         : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
                                         }`}
@@ -1913,7 +1928,7 @@ export default function NewVehicleRequestModal({
                                         }}
                                     >
                                         <div className="mb-3 rounded-xl bg-gradient-to-r from-indigo-50 via-blue-50 to-sky-50 px-3 py-2">
-                                            <p className="text-xs font-bold text-indigo-700">
+                                            <p className="text-[11px] font-semibold text-indigo-700">
                                                 เลือกวันที่ใช้งาน
                                             </p>
                                             <p className="mt-0.5 text-[11px] font-medium text-slate-500">
@@ -1947,14 +1962,14 @@ export default function NewVehicleRequestModal({
                                         />
 
                                         <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-                                            <p className="text-xs font-medium text-rose-600">
+                                            <p className="text-[11px] font-medium text-rose-600">
                                                 • กรุณาเลือกวันที่ตามเงื่อนไข
                                             </p>
 
                                             <button
                                                 type="button"
                                                 onClick={() => setOpenCalendar(false)}
-                                                className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm ring-1 ring-inset ring-indigo-600/20 transition hover:bg-indigo-700 active:scale-[0.98]"
+                                                className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2 text-[11px] font-semibold text-white shadow-sm ring-1 ring-inset ring-indigo-600/20 transition hover:bg-indigo-700 active:scale-[0.98]"
                                             >
                                                 Done
                                             </button>
@@ -2037,12 +2052,12 @@ export default function NewVehicleRequestModal({
                                     </div>
                                 )}
 
-                                <div className="mt-2 mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
-                                    <span className="font-bold">เงื่อนไขวันที่ใช้งาน:</span>{" "}
+                                <div className="mt-2 mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
+                                    <span className="font-semibold">เงื่อนไขวันที่ใช้งาน:</span>{" "}
                                     รถออกใหม่/รถทดแทน (รถทดแทน 7 ปี, รถหมดอายุ และรถทดแทนรถลาออก)
                                     ต้องรอทำการอย่างน้อย 126 วัน • รถเสริมต้องรอทำการอย่างน้อย 30 วัน
                                     {formData.fleet_type && (
-                                        <span className="ml-1 font-bold">
+                                        <span className="ml-1 font-semibold">
                                             เลือกได้ตั้งแต่ {formatShowDate(minUsageDate)} เป็นต้นไป
                                         </span>
                                     )}
@@ -2050,7 +2065,7 @@ export default function NewVehicleRequestModal({
                             </div>
 
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     ปริมาณงาน (Workload - ชิ้น)
                                     <span className="text-red-500">*</span>
                                 </label>
@@ -2062,7 +2077,7 @@ export default function NewVehicleRequestModal({
                                     onChange={handleChange}
                                     disabled={isCenterZeroFields}
                                     required={!isCenterZeroFields}
-                                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isCenterZeroFields
+                                    className={`w-full rounded-xl border px-3 py-2 text-[12px] outline-none ${isCenterZeroFields
                                         ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
                                         : "border-slate-300 focus:border-blue-500"
                                         }`}
@@ -2071,7 +2086,7 @@ export default function NewVehicleRequestModal({
                             </div>
 
                             <div>
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     จำนวนรอบรถ (Truck Turn)<span className="text-red-500">*</span>
                                 </label>
                                 <input
@@ -2083,7 +2098,7 @@ export default function NewVehicleRequestModal({
                                     onChange={handleChange}
                                     disabled={isCenterZeroFields}
                                     required={!isCenterZeroFields}
-                                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isCenterZeroFields
+                                    className={`w-full rounded-xl border px-3 py-2 text-[12px] outline-none ${isCenterZeroFields
                                         ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
                                         : "border-slate-300 focus:border-blue-500"
                                         }`}
@@ -2095,10 +2110,10 @@ export default function NewVehicleRequestModal({
                                 <div className="md:col-span-2 lg:col-span-3">
                                     <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
                                         <div className="mb-3">
-                                            <p className="text-xs font-bold text-orange-700">
+                                            <p className="text-[11px] font-semibold text-orange-700">
                                                 ป้ายทะเบียนรถที่ถูกทดแทน
                                             </p>
-                                            <p className="mt-0.5 text-xs text-orange-600">
+                                            <p className="mt-0.5 text-[11px] text-orange-600">
                                                 กรุณาเลือกให้ครบตามจำนวน {formData.qty} คัน
                                             </p>
                                             <p className="mt-0.5 text-[11px] text-orange-500">
@@ -2129,17 +2144,17 @@ export default function NewVehicleRequestModal({
                                                     >
                                                         <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[120px_1.2fr_1fr_120px]">
                                                             <div>
-                                                                <p className="text-[11px] font-bold text-slate-400">
+                                                                <p className="text-[11px] font-semibold text-slate-400">
                                                                     คันที่
                                                                 </p>
-                                                                <p className="text-sm font-bold text-slate-700">
+                                                                <p className="text-[12px] font-semibold text-slate-700">
                                                                     {formData.fleet_type} {index + 1}
                                                                     <span className="text-red-500"> *</span>
                                                                 </p>
                                                             </div>
 
                                                             <div>
-                                                                <label className="mb-1 block text-[11px] font-bold text-slate-500">
+                                                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                                                     ทะเบียน / ชื่อบริษัท
                                                                 </label>
 
@@ -2152,7 +2167,7 @@ export default function NewVehicleRequestModal({
                                                                             e.target.value
                                                                         )
                                                                     }
-                                                                    className={`w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold outline-none transition ${isAvailable
+                                                                    className={`w-full rounded-xl border bg-white px-3 py-2 text-[12px] font-semibold outline-none transition ${isAvailable
                                                                         ? "border-emerald-300 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50"
                                                                         : isError
                                                                             ? "border-red-300 focus:border-red-500 focus:ring-4 focus:ring-red-50"
@@ -2192,49 +2207,49 @@ export default function NewVehicleRequestModal({
                                                             </div>
 
                                                             <div>
-                                                                <p className="mb-1 text-[11px] font-bold text-slate-500">
+                                                                <p className="mb-1 text-[11px] font-semibold text-slate-500">
                                                                     ข้อมูลรถ
                                                                 </p>
 
                                                                 {truckDetail ? (
-                                                                    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                                                                        <p className="text-sm font-bold text-slate-800">
+                                                                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                                                                        <p className="text-[12px] font-semibold text-slate-800">
                                                                             {formatTruckReplaceTopLine(truckDetail)}
                                                                         </p>
-                                                                        <p className="mt-1 text-xs text-slate-500">
+                                                                        <p className="mt-1 text-[11px] text-slate-500">
                                                                             {formatTruckReplaceBottomLine(truckDetail)}
                                                                         </p>
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                                                                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-400">
                                                                         ยังไม่ได้เลือกข้อมูลรถ
                                                                     </div>
                                                                 )}
                                                             </div>
 
                                                             <div className="lg:text-right">
-                                                                <p className="mb-1 text-[11px] font-bold text-slate-500">
+                                                                <p className="mb-1 text-[11px] font-semibold text-slate-500">
                                                                     สถานะ
                                                                 </p>
 
                                                                 {isChecking ? (
-                                                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                                                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">
                                                                         กำลังตรวจสอบ...
                                                                     </span>
                                                                 ) : isAvailable ? (
-                                                                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">
+                                                                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
                                                                         ✅ ใช้งานได้
                                                                     </span>
                                                                 ) : isError ? (
-                                                                    <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600 ring-1 ring-red-200">
+                                                                    <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-[11px] font-semibold text-red-600 ring-1 ring-red-200">
                                                                         ❌ ทะเบียนซ้ำ
                                                                     </span>
                                                                 ) : license ? (
-                                                                    <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-600 ring-1 ring-amber-200">
+                                                                    <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-600 ring-1 ring-amber-200">
                                                                         รอตรวจสอบ
                                                                     </span>
                                                                 ) : (
-                                                                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+                                                                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-500">
                                                                         รอเลือก
                                                                     </span>
                                                                 )}
@@ -2260,7 +2275,7 @@ export default function NewVehicleRequestModal({
                             )}
 
                             <div className="md:col-span-2 lg:col-span-3">
-                                <label className="mb-1 block text-xs font-semibold text-slate-500">
+                                <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     หมายเหตุ
                                 </label>
                                 <textarea
@@ -2268,19 +2283,19 @@ export default function NewVehicleRequestModal({
                                     value={formData.remark}
                                     onChange={handleChange}
                                     rows={4}
-                                    className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-[12px] outline-none focus:border-blue-500"
                                     placeholder="ระบุหมายเหตุเพิ่มเติม"
                                 />
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+                    <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
                         <button
                             type="button"
                             onClick={handleClose}
                             disabled={saving}
-                            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                         >
                             ยกเลิก
                         </button>
@@ -2293,8 +2308,9 @@ export default function NewVehicleRequestModal({
                                     ? "ทะเบียนต้องขึ้นสถานะใช้งานได้ครบทุกคันก่อนบันทึก"
                                     : undefined
                             }
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-[12px] font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                            <Save size={14} aria-hidden="true" />
                             {saving
                                 ? "กำลังบันทึก..."
                                 : checkingLicenseIndex !== null

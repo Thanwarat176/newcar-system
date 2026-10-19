@@ -1,11 +1,15 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
+  ClipboardList,
+  CircleCheck,
+  CircleX,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -156,6 +160,8 @@ export default function TrackFleetPage() {
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(
     null
   );
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPortalTarget(document.body); }, []);
   const [openDetailModal, setOpenDetailModal] = useState(false);
 
   const [searchText, setSearchText] = useState("");
@@ -925,19 +931,19 @@ export default function TrackFleetPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
-      <main className="mx-auto w-full max-w-[1540px] px-3 py-4 sm:px-4 lg:px-5">
-        <div className="mb-4 flex flex-col gap-3 overflow-hidden rounded-3xl border border-white/70 bg-white/90 px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="min-h-screen bg-slate-50 text-slate-800">
+      <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
+        <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)]" />
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                Fleet Assessment
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                Fleet Management
               </p>
             </div>
 
-            <h1 className="mt-1.5 flex items-center gap-2 text-lg font-black text-slate-900 sm:text-xl">
-              <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
+            <h1 className="mt-1.5 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <Truck size={18} className="shrink-0" />
               </span>
               <span className="truncate">ติดตามกองรถออกใหม่/ทดแทน</span>
@@ -972,7 +978,7 @@ export default function TrackFleetPage() {
             <button
               type="button"
               onClick={() => setOpenExportModal(true)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-900 via-accent-900 to-green-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
             >
               <Download size={16} />
               ดึงรายงาน
@@ -982,7 +988,7 @@ export default function TrackFleetPage() {
               type="button"
               onClick={fetchRequests}
               disabled={loading}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className={loading ? "animate-spin" : ""}>↻</span>
               {loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}
@@ -996,7 +1002,7 @@ export default function TrackFleetPage() {
           </div>
         )}
 
-        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           {(
             [
               {
@@ -1015,6 +1021,7 @@ export default function TrackFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-slate-400",
                 shortLabel: "ALL",
+                backgroundIcon: ClipboardList,
               },
               {
                 key: "progress",
@@ -1023,15 +1030,16 @@ export default function TrackFleetPage() {
                 itemCount: summary.progress.items,
                 sub: "จำนวนรถที่รอการพิจารณา",
                 activeClass:
-                  "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
+                  "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
                 inactiveClass:
-                  "bg-gradient-to-br from-white to-amber-50 text-amber-800 ring-amber-100 hover:from-amber-50 hover:to-orange-50",
-                iconClass: "bg-amber-100 text-amber-700",
+                  "bg-gradient-to-br from-white to-blue-50 text-blue-800 ring-blue-100 hover:from-blue-50 hover:to-sky-50",
+                iconClass: "bg-blue-100 text-blue-700",
                 activeIconClass: "bg-white/20 text-white",
-                countClass: "text-amber-900",
+                countClass: "text-blue-900",
                 activeCountClass: "text-white",
-                dotClass: "bg-amber-500",
+                dotClass: "bg-blue-500",
                 shortLabel: "CT",
+                backgroundIcon: Truck,
               },
               {
                 key: "cancel",
@@ -1049,6 +1057,7 @@ export default function TrackFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-rose-500",
                 shortLabel: "RJ",
+                backgroundIcon: CircleX,
               },
               {
                 key: "success",
@@ -1066,6 +1075,7 @@ export default function TrackFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-emerald-500",
                 shortLabel: "OK",
+                backgroundIcon: CircleCheck,
               },
             ] as const
           ).map(
@@ -1083,21 +1093,24 @@ export default function TrackFleetPage() {
               activeCountClass,
               dotClass,
               shortLabel,
+              backgroundIcon: BackgroundIcon,
             }) => {
               const isActive = statusFilter === key;
 
               return (
                 <button
                   key={key}
+                  aria-pressed={isActive}
                   type="button"
                   onClick={() => {
                     setStatusFilter(key);
                     setCurrentProcessFilter("all");
                     setCurrentPage(1);
                   }}
-                  className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
+                  className={`group relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition duration-200 hover:shadow-md ${isActive ? activeClass : inactiveClass
                     }`}
                 >
+                  <BackgroundIcon aria-hidden="true" size={88} strokeWidth={1.2} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive ? "text-white opacity-[0.12]" : "opacity-[0.07]"}`} />
                   <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
                   <div className="pointer-events-none absolute -bottom-10 left-6 h-20 w-20 rounded-full bg-white/10 blur-2xl" />
 
@@ -1109,7 +1122,7 @@ export default function TrackFleetPage() {
                             }`}
                         />
                         <p
-                          className={`truncate text-[11px] font-black ${isActive ? "text-white/90" : ""
+                          className={`truncate text-[11px] font-semibold ${isActive ? "text-white/90" : ""
                             }`}
                         >
                           {label}
@@ -1117,7 +1130,7 @@ export default function TrackFleetPage() {
                       </div>
 
                       <p
-                        className={`mt-1 truncate text-[10px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
+                        className={`mt-1 truncate text-[11px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
                           }`}
                       >
                         {sub}
@@ -1125,26 +1138,26 @@ export default function TrackFleetPage() {
                     </div>
 
                     <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-black shadow-sm ${isActive ? activeIconClass : iconClass
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-semibold shadow-sm ${isActive ? activeIconClass : iconClass
                         }`}
                     >
                       {shortLabel}
                     </div>
                   </div>
 
-                  <div className="relative mt-4 flex items-end justify-between">
+                  <div className="relative mt-3 flex items-end justify-between">
                     <p
-                      className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
+                      className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
                       {formatNumber(count)}
-                      <span className="ml-1 text-sm font-black opacity-60">
+                      <span className="ml-1 text-xs font-semibold opacity-60">
                         คัน
                       </span>
                     </p>
 
                     <span
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-black ${isActive
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive
                         ? "bg-white/15 text-white"
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
@@ -1158,31 +1171,31 @@ export default function TrackFleetPage() {
           )}
         </div>
 
-        <div className="relative z-30 mb-4 w-full min-w-0 overflow-visible rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-50/90 to-white px-3 py-4 shadow-[0_10px_30px_rgba(15,23,42,0.07)] sm:px-4 lg:px-5">
+        <div className="relative z-30 mb-4 w-full min-w-0 overflow-visible rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <SlidersHorizontal size={16} />
               </span>
 
               <div className="min-w-0">
-                <p className="text-sm font-black text-slate-800">
+                <p className="text-xs font-semibold text-slate-800">
                   ค้นหาและตัวกรอง
                 </p>
-                <p className="mt-0.5 text-[10px] font-medium leading-relaxed text-slate-400 sm:truncate">
+                <p className="mt-0.5 text-[11px] font-medium leading-relaxed text-slate-400 sm:truncate">
                   เลือกเงื่อนไขเพื่อค้นหารายการติดตามกองรถออกใหม่/ทดแทน
                 </p>
               </div>
             </div>
 
-            <span className="w-fit shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
+            <span className="w-fit shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 shadow-sm ring-1 ring-slate-100">
               พบ {formatNumber(pagination.total_vehicles)} คัน
             </span>
           </div>
 
           <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12">
             <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 ค้นหา
               </label>
 
@@ -1199,7 +1212,7 @@ export default function TrackFleetPage() {
                     setCurrentPage(1);
                   }}
                   placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..."
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
 
                 {searchText && (
@@ -1218,7 +1231,7 @@ export default function TrackFleetPage() {
             </div>
 
             <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 ข้อมูลรถหลายรายการ
               </label>
 
@@ -1281,13 +1294,13 @@ export default function TrackFleetPage() {
                 )}
               </div>
 
-              <p className="mt-1 text-[10px] text-slate-400">
+              <p className="mt-1 text-[11px] text-slate-400">
                 กด Enter หรือลูกน้ำเพื่อเพิ่มรายการ
               </p>
             </div>
 
             <div className="min-w-0 lg:col-span-3 xl:col-span-2">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทคำขอ
               </label>
 
@@ -1302,7 +1315,7 @@ export default function TrackFleetPage() {
                     setFleetTypeFilter(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="all">ทุกประเภทคำขอ</option>
                   {filterOptions.fleet_types.map((fleetType) => (
@@ -1311,14 +1324,14 @@ export default function TrackFleetPage() {
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                   ▼
                 </span>
               </div>
             </div>
 
             <div className="min-w-0 lg:col-span-3 xl:col-span-2">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 ประเภทรถ
               </label>
 
@@ -1336,7 +1349,7 @@ export default function TrackFleetPage() {
                     setCurrentPage(1);
                   }}
                   placeholder="พิมพ์ค้นหาประเภทรถ"
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
                 <datalist id="truck-type-filter-options">
                   {filterOptions.truck_types.map((truckType) => (
@@ -1347,7 +1360,7 @@ export default function TrackFleetPage() {
             </div>
 
             <div className="min-w-0 lg:col-span-3 xl:col-span-2">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 DC Type
               </label>
 
@@ -1363,7 +1376,7 @@ export default function TrackFleetPage() {
                     setDcFilter("all");
                     setCurrentPage(1);
                   }}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="all">ทุก DC Type</option>
                   {filterOptions.dc_types.map((type) => (
@@ -1372,13 +1385,13 @@ export default function TrackFleetPage() {
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                   ▼
                 </span>
               </div>
             </div>
             <div className="min-w-0 lg:col-span-3 xl:col-span-2">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 DC
               </label>
 
@@ -1396,7 +1409,7 @@ export default function TrackFleetPage() {
                     setCurrentPage(1);
                   }}
                   placeholder="พิมพ์ค้นหา DC"
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
                 <datalist id="dc-filter-options">
                   {filterOptions.dc_codes.map((dc) => (
@@ -1407,7 +1420,7 @@ export default function TrackFleetPage() {
             </div>
 
             <div className="min-w-0 md:col-span-2 lg:col-span-6 xl:col-span-4">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 ขั้นตอนปัจจุบัน
               </label>
 
@@ -1434,14 +1447,14 @@ export default function TrackFleetPage() {
                   ))}
                 </select>
 
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                   ▼
                 </span>
               </div>
             </div>
 
             <div className="min-w-0 lg:col-span-4 xl:col-span-3">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                 วันที่ขอ
               </label>
 
@@ -1494,10 +1507,10 @@ export default function TrackFleetPage() {
                 >
                   <div className="flex items-center justify-between bg-blue-50 px-4 py-2.5">
                     <div>
-                      <p className="text-xs font-black text-blue-700">
+                      <p className="text-xs font-semibold text-blue-700">
                         เลือกช่วงวันที่ขอ
                       </p>
-                      <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                      <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                         Start Date – End Date
                       </p>
                     </div>
@@ -1516,7 +1529,7 @@ export default function TrackFleetPage() {
                             },
                           ]);
                         }}
-                        className="rounded-lg bg-white px-2 py-1 text-[10px] font-black text-blue-600 shadow-sm transition hover:bg-blue-100"
+                        className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-blue-600 shadow-sm transition hover:bg-blue-100"
                       >
                         ล้าง
                       </button>
@@ -1562,7 +1575,7 @@ export default function TrackFleetPage() {
                     <button
                       type="button"
                       onClick={() => setShowRequestDatePicker(false)}
-                      className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+                      className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
                     >
                       เสร็จสิ้น
                     </button>
@@ -1607,30 +1620,30 @@ export default function TrackFleetPage() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-sm font-black text-slate-800">{pageTitle}</h2>
-              <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+              <h2 className="text-xs font-semibold text-slate-800">{pageTitle}</h2>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                 แสดง {requests.length} จากทั้งหมด {pagination.total_vehicles} รายการ
               </p>
             </div>
 
-            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-600">
+            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">
               <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
               เลือก “ประเมิน” เพื่อดูรายละเอียด
             </span>
           </div>
 
           <div className="relative">
-            <div className="bg-blue-50/70 px-3 py-1.5 text-[10px] font-bold text-blue-500 sm:hidden">
+            <div className="bg-blue-50/70 px-3 py-1.5 text-[11px] font-bold text-blue-500 sm:hidden">
               เลื่อนซ้าย–ขวาเพื่อดูข้อมูลทั้งหมด →
             </div>
 
-            <div className="max-h-[calc(100vh-430px)] min-h-[450px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
+            <div className="max-h-[70vh] min-h-[360px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
               <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
-                  <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
+                  <tr className="bg-blue-800 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
                     {[
                       "ลำดับ",
                       "เลขที่เอกสาร",
@@ -1715,7 +1728,7 @@ export default function TrackFleetPage() {
                             colSpan={13}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
-                            <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
+                            <div className="inline-flex items-center gap-2 text-[11px] font-semibold text-blue-600">
                               <CalendarDays size={13} className="text-blue-400" />
                               วันที่ขอ: {formatThaiDate(date)}
                               <span className="font-semibold text-slate-400">
@@ -1743,29 +1756,29 @@ export default function TrackFleetPage() {
                               className="group bg-white text-xs transition hover:bg-blue-50/30"
                             >
                               <td className="sticky left-0 z-10 bg-white px-3 py-3 text-center group-hover:bg-blue-50/30">
-                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-black text-slate-500">
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-500">
                                   {(currentPage - 1) * pageSize + index + 1}
                                 </span>
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3">
-                                <p className="font-black text-slate-800">
+                                <p className="font-semibold text-slate-800">
                                   {item.running_doc_vehicle_no ||
                                     `${item.running_doc}_${item.vehicle_no}`}
                                 </p>
-                                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                                <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                                   ขอ: {formatThaiDate(item.request_date || item.date)}
                                 </p>
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3">
-                                <span className="inline-flex rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-black text-blue-600 ring-1 ring-blue-100">
+                                <span className="inline-flex rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-100">
                                   {item.dc_type || "-"}
                                 </span>
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3">
-                                <span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-600 ring-1 ring-emerald-100">
+                                <span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-emerald-100">
                                   {item.dc_code || "-"}
                                 </span>
                               </td>
@@ -1792,42 +1805,42 @@ export default function TrackFleetPage() {
                                 {item.replaced_old_licenses && item.replaced_old_licenses.length > 0 ? (
                                   <ul className="space-y-1">
                                     {item.replaced_old_licenses.map((lic, idx) => (
-                                      <li key={idx} className="text-[10px] text-slate-700 flex items-start gap-1">
+                                      <li key={idx} className="text-[11px] text-slate-700 flex items-start gap-1">
                                         <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400"></span>
                                         <span className="font-bold">{lic}</span>
                                       </li>
                                     ))}
                                   </ul>
                                 ) : (
-                                  <span className="text-[10px] text-slate-400">-</span>
+                                  <span className="text-[11px] text-slate-400">-</span>
                                 )}
                               </td>
 
                               <td className="px-3 py-3">
-                                <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5">
+                                <div className="min-w-[250px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5">
                                   <div className="grid grid-cols-[72px_1fr] gap-x-2">
                                     <span className="font-bold text-slate-400">เลขตัวถัง</span>
-                                    <span className="break-all font-black text-slate-700">
+                                    <span className="break-all font-semibold text-slate-700">
                                       {formatVehicleValue(item.vehicle_info?.car_chassis)}
                                     </span>
 
                                     <span className="font-bold text-slate-400">รุ่นรถ</span>
-                                    <span className="font-black text-slate-700">
+                                    <span className="font-semibold text-slate-700">
                                       {formatVehicleValue(item.vehicle_info?.car_model)}
                                     </span>
 
                                     <span className="font-bold text-slate-400">ยี่ห้อ</span>
-                                    <span className="font-black text-slate-700">
+                                    <span className="font-semibold text-slate-700">
                                       {formatVehicleValue(item.vehicle_info?.car_brand)}
                                     </span>
 
                                     <span className="font-bold text-slate-400">เลขเครื่อง</span>
-                                    <span className="break-all font-black text-slate-700">
+                                    <span className="break-all font-semibold text-slate-700">
                                       {formatVehicleValue(item.vehicle_info?.car_engine)}
                                     </span>
 
                                     <span className="font-bold text-slate-400">ทะเบียน</span>
-                                    <span className="font-black text-slate-700">
+                                    <span className="font-semibold text-slate-700">
                                       {formatVehicleValue(item.vehicle_info?.car_license)}
                                     </span>
                                   </div>
@@ -1835,13 +1848,13 @@ export default function TrackFleetPage() {
                               </td>
 
                               <td className="whitespace-nowrap px-3 py-3">
-                                <p className="font-black text-slate-700">
+                                <p className="font-semibold text-slate-700">
                                   {formatThaiDate(item.usage_date)}
                                 </p>
 
                                 {!isRejected && (
                                   <p
-                                    className={`mt-1 text-[10px] font-black ${getRemainingUsageDaysClass(
+                                    className={`mt-1 text-[11px] font-semibold ${getRemainingUsageDaysClass(
                                       item.usage_date
                                     )}`}
                                   >
@@ -1874,7 +1887,7 @@ export default function TrackFleetPage() {
 
                                         <div className="min-w-0">
                                           <p
-                                            className={`break-words text-[10px] font-black leading-4 ${isRejected
+                                            className={`break-words text-[11px] font-semibold leading-4 ${isRejected
                                               ? "text-red-700"
                                               : "text-blue-700"
                                               }`}
@@ -1885,7 +1898,7 @@ export default function TrackFleetPage() {
                                       </div>
 
                                       <p
-                                        className={`mt-1.5 break-words border-t pt-1.5 text-[9px] font-semibold text-slate-400 ${isRejected
+                                        className={`mt-1.5 break-words border-t pt-1.5 text-[11px] font-semibold text-slate-400 ${isRejected
                                           ? "border-red-200"
                                           : "border-blue-100"
                                           }`}
@@ -1896,7 +1909,7 @@ export default function TrackFleetPage() {
                                   ) : (
                                     <div className="flex items-center gap-2">
                                       <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
-                                      <p className="text-[10px] font-black text-slate-600">
+                                      <p className="text-[11px] font-semibold text-slate-600">
                                         ยังไม่พบข้อมูลรถจาก Flow API
                                       </p>
                                     </div>
@@ -1908,7 +1921,7 @@ export default function TrackFleetPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenDetail(item)}
-                                  className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg"
+                                  className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg"
                                 >
                                   ประเมิน
                                 </button>
@@ -2015,8 +2028,16 @@ export default function TrackFleetPage() {
           </div>
         </div>
 
+        <style jsx>{`
+          main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) {
+            outline: 2px solid #2563eb; outline-offset: 3px;
+          }
+          @media (prefers-reduced-motion: reduce) { main :global(*) { transition: none !important; animation: none !important; } }
+        `}</style>
       </main>
 
+      {portalTarget && createPortal(
+        <div style={{ position: "relative", zIndex: 100000 }}>
       <ExportTrackFleet
         open={openExportModal}
         onClose={() => setOpenExportModal(false)}
@@ -2039,6 +2060,8 @@ export default function TrackFleetPage() {
         vehicleNo={selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null}
         onClose={handleCloseDetail}
       />
+        </div>, portalTarget
+      )}
 
     </div>
   );

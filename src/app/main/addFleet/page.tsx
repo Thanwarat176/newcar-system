@@ -2,12 +2,18 @@
 
 import NewVehicleRequestModal from "./components/NewVehicleRequestModal";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import { th } from "date-fns/locale";
 import {
   ArrowUpDown,
+  ClipboardList,
+  Clock,
+  ShieldCheck,
+  CircleCheck,
+  CircleX,
   ChevronDown,
   ChevronUp,
   CalendarDays,
@@ -245,6 +251,13 @@ export default function AddFleetPage() {
     key: SortKey;
     direction: SortDirection;
   } | null>(null);
+
+  // Mount outside the page layout so ancestor stacking contexts cannot hide modals.
+  const [modalPortalTarget, setModalPortalTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setModalPortalTarget(document.body);
+  }, []);
 
   const [openCreateModal, setOpenCreateModal] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
@@ -2093,20 +2106,20 @@ export default function AddFleetPage() {
   }, [warehouseFilteredRequests, warehouseFilteredProcessRows]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0,#f5f7fb_32%,#f8fafc_100%)]">
+    <div className="min-h-screen bg-slate-50 text-slate-800">
       <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
         {/* ── HEADER ── */}
-        <div className="mb-4 flex flex-col gap-3 overflow-hidden rounded-3xl border border-white/70 bg-white/90 px-4 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)]" />
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                New Vehicle Release
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                Fleet Management
               </p>
             </div>
 
-            <h1 className="mt-1.5 flex items-center gap-2 text-lg font-black text-slate-900 sm:text-xl">
-              <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
+            <h1 className="mt-1.5 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <Truck size={18} className="shrink-0" />
               </span>
               <span className="truncate">รายการคำขอเพิ่มรถ</span>
@@ -2139,7 +2152,7 @@ export default function AddFleetPage() {
             <button
               type="button"
               onClick={() => setOpenExportModal(true)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-900 via-accent-900 to-green-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
             >
               <Download size={16} />
               ดึงรายงาน
@@ -2148,7 +2161,7 @@ export default function AddFleetPage() {
             <button
               type="button"
               onClick={() => setOpenCreateModal(true)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-800 px-4 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               <span className="text-base leading-none">+</span>
               สร้างคำขอ
@@ -2164,7 +2177,7 @@ export default function AddFleetPage() {
         )}
 
         {/* ── STATUS CARDS ── */}
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
           {(
             [
               {
@@ -2183,6 +2196,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-slate-400",
                 shortLabel: "ALL",
+                backgroundIcon: ClipboardList,
               },
               {
                 key: "gm_pending",
@@ -2200,6 +2214,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-purple-500",
                 shortLabel: "GM",
+                backgroundIcon: ShieldCheck,
               },
               {
                 key: "fbp_pending",
@@ -2217,6 +2232,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-amber-500",
                 shortLabel: "CT",
+                backgroundIcon: Clock,
               },
               {
                 key: "process",
@@ -2234,6 +2250,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-blue-500",
                 shortLabel: "PR",
+                backgroundIcon: Truck,
               },
               {
                 key: "completed",
@@ -2251,6 +2268,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-emerald-500",
                 shortLabel: "OK",
+                backgroundIcon: CircleCheck,
               },
               {
                 key: "rejected",
@@ -2268,6 +2286,7 @@ export default function AddFleetPage() {
                 activeCountClass: "text-white",
                 dotClass: "bg-rose-500",
                 shortLabel: "RJ",
+                backgroundIcon: CircleX,
               },
             ] as const
           ).map(
@@ -2285,21 +2304,32 @@ export default function AddFleetPage() {
               activeCountClass,
               dotClass,
               shortLabel,
+              backgroundIcon: BackgroundIcon,
             }) => {
               const isActive = statusFilter === key;
 
               return (
                 <button
                   key={key}
+                  aria-pressed={isActive}
                   type="button"
                   onClick={() => {
                     setStatusFilter(key);
                     setCurrentProcessFilter("all");
                     setCurrentPage(1);
                   }}
-                  className={`group relative overflow-hidden rounded-2xl p-4 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] ring-1 transition duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.14)] ${isActive ? activeClass : inactiveClass
+                  className={`group relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition duration-200 hover:shadow-md ${isActive ? activeClass : inactiveClass
                     }`}
                 >
+                  <BackgroundIcon
+                    aria-hidden="true"
+                    size={88}
+                    strokeWidth={1.2}
+                    className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive
+                        ? "text-white opacity-[0.12]"
+                        : "opacity-[0.07]"
+                      }`}
+                  />
                   <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
                   <div className="pointer-events-none absolute -bottom-10 left-6 h-20 w-20 rounded-full bg-white/10 blur-2xl" />
 
@@ -2312,7 +2342,7 @@ export default function AddFleetPage() {
                         />
 
                         <p
-                          className={`truncate text-[11px] font-black ${isActive ? "text-white/90" : ""
+                          className={`truncate text-[11px] font-semibold ${isActive ? "text-white/90" : ""
                             }`}
                         >
                           {label}
@@ -2320,7 +2350,7 @@ export default function AddFleetPage() {
                       </div>
 
                       <p
-                        className={`mt-1 truncate text-[10px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
+                        className={`mt-1 truncate text-[11px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
                           }`}
                       >
                         {sub}
@@ -2328,24 +2358,24 @@ export default function AddFleetPage() {
                     </div>
 
                     <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-black shadow-sm ${isActive ? activeIconClass : iconClass
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-semibold shadow-sm ${isActive ? activeIconClass : iconClass
                         }`}
                     >
                       {shortLabel}
                     </div>
                   </div>
 
-                  <div className="relative mt-4 flex items-end justify-between">
+                  <div className="relative mt-3 flex items-end justify-between">
                     <p
-                      className={`text-3xl font-black tracking-tight ${isActive ? activeCountClass : countClass
+                      className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
                       {count.toLocaleString("th-TH")}
-                      <span className="ml-1 text-sm font-black opacity-60">คัน</span>
+                      <span className="ml-1 text-xs font-semibold opacity-60">คัน</span>
                     </p>
 
                     <span
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-black ${isActive
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive
                         ? "bg-white/15 text-white"
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
@@ -2361,35 +2391,35 @@ export default function AddFleetPage() {
         </div>
 
         {/* ── FILTER BAR COMPACT ── */}
-        <div className="mb-4 overflow-visible rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.07)]">
+        <div className="mb-4 overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm">
           {/* header */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-gradient-to-r from-slate-50 via-blue-50/50 to-slate-50 px-4 py-2.5">
-            <div className="flex items-center gap-2 text-xs font-black text-slate-700">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/20">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-white px-4 py-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <SlidersHorizontal size={16} />
               </span>
               <div>
-                <p className="text-sm font-black text-slate-800">
+                <p className="text-xs font-semibold text-slate-800">
                   ค้นหาและตัวกรอง
                 </p>
 
-                <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                   เลือกเงื่อนไขเพื่อค้นหารายการคำขอ
                 </p>
               </div>
             </div>
 
-            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm ring-1 ring-slate-100">
+            <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 shadow-sm ring-1 ring-slate-100">
               พบ {formatNumber(filteredVehicleCount)} คัน
             </span>
           </div>
 
           {/* FILTER INPUTS */}
-          <div className="relative z-30 rounded-b-2xl border-t border-slate-100 bg-white p-4 sm:p-5">
-            <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-12">
+          <div className="relative z-30 rounded-b-2xl border-t border-slate-100 bg-white p-3 sm:p-4">
+            <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-12">
               {/* SEARCH */}
               <div className="min-w-0 sm:col-span-2 lg:col-span-6">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   ค้นหา
                 </label>
 
@@ -2404,7 +2434,7 @@ export default function AddFleetPage() {
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                     placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..."
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
 
                   {searchText && (
@@ -2421,7 +2451,7 @@ export default function AddFleetPage() {
 
               {/* FLEET TYPE */}
               <div className="min-w-0 lg:col-span-3">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   ประเภทคำขอ
                 </label>
 
@@ -2434,7 +2464,7 @@ export default function AddFleetPage() {
                   <select
                     value={fleetTypeFilter}
                     onChange={(e) => setFleetTypeFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="all">ทุกประเภทคำขอ</option>
 
@@ -2445,7 +2475,7 @@ export default function AddFleetPage() {
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                     ▼
                   </span>
                 </div>
@@ -2453,7 +2483,7 @@ export default function AddFleetPage() {
 
               {/* TRUCK TYPE SEARCH */}
               <div className="min-w-0 lg:col-span-3">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   ประเภทรถ
                 </label>
 
@@ -2466,7 +2496,7 @@ export default function AddFleetPage() {
                   <select
                     value={truckTypeFilter}
                     onChange={(e) => setTruckTypeFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="all">ทุกประเภทรถ</option>
 
@@ -2477,7 +2507,7 @@ export default function AddFleetPage() {
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                     ▼
                   </span>
                 </div>
@@ -2485,7 +2515,7 @@ export default function AddFleetPage() {
 
               {/* DC TYPE */}
               <div className="min-w-0 lg:col-span-2">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   DC Type
                 </label>
 
@@ -2501,7 +2531,7 @@ export default function AddFleetPage() {
                       setDcTypeFilter(e.target.value);
                       setDcFilter("all");
                     }}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="all">ทุก DC Type</option>
 
@@ -2512,7 +2542,7 @@ export default function AddFleetPage() {
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                     ▼
                   </span>
                 </div>
@@ -2520,7 +2550,7 @@ export default function AddFleetPage() {
 
               {/* DC */}
               <div className="min-w-0 lg:col-span-2">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   DC
                 </label>
 
@@ -2533,7 +2563,7 @@ export default function AddFleetPage() {
                   <select
                     value={dcFilter}
                     onChange={(e) => setDcFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="all">ทุก DC</option>
 
@@ -2544,7 +2574,7 @@ export default function AddFleetPage() {
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                     ▼
                   </span>
                 </div>
@@ -2552,7 +2582,7 @@ export default function AddFleetPage() {
 
               {/* CURRENT PROCESS / TCAS STEP */}
               <div className="min-w-0 lg:col-span-3">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   ดูสถานะขั้นตอน
                 </label>
 
@@ -2566,7 +2596,7 @@ export default function AddFleetPage() {
                     aria-label="ดูสถานะขั้นตอนที่"
                     value={currentProcessFilter}
                     onChange={(e) => setCurrentProcessFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="all">ทุกขั้นตอน</option>
 
@@ -2577,7 +2607,7 @@ export default function AddFleetPage() {
                     ))}
                   </select>
 
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                     ▼
                   </span>
                 </div>
@@ -2585,7 +2615,7 @@ export default function AddFleetPage() {
 
               {/* DATE */}
               <div className="min-w-0 lg:col-span-3">
-                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   วันที่ขอ
                 </label>
 
@@ -2638,10 +2668,10 @@ export default function AddFleetPage() {
                   >
                     <div className="flex items-center justify-between bg-blue-50 px-4 py-2.5">
                       <div>
-                        <p className="text-xs font-black text-blue-700">
+                        <p className="text-xs font-semibold text-blue-700">
                           เลือกช่วงวันที่ขอ
                         </p>
-                        <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                        <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                           Start Date – End Date
                         </p>
                       </div>
@@ -2659,7 +2689,7 @@ export default function AddFleetPage() {
                               },
                             ]);
                           }}
-                          className="rounded-lg bg-white px-2 py-1 text-[10px] font-black text-blue-600 shadow-sm transition hover:bg-blue-100"
+                          className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-blue-600 shadow-sm transition hover:bg-blue-100"
                         >
                           ล้าง
                         </button>
@@ -2704,7 +2734,7 @@ export default function AddFleetPage() {
                       <button
                         type="button"
                         onClick={() => setShowRequestDatePicker(false)}
-                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
                       >
                         เสร็จสิ้น
                       </button>
@@ -2750,24 +2780,24 @@ export default function AddFleetPage() {
         </div>
 
         {/* ── TABLE ── */}
-        <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.11)]">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="relative">
-            <div className="bg-blue-50/70 px-3 py-1.5 text-[10px] font-bold text-blue-500 sm:hidden">
+            <div className="bg-blue-50/70 px-3 py-1.5 text-[11px] font-bold text-blue-500 sm:hidden">
               เลื่อนซ้าย–ขวาเพื่อดูข้อมูลทั้งหมด →
             </div>
 
-            <div className="max-h-[calc(100vh-430px)] min-h-[400px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
+            <div className="max-h-[70vh] min-h-[360px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
               <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-20">
-                  <tr className="bg-blue-800 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
+                  <tr className="bg-blue-800 text-[11px] font-semibold text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
                     {(statusFilter === "process"
                       ? [
                         "ลำดับ",
                         "เลขที่เอกสาร",
                         "DC Type",
                         "DC",
-                        "ประเภทรถ",
                         "ประเภทคำขอ",
+                        "ประเภทรถ",
                         "จำนวน",
                         "วันที่ใช้งาน",
                         "ผู้ขอ",
@@ -2779,8 +2809,8 @@ export default function AddFleetPage() {
                         "เลขที่เอกสาร",
                         "DC Type",
                         "DC",
-                        "ประเภทรถ",
                         "ประเภทคำขอ",
+                        "ประเภทรถ",
                         "ทะเบียนทดแทน",
                         statusFilter === "rejected"
                           ? "จำนวนทั้งหมด / อนุมัติ / ไม่อนุมัติ"
@@ -2854,7 +2884,7 @@ export default function AddFleetPage() {
                             colSpan={statusFilter === "process" ? 11 : 12}
                             className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"
                           >
-                            <div className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600">
+                            <div className="inline-flex items-center gap-2 text-[11px] font-semibold text-blue-600">
                               <button
                                 type="button"
                                 onClick={() => handleSort("request_date")}
@@ -2871,7 +2901,7 @@ export default function AddFleetPage() {
                                 {renderSortIcon("request_date")}
                               </button>
                               {isTodayRequest(date) && (
-                                <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-emerald-500/20">
+                                <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm shadow-emerald-500/20">
                                   New
                                 </span>
                               )}
@@ -3010,13 +3040,13 @@ export default function AddFleetPage() {
                               <Fragment key={rowKey}>
                                 <tr className="group bg-white text-xs transition hover:bg-blue-50/30">
                                   <td className="sticky left-0 z-10 bg-white px-3 py-3 text-center group-hover:bg-blue-50/30">
-                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-black text-slate-500">
+                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-500">
                                       {index + 1}
                                     </span>
                                   </td>
 
                                   <td className="whitespace-nowrap px-3 py-3">
-                                    <p className="font-black text-slate-800">
+                                    <p className="font-semibold text-slate-800">
                                       {statusFilter === "process"
                                         ? item.running_doc_vehicle_no ||
                                         (item.vehicle_no !== undefined &&
@@ -3025,19 +3055,19 @@ export default function AddFleetPage() {
                                           : item.running_doc || "-")
                                         : item.running_doc || "-"}
                                     </p>
-                                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                                    <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                                       ใช้: {formatThaiDate(item.usage_date)}
                                     </p>
                                   </td>
 
                                   <td className="whitespace-nowrap px-3 py-3">
-                                    <span className="inline-flex rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-black text-blue-600 ring-1 ring-blue-100">
+                                    <span className="inline-flex rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-100">
                                       {item.dc_type || "-"}
                                     </span>
                                   </td>
 
                                   <td className="whitespace-nowrap px-3 py-3">
-                                    <span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-600 ring-1 ring-emerald-100">
+                                    <span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-emerald-100">
                                       {item.dc_code || "-"}
                                     </span>
                                   </td>
@@ -3062,7 +3092,7 @@ export default function AddFleetPage() {
                                             <span
                                               key={`${rowKey}-lic-${li}`}
                                               title={lic}
-                                              className="inline-flex whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200"
+                                              className="inline-flex whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200"
                                             >
                                               {lic}
                                             </span>
@@ -3083,36 +3113,36 @@ export default function AddFleetPage() {
                                       <div className="flex min-w-[230px] items-center justify-center gap-1.5">
                                         {/* จำนวนทั้งหมด */}
                                         <div className="min-w-[68px] rounded-xl bg-slate-50 px-2 py-1.5 ring-1 ring-slate-200">
-                                          <p className="text-[9px] font-bold text-slate-400">
+                                          <p className="text-[11px] font-bold text-slate-400">
                                             ทั้งหมด
                                           </p>
-                                          <p className="mt-0.5 text-sm font-black text-slate-700">
+                                          <p className="mt-0.5 text-xs font-semibold text-slate-700">
                                             {formatNumber(totalQty)}
                                           </p>
                                         </div>
 
                                         {/* จำนวนที่อนุมัติ */}
                                         <div className="min-w-[68px] rounded-xl bg-emerald-50 px-2 py-1.5 ring-1 ring-emerald-200">
-                                          <p className="text-[9px] font-bold text-emerald-500">
+                                          <p className="text-[11px] font-bold text-emerald-500">
                                             อนุมัติ
                                           </p>
-                                          <p className="mt-0.5 text-sm font-black text-emerald-700">
+                                          <p className="mt-0.5 text-xs font-semibold text-emerald-700">
                                             {formatNumber(approvedQty)}
                                           </p>
                                         </div>
 
                                         {/* จำนวนที่ไม่อนุมัติ */}
                                         <div className="min-w-[68px] rounded-xl bg-rose-50 px-2 py-1.5 ring-1 ring-rose-200">
-                                          <p className="text-[9px] font-bold text-rose-500">
+                                          <p className="text-[11px] font-bold text-rose-500">
                                             ไม่อนุมัติ
                                           </p>
-                                          <p className="mt-0.5 text-sm font-black text-rose-700">
+                                          <p className="mt-0.5 text-xs font-semibold text-rose-700">
                                             {formatNumber(rejectedQty)}
                                           </p>
                                         </div>
                                       </div>
                                     ) : (
-                                      <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
+                                      <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
                                         {formatNumber(item.qty)}
                                       </span>
                                     )}
@@ -3149,7 +3179,7 @@ export default function AddFleetPage() {
                                           <div className="min-w-0">
                                             {!isRejectedStatus && (
                                               <p
-                                                className={`text-[10px] font-black ${isCompletedStatus
+                                                className={`text-[11px] font-semibold ${isCompletedStatus
                                                   ? "text-emerald-700"
                                                   : "text-blue-700"
                                                   }`}
@@ -3164,7 +3194,7 @@ export default function AddFleetPage() {
                                             )}
 
                                             <p
-                                              className={`break-words text-[10px] font-black leading-4 ${isRejectedStatus
+                                              className={`break-words text-[11px] font-semibold leading-4 ${isRejectedStatus
                                                 ? "text-red-700"
                                                 : "mt-0.5 text-slate-700"
                                                 }`}
@@ -3186,7 +3216,7 @@ export default function AddFleetPage() {
                                         {item.vehicle_no !== undefined &&
                                           item.vehicle_no !== null && (
                                             <p
-                                              className={`mt-1.5 break-words border-t pt-1.5 text-[9px] font-semibold text-slate-400 ${isRejectedStatus
+                                              className={`mt-1.5 break-words border-t pt-1.5 text-[11px] font-semibold text-slate-400 ${isRejectedStatus
                                                 ? "border-red-200"
                                                 : isCompletedStatus
                                                   ? "border-emerald-100"
@@ -3206,12 +3236,12 @@ export default function AddFleetPage() {
 
                                         <div className="min-w-0">
                                           <p
-                                            className={`whitespace-nowrap text-[11px] font-black ${statusVisual.textClass}`}
+                                            className={`whitespace-nowrap text-[11px] font-semibold ${statusVisual.textClass}`}
                                           >
                                             {statusText}
                                           </p>
 
-                                          <p className="mt-0.5 whitespace-nowrap text-[9px] font-semibold text-slate-400">
+                                          <p className="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-slate-400">
                                             {statusVisual.hint}
                                           </p>
                                         </div>
@@ -3226,7 +3256,7 @@ export default function AddFleetPage() {
                                       onClick={() =>
                                         handleToggleRow(item, rowKey, Boolean(isOpen))
                                       }
-                                      className={`inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${isOpen
+                                      className={`inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isOpen
                                         ? "bg-blue-700 text-white shadow-md shadow-blue-700/20 hover:bg-blue-800"
                                         : "border border-slate-200 bg-white text-slate-600 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                                         }`}
@@ -3267,14 +3297,14 @@ export default function AddFleetPage() {
                                         <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                                           <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                              <p className="text-xs font-black text-slate-800">
+                                              <p className="text-xs font-semibold text-slate-800">
                                                 {hasTcasVehicleDetail
                                                   ? `รถคันที่ ${item.vehicle_no ?? "-"}`
                                                   : "รายละเอียดคำขอ"}
                                               </p>
 
                                               {hasTcasVehicleDetail && (
-                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
+                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-100">
                                                   {item.current_process ||
                                                     "ยังไม่เริ่ม"}{" "}
                                                   ({item.current_step ?? 0}/
@@ -3283,7 +3313,7 @@ export default function AddFleetPage() {
                                               )}
                                             </div>
 
-                                            <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
+                                            <p className="mt-1 truncate text-[11px] font-semibold text-slate-400">
                                               {hasTcasVehicleDetail
                                                 ? `ทะเบียน ${item.car_license || item.vehicle_license || "-"}`
                                                 : item.running_doc || "-"}
@@ -3291,7 +3321,7 @@ export default function AddFleetPage() {
                                           </div>
 
                                           <span
-                                            className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[10px] font-black ${hasTcasVehicleDetail
+                                            className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${hasTcasVehicleDetail
                                               ? isCompletedStatus
                                                 ? "bg-emerald-600 text-white"
                                                 : "bg-blue-600 text-white"
@@ -3314,17 +3344,17 @@ export default function AddFleetPage() {
                                             }`}
                                         >
                                           {/* ซ้าย: สรุปคำขอ */}
-                                          <section className="flex h-full min-w-0 flex-col bg-slate-50/60 p-4 sm:p-5 lg:border-r lg:border-slate-200">
+                                          <section className="flex h-full min-w-0 flex-col bg-slate-50/60 p-3 sm:p-4 lg:border-r lg:border-slate-200">
                                             {/* หัวข้อ */}
                                             <div className="mb-5 flex items-center justify-between gap-3">
                                               <div className="flex items-center gap-3">
                                                 <span className="h-9 w-1 rounded-full bg-blue-600" />
 
                                                 <div>
-                                                  <h4 className="text-sm font-black text-slate-800">
+                                                  <h4 className="text-xs font-semibold text-slate-800">
                                                     สรุปคำขอ
                                                   </h4>
-                                                  <p className="mt-0.5 text-[10px] font-medium text-slate-500">
+                                                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">
                                                     ข้อมูลคำขอและผลการอนุมัติ
                                                   </p>
                                                 </div>
@@ -3362,10 +3392,10 @@ export default function AddFleetPage() {
                                                     key={field.label}
                                                     className="flex h-full min-h-[88px] min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-3.5"
                                                   >
-                                                    <dt className="text-[10px] font-semibold text-slate-500">
+                                                    <dt className="text-[11px] font-semibold text-slate-500">
                                                       {field.label}
                                                     </dt>
-                                                    <dd className="mt-3 whitespace-pre-wrap break-words text-[13px] font-bold leading-5 text-slate-800">
+                                                    <dd className="mt-3 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-slate-800">
                                                       {field.value}
                                                     </dd>
                                                   </div>
@@ -3384,10 +3414,10 @@ export default function AddFleetPage() {
 
                                               <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                                 <div className="min-w-0 rounded-xl border border-blue-100 bg-white p-3.5 sm:col-span-2">
-                                                  <dt className="text-[10px] font-semibold text-slate-500">
+                                                  <dt className="text-[11px] font-semibold text-slate-500">
                                                     บริษัทขนส่งที่อนุมัติ
                                                   </dt>
-                                                  <dd className="mt-2 break-words text-[13px] font-bold leading-6 text-slate-800">
+                                                  <dd className="mt-2 break-words text-xs font-bold leading-6 text-slate-800">
                                                     {item.approved_company_name || "-"}
                                                   </dd>
                                                 </div>
@@ -3416,10 +3446,10 @@ export default function AddFleetPage() {
                                                     key={field.label}
                                                     className="flex min-h-[88px] min-w-0 flex-col rounded-xl border border-blue-100 bg-white p-3.5"
                                                   >
-                                                    <dt className="text-[10px] font-semibold text-slate-500">
+                                                    <dt className="text-[11px] font-semibold text-slate-500">
                                                       {field.label}
                                                     </dt>
-                                                    <dd className="mt-auto whitespace-pre-wrap break-words pt-3 text-[13px] font-bold leading-5 text-blue-800">
+                                                    <dd className="mt-auto whitespace-pre-wrap break-words pt-3 text-xs font-bold leading-5 text-blue-800">
                                                       {field.value}
                                                     </dd>
                                                   </div>
@@ -3430,7 +3460,7 @@ export default function AddFleetPage() {
                                             {/* หมายเหตุ */}
                                             <div className="mt-auto pt-4">
                                               <div className="min-h-[100px] rounded-xl border border-slate-200 bg-white p-4">
-                                                <p className="text-[10px] font-bold text-slate-500">
+                                                <p className="text-[11px] font-bold text-slate-500">
                                                   หมายเหตุจากคลัง
                                                 </p>
                                                 <p className="mt-2 whitespace-pre-wrap break-words text-[12px] font-medium leading-6 text-slate-700">
@@ -3444,16 +3474,16 @@ export default function AddFleetPage() {
                                           {hasTcasVehicleDetail ? (
                                             <section className="min-w-0 border-t border-slate-200 p-4 lg:border-t-0">
                                               <div className="mb-3 flex items-center justify-between">
-                                                <h4 className="text-[11px] font-black text-slate-700">
+                                                <h4 className="text-[11px] font-semibold text-slate-700">
                                                   ข้อมูลรถที่จะเข้าคลัง
                                                 </h4>
-                                                <span className="text-[10px] font-semibold text-slate-400">
+                                                <span className="text-[11px] font-semibold text-slate-400">
                                                   อัปเดตล่าสุดจากคลัง
                                                 </span>
                                               </div>
 
                                               {warehouseInfoLoading[rowKey] ? (
-                                                <div className="flex min-h-[96px] items-center justify-center rounded-lg border border-dashed border-blue-200 bg-blue-50/50 text-[11px] font-black text-blue-600">
+                                                <div className="flex min-h-[96px] items-center justify-center rounded-lg border border-dashed border-blue-200 bg-blue-50/50 text-[11px] font-semibold text-blue-600">
                                                   กำลังโหลดข้อมูลรถคันที่{" "}
                                                   {item.vehicle_no}...
                                                 </div>
@@ -3461,10 +3491,10 @@ export default function AddFleetPage() {
                                                 rowKey
                                               ] ? (
                                                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3">
-                                                  <p className="text-[11px] font-black text-rose-700">
+                                                  <p className="text-[11px] font-semibold text-rose-700">
                                                     โหลดข้อมูลรถไม่สำเร็จ
                                                   </p>
-                                                  <p className="mt-1 break-words text-[10px] font-semibold text-rose-600">
+                                                  <p className="mt-1 break-words text-[11px] font-semibold text-rose-600">
                                                     {
                                                       warehouseInfoErrors[
                                                       rowKey
@@ -3479,7 +3509,7 @@ export default function AddFleetPage() {
                                                         rowKey,
                                                       )
                                                     }
-                                                    className="mt-2 rounded-md bg-rose-600 px-2.5 py-1.5 text-[10px] font-black text-white transition hover:bg-rose-700"
+                                                    className="mt-2 rounded-md bg-rose-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-rose-700"
                                                   >
                                                     โหลดใหม่
                                                   </button>
@@ -3492,11 +3522,11 @@ export default function AddFleetPage() {
                                                         key={`${rowKey}-${field.key}`}
                                                         className="min-w-0 border-r border-b border-slate-200 px-3 py-2.5"
                                                       >
-                                                        <dt className="text-[9px] font-bold text-slate-400">
+                                                        <dt className="text-[11px] font-bold text-slate-400">
                                                           {field.label}
                                                         </dt>
                                                         <dd
-                                                          className={`mt-0.5 break-words text-[11px] font-black ${field.key ===
+                                                          className={`mt-0.5 break-words text-[11px] font-semibold ${field.key ===
                                                             "warehouse_plan_date"
                                                             ? "text-blue-700"
                                                             : field.key ===
@@ -3518,38 +3548,38 @@ export default function AddFleetPage() {
                                             <section className="border-t border-slate-200">
                                               <div className="flex items-center justify-between px-4 py-2.5">
                                                 <div>
-                                                  <h4 className="text-[11px] font-black text-slate-700">
+                                                  <h4 className="text-[11px] font-semibold text-slate-700">
                                                     รายละเอียดรถทดแทน
                                                   </h4>
-                                                  <p className="mt-0.5 text-[9px] font-medium text-slate-400">
+                                                  <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                                                     ทะเบียน จังหวัด ประเภทรถ
                                                     และผู้ประกอบการขนส่งเดิม
                                                   </p>
                                                 </div>
 
-                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
+                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-100">
                                                   {replacementTruckRows.length}{" "}
                                                   คัน
                                                 </span>
                                               </div>
 
                                               <div className="max-h-[220px] overflow-auto border-t border-slate-200">
-                                                <table className="w-full min-w-[680px] text-left text-[10px]">
+                                                <table className="w-full min-w-[680px] text-left text-[11px]">
                                                   <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
                                                     <tr>
-                                                      <th className="w-[54px] px-3 py-2 text-center font-black">
+                                                      <th className="w-[54px] px-3 py-2 text-center font-semibold">
                                                         #
                                                       </th>
-                                                      <th className="px-3 py-2 font-black">
+                                                      <th className="px-3 py-2 font-semibold">
                                                         ทะเบียนรถ
                                                       </th>
-                                                      <th className="px-3 py-2 font-black">
+                                                      <th className="px-3 py-2 font-semibold">
                                                         จังหวัด
                                                       </th>
-                                                      <th className="px-3 py-2 font-black">
+                                                      <th className="px-3 py-2 font-semibold">
                                                         ประเภทรถเดิม
                                                       </th>
-                                                      <th className="px-3 py-2 font-black">
+                                                      <th className="px-3 py-2 font-semibold">
                                                         ผู้ประกอบการขนส่งเดิม
                                                       </th>
                                                     </tr>
@@ -3565,11 +3595,11 @@ export default function AddFleetPage() {
                                                           }
                                                           className="border-t border-slate-100 hover:bg-blue-50/40"
                                                         >
-                                                          <td className="px-3 py-2 text-center font-black text-slate-400">
+                                                          <td className="px-3 py-2 text-center font-semibold text-slate-400">
                                                             {truckIndex + 1}
                                                           </td>
 
-                                                          <td className="px-3 py-2 font-black text-blue-700">
+                                                          <td className="px-3 py-2 font-semibold text-blue-700">
                                                             {truck.license ||
                                                               "-"}
                                                           </td>
@@ -3691,21 +3721,43 @@ export default function AddFleetPage() {
           </div>
         </div>
 
-        <ExportRequestModal
-          open={openExportModal}
-          onClose={() => setOpenExportModal(false)}
-          requests={exportRequests}
-          dcLabel={selectedDCLabel}
-        />
-        <NewVehicleRequestModal
-          open={openCreateModal}
-          onClose={() => setOpenCreateModal(false)}
-          onSuccess={() => {
-            setOpenCreateModal(false);
-            fetchRequests();
-          }}
-          existingRequests={requests}
-        />
+        {modalPortalTarget && createPortal(
+          <div
+            data-fleet-modal-layer="true"
+            style={{ position: "relative", zIndex: 100000 }}
+          >
+            <ExportRequestModal
+              open={openExportModal}
+              onClose={() => setOpenExportModal(false)}
+              requests={exportRequests}
+              dcLabel={selectedDCLabel}
+            />
+            <NewVehicleRequestModal
+              open={openCreateModal}
+              onClose={() => setOpenCreateModal(false)}
+              onSuccess={() => {
+                setOpenCreateModal(false);
+                fetchRequests();
+              }}
+              existingRequests={requests}
+            />
+          </div>,
+          modalPortalTarget,
+        )}
+        <style jsx>{`
+          main :global(button:focus-visible),
+          main :global(select:focus-visible),
+          main :global(input:focus-visible) {
+            outline: 2px solid #2563eb;
+            outline-offset: 3px;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            main :global(*) {
+              transition: none !important;
+              animation: none !important;
+            }
+          }
+        `}</style>
       </main>
     </div>
   );

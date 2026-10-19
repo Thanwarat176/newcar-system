@@ -2137,7 +2137,7 @@ export default function FlowAssessmentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5">
+    <div className="flow-modal-polished fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5">
       <button
         type="button"
         aria-label="ปิดหน้าต่าง"
@@ -2145,21 +2145,38 @@ export default function FlowAssessmentModal({
         onClick={onClose}
       />
 
+      <style>{`
+        .flow-modal-polished { font-family: inherit; font-size: 11px; line-height: 1.55; }
+        .flow-modal-polished :is(button,input,select,textarea) { font-family: inherit; }
+        .flow-modal-polished :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea) {
+          font-size: 11px; border-color: #dbe3ef; background-color: #fff;
+          transition: border-color .15s, box-shadow .15s;
+        }
+        .flow-modal-polished :is(input,select,textarea):focus {
+          border-color: #60a5fa; box-shadow: 0 0 0 3px #dbeafe80;
+        }
+        .flow-modal-polished :is(button,input,select,textarea):focus-visible {
+          outline: 2px solid #2563eb; outline-offset: 2px;
+        }
+        .flow-modal-polished { scrollbar-color: #cbd5e1 #f8fafc; }
+        .flow-modal-polished button { font-weight: 600; }
+        @media (prefers-reduced-motion: reduce) { .flow-modal-polished * { transition: none !important; } }
+      `}</style>
       <section className="relative flex max-h-[96vh] w-full max-w-[1440px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl sm:max-h-[94vh]">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-blue-50/70 via-white to-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-blue-500">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700 ring-1 ring-blue-200">
                 <ClipboardList size={14} />
               </span>
               Fleet Process Tracking
             </div>
 
-            <h2 className="mt-1 truncate text-lg font-black text-slate-900 sm:text-xl">
+            <h2 className="mt-1 truncate text-base font-semibold text-slate-900 sm:text-lg">
               {request?.running_doc || `Request ID: ${requestId}`}
             </h2>
 
-            <p className="mt-1 text-xs font-semibold text-slate-400">
+            <p className="mt-1 text-[11px] font-semibold text-slate-400">
               รายละเอียดคำขอ รถ และขั้นตอนการดำเนินงาน
             </p>
           </div>
@@ -2172,7 +2189,7 @@ export default function FlowAssessmentModal({
                   type="button"
                   onClick={handleAssessmentClick}
                   disabled={initializing}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <CheckCircle2 size={15} />
                   ประเมิน
@@ -2189,7 +2206,7 @@ export default function FlowAssessmentModal({
                 savingMemoKey !== null ||
                 savingWarehouseInfo
               }
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw
                 size={15}
@@ -2218,19 +2235,19 @@ export default function FlowAssessmentModal({
           {loading ? (
             <div className="flex min-h-[430px] flex-col items-center justify-center">
               <LoaderCircle size={34} className="animate-spin text-blue-600" />
-              <p className="mt-3 text-sm font-bold text-slate-500">
+              <p className="mt-3 text-[11px] font-semibold text-slate-500">
                 กำลังโหลดข้อมูล Request ID {requestId}...
               </p>
             </div>
           ) : error ? (
             <div className="flex min-h-[430px] flex-col items-center justify-center text-center">
-              <div className="rounded-2xl bg-rose-50 px-5 py-4 text-sm font-bold text-rose-600">
+              <div className="rounded-2xl bg-rose-50 px-5 py-4 text-[11px] font-semibold text-rose-600">
                 {error}
               </div>
               <button
                 type="button"
                 onClick={handleRefreshData}
-                className="mt-4 rounded-xl bg-blue-700 px-4 py-2 text-xs font-black text-white"
+                className="mt-4 rounded-xl bg-blue-700 px-4 py-2 text-[11px] font-semibold text-white"
               >
                 ลองใหม่
               </button>
@@ -2238,7 +2255,7 @@ export default function FlowAssessmentModal({
           ) : (
             <div className="space-y-5">
               {actionMessage && (
-                <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
+                <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[11px] font-semibold text-emerald-700">
                   <CheckCircle2 size={17} className="mt-0.5 shrink-0" />
                   <span>{actionMessage}</span>
                 </div>
@@ -2278,7 +2295,7 @@ export default function FlowAssessmentModal({
 
               <div className="">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-8">
-                  <h3 className="text-sm font-black text-slate-800">
+                  <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-xs font-semibold text-slate-800 before:h-4 before:w-1 before:rounded-full before:bg-blue-600 before:content-['']">
                     ข้อมูลคำขอ
                   </h3>
 
@@ -2354,13 +2371,13 @@ export default function FlowAssessmentModal({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <h3 className="text-sm font-black text-slate-800">
+                    <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-xs font-semibold text-slate-800 before:h-4 before:w-1 before:rounded-full before:bg-blue-600 before:content-['']">
                       ข้อมูลเพิ่มเติมของรถ
                     </h3>
-                    <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
+                    <p className="mt-1 break-words text-[10px] font-medium leading-4 text-slate-500">
                       รถคันที่ {vehicleNo || "-"} ·{" "}
                       {request?.running_doc && vehicleNo !== null &&
                         vehicleNo !== undefined
@@ -2374,7 +2391,7 @@ export default function FlowAssessmentModal({
                   <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                     <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h4 className="text-xs font-black text-slate-800">
+                        <h4 className="text-[11px] font-semibold text-slate-800">
                           ข้อมูลรายละเอียดรถ
                         </h4>
 
@@ -2387,7 +2404,7 @@ export default function FlowAssessmentModal({
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       {VEHICLE_DETAIL_FIELDS.map((field) => (
                         <div key={field.key} className="block">
-                          <span className="mb-1.5 block text-[10px] font-black text-slate-500">
+                          <span className="mb-1.5 block text-[10px] font-semibold text-slate-500">
                             {field.label}
                           </span>
 
@@ -2400,7 +2417,7 @@ export default function FlowAssessmentModal({
                                 )
                               }
                               disabled={savingWarehouseInfo}
-                              className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-xs font-bold text-slate-700 outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                              className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-left text-[11px] font-semibold text-slate-700 outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                             >
                               <CalendarDays
                                 size={14}
@@ -2435,7 +2452,7 @@ export default function FlowAssessmentModal({
                                     : `กรอก${field.label}`
                                 }
                                 disabled={savingWarehouseInfo}
-                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                               />
 
                               {field.key === "car_province" && (
@@ -2452,7 +2469,7 @@ export default function FlowAssessmentModal({
                       <div className="sm:col-span-2 xl:col-span-1 2xl:col-span-2">
                         <label
                           htmlFor={`vehicle-remark-${vehicleNo}`}
-                          className="mb-1.5 block text-[10px] font-black text-slate-500"
+                          className="mb-1.5 block text-[10px] font-semibold text-slate-500"
                         >
                           หมายเหตุ
                         </label>
@@ -2466,7 +2483,7 @@ export default function FlowAssessmentModal({
                           }
                           placeholder="กรอกหมายเหตุเพิ่มเติม"
                           disabled={savingWarehouseInfo}
-                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[11px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                         />
                       </div>
 
@@ -2482,7 +2499,7 @@ export default function FlowAssessmentModal({
                             vehicleNo === undefined ||
                             vehicleNo === ""
                           }
-                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-xs font-black text-white shadow-md shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-[11px] font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                         >
                           {savingWarehouseInfo ? (
                             <LoaderCircle size={14} className="animate-spin" />
@@ -2502,7 +2519,7 @@ export default function FlowAssessmentModal({
 
                   <section className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
                     <div className="mb-3">
-                      <h4 className="text-xs font-black text-slate-800">
+                      <h4 className="text-[11px] font-semibold text-slate-800">
                         ข้อมูลเลขบันทึกเอกสาร
                       </h4>
 
@@ -2542,12 +2559,12 @@ export default function FlowAssessmentModal({
                             className="rounded-xl border border-blue-100 bg-white/70 p-3"
                           >
                             <div className="mb-1.5 flex items-center justify-between gap-2">
-                              <span className="text-[10px] font-black text-slate-500">
+                              <span className="text-[10px] font-semibold text-slate-500">
                                 {field.label}
                               </span>
 
                               {hasExistingData && (
-                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-600">
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">
                                   มีข้อมูลแล้ว
                                 </span>
                               )}
@@ -2586,11 +2603,11 @@ export default function FlowAssessmentModal({
                                 }}
                                 placeholder={`กรอก${field.label}`}
                                 disabled={savingMemoKey !== null}
-                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                               />
 
                               {/* วันที่เพิ่มเลขบันทึก */}
-                              <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 text-xs font-bold text-slate-700">
+                              <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 text-[11px] font-semibold text-slate-700">
                                 <CalendarDays
                                   size={14}
                                   className="shrink-0 text-blue-500"
@@ -2614,7 +2631,7 @@ export default function FlowAssessmentModal({
                               {/* แนบไฟล์ */}
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <label
-                                  className={`flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-xl border px-3 text-xs font-bold transition ${selectedFile
+                                  className={`flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-xl border px-3 text-[11px] font-semibold transition ${selectedFile
                                     ? "border-violet-300 bg-violet-50 text-violet-700"
                                     : existingFile?.file_name
                                       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -2671,7 +2688,7 @@ export default function FlowAssessmentModal({
                                   !memoNumber ||
                                   !memoDate
                                 }
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-700 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                               >
                                 {isSavingThisMemo ? (
                                   <LoaderCircle
@@ -2733,7 +2750,7 @@ export default function FlowAssessmentModal({
               >
                 <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="text-sm font-black text-slate-800">
+                    <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-xs font-semibold text-slate-800 before:h-4 before:w-1 before:rounded-full before:bg-blue-600 before:content-['']">
                       ขั้นตอนการดำเนินงาน
                     </h3>
                     <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
@@ -2742,13 +2759,13 @@ export default function FlowAssessmentModal({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-600">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-[10px] font-semibold text-blue-600">
                       <Clock3 size={12} />
                       SLA จาก Master Flow
                     </span>
 
                     <span
-                      className={`w-fit rounded-full px-3 py-1 text-[10px] font-black ${data.is_initialized
+                      className={`w-fit rounded-full px-3 py-1 text-[10px] font-semibold ${data.is_initialized
                         ? "bg-emerald-50 text-emerald-600"
                         : "bg-amber-50 text-amber-600"
                         }`}
@@ -2766,11 +2783,11 @@ export default function FlowAssessmentModal({
                       <Play size={26} />
                     </span>
 
-                    <p className="mt-4 text-sm font-black text-slate-700">
+                    <p className="mt-4 text-[11px] font-semibold text-slate-700">
                       กรุณาเริ่มต้นกระบวนการก่อนเลือกวันที่
                     </p>
 
-                    <p className="mt-1 text-xs font-semibold text-slate-400">
+                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
                       กดปุ่มด้านล่างเพื่อสร้างรายการติดตามของรถแต่ละคัน
                     </p>
 
@@ -2778,7 +2795,7 @@ export default function FlowAssessmentModal({
                       type="button"
                       onClick={handleInitializeFlow}
                       disabled={initializing || !request?.id}
-                      className="mt-5 inline-flex h-11 min-w-[190px] items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 text-xs font-black text-white shadow-lg shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mt-5 inline-flex h-11 min-w-[190px] items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {initializing ? (
                         <LoaderCircle size={16} className="animate-spin" />
@@ -2792,7 +2809,7 @@ export default function FlowAssessmentModal({
                     </button>
                   </div>
                 ) : flowRowsByVehicle.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-xs font-semibold text-slate-400">
+                  <div className="px-4 py-10 text-center text-[11px] font-semibold text-slate-400">
                     ไม่พบข้อมูลขั้นตอน
                   </div>
                 ) : (
@@ -2804,12 +2821,12 @@ export default function FlowAssessmentModal({
                       >
                         <div className="flex flex-col gap-2 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-xs font-black text-white shadow-md shadow-blue-700/20">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-[11px] font-semibold text-white shadow-md shadow-blue-700/20">
                               {vehicle.vehicle_no}
                             </span>
 
                             <div className="min-w-0">
-                              <p className="truncate text-xs font-black text-slate-800">
+                              <p className="truncate text-[11px] font-semibold text-slate-800">
                                 รถคันที่ {vehicle.vehicle_no}
                               </p>
                               <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
@@ -2818,14 +2835,14 @@ export default function FlowAssessmentModal({
                             </div>
                           </div>
 
-                          <span className="w-fit rounded-full bg-white px-3 py-1 text-[10px] font-black text-slate-500 ring-1 ring-slate-200">
+                          <span className="w-fit rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
                             เลื่อนแนวนอน →
                           </span>
                         </div>
 
                         <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                               การดำเนินการหนังสือ
                             </p>
                             <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
@@ -2837,7 +2854,7 @@ export default function FlowAssessmentModal({
                             vehicle.expiredDocumentFlow?.str_date ||
                             vehicle.expiredDocumentFlow?.end_date
                           ) ? (
-                            <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-amber-100 px-4 text-[11px] font-black text-amber-700 ring-1 ring-amber-200">
+                            <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-amber-100 px-4 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
                               <FileWarning size={15} />
                               หนังสือหมดอายุแล้ว
                             </span>
@@ -2845,7 +2862,7 @@ export default function FlowAssessmentModal({
                             vehicle.cancelDocumentFlow?.str_date ||
                             vehicle.cancelDocumentFlow?.end_date
                           ) ? (
-                            <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-100 px-4 text-[11px] font-black text-rose-700 ring-1 ring-rose-200">
+                            <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-100 px-4 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-200">
                               <Ban size={15} />
                               ยกเลิกหนังสือแล้ว
                             </span>
@@ -2861,7 +2878,7 @@ export default function FlowAssessmentModal({
                                     )
                                   }
                                   disabled={savingFlowId !== null}
-                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 text-[11px] font-black text-white shadow-lg shadow-rose-600/25 transition hover:-translate-y-0.5 hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 text-[11px] font-semibold text-white shadow-lg shadow-rose-600/25 transition hover:-translate-y-0.5 hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {savingFlowId === String(vehicle.cancelDocumentFlow.id) ? (
                                     <LoaderCircle size={14} className="animate-spin" />
@@ -2882,7 +2899,7 @@ export default function FlowAssessmentModal({
                                     )
                                   }
                                   disabled={savingFlowId !== null}
-                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 text-[11px] font-black text-white shadow-lg shadow-amber-500/25 transition hover:-translate-y-0.5 hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 text-[11px] font-semibold text-white shadow-lg shadow-amber-500/25 transition hover:-translate-y-0.5 hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {savingFlowId === String(vehicle.expiredDocumentFlow.id) ? (
                                     <LoaderCircle size={14} className="animate-spin" />
@@ -2894,7 +2911,7 @@ export default function FlowAssessmentModal({
                               )}
 
                               {!vehicle.cancelDocumentFlow && !vehicle.expiredDocumentFlow && (
-                                <span className="text-[10px] font-bold text-slate-400">
+                                <span className="text-[10px] font-semibold text-slate-400">
                                   ไม่พบ Process ดำเนินการหนังสือ
                                 </span>
                               )}
@@ -3076,7 +3093,7 @@ export default function FlowAssessmentModal({
                                   >
                                     <div className="flex items-start justify-between gap-3">
                                       <span
-                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${hasDocumentFinalStatus
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${hasDocumentFinalStatus
                                           ? "bg-slate-300 text-slate-600"
                                           : hasCompleted
                                             ? "bg-emerald-600 text-white"
@@ -3089,7 +3106,7 @@ export default function FlowAssessmentModal({
                                       </span>
 
                                       <span
-                                        className={`rounded-full px-2 py-1 text-[9px] font-black ${hasDocumentFinalStatus
+                                        className={`rounded-full px-2 py-1 text-[10px] font-semibold ${hasDocumentFinalStatus
                                           ? "bg-slate-200 text-slate-500"
                                           : hasCompleted
                                             ? "bg-emerald-100 text-emerald-700"
@@ -3113,7 +3130,7 @@ export default function FlowAssessmentModal({
                                     </div>
 
                                     <div className="mt-3 min-h-[58px]">
-                                      <p className="text-xs font-black leading-5 text-slate-800">
+                                      <p className="text-[11px] font-semibold leading-5 text-slate-800">
                                         {flow.process}
                                       </p>
 
@@ -3127,7 +3144,7 @@ export default function FlowAssessmentModal({
                                     <div className="mt-4 space-y-3">
                                       {/* วันที่เริ่ม */}
                                       <div>
-                                        <span className="mb-1.5 block text-[9px] font-black uppercase tracking-wide text-slate-400">
+                                        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                                           วันที่เริ่ม
                                         </span>
 
@@ -3157,7 +3174,7 @@ export default function FlowAssessmentModal({
                                               });
                                             }
                                           }}
-                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-bold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
+                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-semibold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
                                             ? "border-slate-300 bg-slate-200 text-slate-400"
                                             : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:ring-blue-100 disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700"
                                             }`}
@@ -3177,7 +3194,7 @@ export default function FlowAssessmentModal({
 
                                       {/* วันที่สิ้นสุด */}
                                       <div>
-                                        <span className="mb-1.5 block text-[9px] font-black uppercase tracking-wide text-slate-400">
+                                        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                                           วันที่สิ้นสุด
                                         </span>
 
@@ -3207,7 +3224,7 @@ export default function FlowAssessmentModal({
                                               });
                                             }
                                           }}
-                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-bold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
+                                          className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-semibold outline-none transition focus:ring-4 disabled:cursor-not-allowed ${hasDocumentFinalStatus
                                             ? "border-slate-300 bg-slate-200 text-slate-400"
                                             : invalidDateRange
                                               ? "border-rose-400 bg-white text-rose-700 focus:border-rose-500 focus:ring-rose-100"
@@ -3232,7 +3249,7 @@ export default function FlowAssessmentModal({
                                         </button>
 
                                         {invalidDateRange && (
-                                          <p className="mt-1 text-[9px] font-bold text-rose-500">
+                                          <p className="mt-1 text-[10px] font-semibold text-rose-500">
                                             วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่ม
                                           </p>
                                         )}
@@ -3247,7 +3264,7 @@ export default function FlowAssessmentModal({
                                           ) : (
                                             <FileWarning size={14} className="mt-0.5 shrink-0" />
                                           )}
-                                          <p className="text-[10px] font-black leading-4">
+                                          <p className="text-[10px] font-semibold leading-4">
                                             {documentLockedMessage}
                                           </p>
                                         </div>
@@ -3265,12 +3282,12 @@ export default function FlowAssessmentModal({
                                         }`}
                                     >
                                       <div className="flex items-center justify-between gap-3">
-                                        <span className="text-[10px] font-black text-slate-500">
+                                        <span className="text-[10px] font-semibold text-slate-500">
                                           SLA กำหนด
                                         </span>
 
                                         <span
-                                          className={`text-xs font-black ${invalidDateRange
+                                          className={`text-[11px] font-semibold ${invalidDateRange
                                             ? "text-rose-600"
                                             : hasTargetSla
                                               ? "text-blue-700"
@@ -3290,22 +3307,22 @@ export default function FlowAssessmentModal({
                                         !invalidDateRange && (
                                           <div className="mt-2 space-y-2 border-t border-black/5 pt-2">
                                             <div className="flex items-center justify-between gap-3">
-                                              <span className="text-[9px] font-bold text-slate-400">
+                                              <span className="text-[10px] font-semibold text-slate-400">
                                                 วันครบกำหนด
                                               </span>
 
-                                              <span className="text-[10px] font-black text-slate-700">
+                                              <span className="text-[10px] font-semibold text-slate-700">
                                                 {formatDate(slaDueDate)}
                                               </span>
                                             </div>
 
                                             <div className="flex items-start justify-between gap-3">
-                                              <span className="text-[9px] font-bold text-slate-400">
+                                              <span className="text-[10px] font-semibold text-slate-400">
                                                 สถานะ SLA
                                               </span>
 
                                               <p
-                                                className={`max-w-[145px] text-right text-[10px] font-black ${isOverSla || isCurrentlyOverdue
+                                                className={`max-w-[145px] text-right text-[10px] font-semibold ${isOverSla || isCurrentlyOverdue
                                                   ? "text-rose-600"
                                                   : hasCompleted
                                                     ? "text-emerald-600"
@@ -3320,13 +3337,13 @@ export default function FlowAssessmentModal({
 
                                             {hasCompleted && (
                                               <div className="flex items-center justify-between gap-3">
-                                                <span className="text-[9px] font-bold text-slate-400">
+                                                <span className="text-[10px] font-semibold text-slate-400">
                                                   ใช้จริง
                                                 </span>
 
                                                 <div className="text-right">
                                                   <p
-                                                    className={`text-[10px] font-black ${isOverSla
+                                                    className={`text-[10px] font-semibold ${isOverSla
                                                       ? "text-rose-600"
                                                       : "text-emerald-600"
                                                       }`}
@@ -3335,7 +3352,7 @@ export default function FlowAssessmentModal({
                                                   </p>
 
                                                   <p
-                                                    className={`mt-0.5 text-[9px] font-bold ${isOverSla
+                                                    className={`mt-0.5 text-[10px] font-semibold ${isOverSla
                                                       ? "text-rose-500"
                                                       : "text-emerald-500"
                                                       }`}
@@ -3371,7 +3388,7 @@ export default function FlowAssessmentModal({
                                         invalidDateRange
                                       }
                                       title={permissionMessage}
-                                      className={`mt-auto inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-black transition ${hasDocumentFinalStatus
+                                      className={`mt-auto inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-semibold transition ${hasDocumentFinalStatus
                                         ? "cursor-not-allowed bg-slate-300 text-slate-500"
                                         : isAlreadySaved
                                           ? "cursor-not-allowed bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200"
@@ -3426,7 +3443,7 @@ export default function FlowAssessmentModal({
 
                                           <div className="min-w-0 flex-1">
                                             <p
-                                              className={`text-[10px] font-black ${shouldShowExpiredAction &&
+                                              className={`text-[10px] font-semibold ${shouldShowExpiredAction &&
                                                 !hasDocumentFinalStatus
                                                 ? "text-rose-700"
                                                 : "text-amber-700"
@@ -3435,7 +3452,7 @@ export default function FlowAssessmentModal({
                                               สถานะหนังสือไฟแนนซ์
                                             </p>
 
-                                            <p className="mt-0.5 text-[9px] font-semibold leading-4 text-slate-500">
+                                            <p className="mt-0.5 text-[10px] font-semibold leading-4 text-slate-500">
                                               {shouldShowExpiredAction &&
                                                 !hasDocumentFinalStatus
                                                 ? "ครบกำหนด SLA แล้ว กรุณาเร่งดำเนินการ"
@@ -3446,12 +3463,12 @@ export default function FlowAssessmentModal({
 
                                         <div className="mt-3">
                                           {isDocumentExpired ? (
-                                            <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-100 px-3 py-2.5 text-[10px] font-black text-amber-700 ring-1 ring-amber-200">
+                                            <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-100 px-3 py-2.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
                                               <FileWarning size={14} />
                                               หนังสือหมดอายุแล้ว
                                             </div>
                                           ) : isDocumentCancelled ? (
-                                            <div className="flex items-center justify-center gap-2 rounded-xl bg-rose-100 px-3 py-2.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
+                                            <div className="flex items-center justify-center gap-2 rounded-xl bg-rose-100 px-3 py-2.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-200">
                                               <Ban size={14} />
                                               หนังสือถูกยกเลิกแล้ว
                                             </div>
@@ -3469,7 +3486,7 @@ export default function FlowAssessmentModal({
                                                 )
                                               }
                                               disabled={savingFlowId !== null}
-                                              className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border-2 bg-white px-3 text-[10px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${shouldShowExpiredAction
+                                              className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border-2 bg-white px-3 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${shouldShowExpiredAction
                                                 ? "border-rose-500 text-rose-700 hover:bg-rose-100"
                                                 : "border-amber-400 text-amber-700 hover:bg-amber-100"
                                                 }`}
@@ -3493,7 +3510,7 @@ export default function FlowAssessmentModal({
                                       </div>
                                     )}
 
-                                    <p className="mt-3 truncate text-[9px] font-semibold text-slate-400">
+                                    <p className="mt-3 truncate text-[10px] font-semibold text-slate-400">
                                       {flow.updated_by ||
                                         flow.created_by ||
                                         "ยังไม่มีผู้แก้ไข"}
@@ -3545,7 +3562,7 @@ export default function FlowAssessmentModal({
               >
                 <div className="flex items-center justify-between bg-blue-50 px-4 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-black text-blue-700">
+                    <p className="truncate text-[11px] font-semibold text-blue-700">
                       เลือกวันที่เอกสาร
                     </p>
                     <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
@@ -3584,7 +3601,7 @@ export default function FlowAssessmentModal({
                   <p className="text-[10px] font-semibold text-slate-400">
                     วันที่ที่เลือก
                   </p>
-                  <p className="mt-1 text-xs font-black text-blue-700">
+                  <p className="mt-1 text-[11px] font-semibold text-blue-700">
                     {selectedValue
                       ? formatDate(selectedValue)
                       : "ยังไม่ได้เลือกวันที่"}
@@ -3600,7 +3617,7 @@ export default function FlowAssessmentModal({
                         );
                         setOpenMemoDatePicker(null);
                       }}
-                      className="mt-3 h-9 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                      className="mt-3 h-9 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                     >
                       ล้างวันที่
                     </button>
@@ -3626,7 +3643,7 @@ export default function FlowAssessmentModal({
           >
             <div className="flex items-center justify-between bg-blue-50 px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate text-xs font-black text-blue-700">
+                <p className="truncate text-[11px] font-semibold text-blue-700">
                   เลือกวันที่จะเข้าคลัง
                 </p>
                 <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
@@ -3665,7 +3682,7 @@ export default function FlowAssessmentModal({
               <p className="text-[10px] font-semibold text-slate-400">
                 วันที่ที่เลือก
               </p>
-              <p className="mt-1 text-xs font-black text-blue-700">
+              <p className="mt-1 text-[11px] font-semibold text-blue-700">
                 {vehicleExtraForm.warehouse_plan_date
                   ? formatDate(vehicleExtraForm.warehouse_plan_date)
                   : "ยังไม่ได้เลือกวันที่"}
@@ -3678,7 +3695,7 @@ export default function FlowAssessmentModal({
                     handleVehicleExtraChange("warehouse_plan_date", "");
                     setOpenWarehouseDatePicker(null);
                   }}
-                  className="mt-3 h-9 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                  className="mt-3 h-9 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                 >
                   ล้างวันที่
                 </button>
@@ -3724,7 +3741,7 @@ export default function FlowAssessmentModal({
         >
           <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-black text-blue-700">
+              <p className="truncate text-[11px] font-semibold text-blue-700">
                 {isEndDate
                   ? "เลือกวันที่สิ้นสุด"
                   : "เลือกวันที่เริ่ม"}
@@ -3748,7 +3765,7 @@ export default function FlowAssessmentModal({
                   );
                   setOpenDatePicker(null);
                 }}
-                className="flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 text-xs font-bold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <X size={13} />
                 ล้างวันที่
@@ -3790,7 +3807,7 @@ export default function FlowAssessmentModal({
               วันที่ที่เลือก
             </p>
 
-            <p className="mt-1 text-xs font-black text-blue-700">
+            <p className="mt-1 text-[11px] font-semibold text-blue-700">
               {selectedValue
                 ? formatDate(selectedValue)
                 : "ยังไม่ได้เลือกวันที่"}
@@ -3816,19 +3833,19 @@ function InfoCard({
   subValue: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
           {icon}
         </span>
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             {label}
           </p>
-          <p className="mt-1 truncate text-sm font-black text-slate-800">
+          <p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">
             {value}
           </p>
-          <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
+          <p className="mt-1 break-words text-[10px] font-medium leading-4 text-slate-500">
             {subValue}
           </p>
         </div>
@@ -3846,10 +3863,10 @@ function DetailItem({
 }) {
   return (
     <div>
-      <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </p>
-      <p className="mt-1 break-words text-xs font-bold text-slate-700">
+      <p className="mt-1 break-words text-[11px] font-semibold text-slate-700">
         {value || "-"}
       </p>
     </div>
