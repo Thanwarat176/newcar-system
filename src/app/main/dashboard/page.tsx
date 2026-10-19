@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FlowAssessmentModal from "../trackFleet/component/FlowAssessmentModal";
+import { createPortal } from "react-dom";
 
 interface UserInfo {
   warehouse?: string;
@@ -31,6 +32,8 @@ interface FlowRecord {
 interface ProcessDefinition {
   id: number | string;
   process_level: number | string;
+  process?: string;
+  fleet_type?: string | null;
 }
 interface FleetRequest {
   id: FleetId;
@@ -268,7 +271,7 @@ function readFleetRawRows(value: unknown): Record<string, unknown>[] {
   throw new Error("รูปแบบข้อมูล API ไม่ตรงกับที่รองรับ");
 }
 
-async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal, onFleetTypes?: (types: string[]) => void): Promise<FleetRequest[]> {
+async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal, onFleetTypes?: (types: string[]) => void, onProcesses?: (definitions: ProcessDefinition[]) => void): Promise<FleetRequest[]> {
   const baseUrl = new URL(apiUrl, window.location.href);
   const results: FleetRequest[] = [];
   const seen = new Set<string>();
@@ -284,6 +287,19 @@ async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal, onFlee
     const response = await fetch(url.toString(), { method: "GET", cache: "no-store", signal });
     if (!response.ok) throw new Error(`ไม่สามารถดึงข้อมูลหน้า ${page} ได้ (HTTP ${response.status})`);
     const payload: unknown = await response.json();
+    if (typeof payload === "object" && payload !== null) {
+      const definitions = (payload as Record<string, unknown>).processes;
+      if (Array.isArray(definitions)) {
+        onProcesses?.(definitions.filter((item): item is ProcessDefinition => {
+          if (typeof item !== "object" || item === null) return false;
+          const row = item as Record<string, unknown>;
+          return (typeof row.id === "string" || typeof row.id === "number") &&
+            (typeof row.process_level === "string" || typeof row.process_level === "number") &&
+            typeof row.process === "string";
+        }));
+      }
+    }
+
     if (typeof payload === "object" && payload !== null) {
       const filters = (payload as Record<string, unknown>).filters;
       if (typeof filters === "object" && filters !== null) {
@@ -617,10 +633,11 @@ function FleetStatusByDc({
     };
   }, []);
 
+  const [apiProcesses, setApiProcesses] = useState<ProcessDefinition[]>([]);
   const [apiFleetTypes, setApiFleetTypes] = useState<string[]>([]);
   const [selectedSummaryMonths, setSelectedSummaryMonths] = useState<number[]>(() => {
     const end = new Date().getMonth();
-    return Array.from({ length: 6 }, (_, i) => ((end - 5 + i + 12) % 12)).sort((a,b) => a-b);
+    return Array.from({ length: 6 }, (_, i) => ((end - 5 + i + 12) % 12)).sort((a, b) => a - b);
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -670,9 +687,9 @@ function FleetStatusByDc({
         if (!response.ok) {
           const message =
             typeof payload === "object" &&
-            payload !== null &&
-            "message" in payload &&
-            typeof payload.message === "string"
+              payload !== null &&
+              "message" in payload &&
+              typeof payload.message === "string"
               ? payload.message
               : `โหลด Dashboard ไม่สำเร็จ (HTTP ${response.status})`;
           throw new Error(message);
@@ -703,7 +720,12 @@ function FleetStatusByDc({
       setError("");
       try {
         const fleetTypes = new Set<string>();
-        const list = await fetchAllFleetRequests(apiUrl, signal, types => types.forEach(type => fleetTypes.add(type)));
+        const list = await fetchAllFleetRequests(
+          apiUrl,
+          signal,
+          types => types.forEach(type => fleetTypes.add(type)),
+          definitions => { if (!signal.aborted) setApiProcesses(definitions); },
+        );
         if (!signal.aborted) setApiFleetTypes(Array.from(fleetTypes));
         if (!signal.aborted) setRequests(list);
       } catch (err) {
@@ -729,18 +751,28 @@ function FleetStatusByDc({
   // Scope the common source before calculating cards, charts, tables and SLA.
   const sourceRequests = useMemo(() => {
     if (!warehouseScope.ready) return [];
-    const allRows = suppliedRequests ?? requests;
+  
+    // แสดงทุก fleet_type ยกเว้นรถเสริม
+    const allRows = (suppliedRequests ?? requests).filter(
+      row => String(row.fleet_type ?? "").trim() !== "รถเสริม",
+    );
+  
     if (warehouseScope.showAll) return allRows;
+  
     const allowedCodes = new Set(warehouseScope.codes);
+  
     return allRows.filter(row =>
       allowedCodes.has(
-        String(row.dc_code ?? "").trim().replace(/\s+/g, " ").toUpperCase()
-      )
+        String(row.dc_code ?? "")
+          .trim()
+          .replace(/\s+/g, " ")
+          .toUpperCase(),
+      ),
     );
   }, [suppliedRequests, requests, warehouseScope]);
   const filterOptions = useMemo(() => {
     const values = (key: "area" | "fbp" | "new_truck_type" | "status") => Array.from(new Set(sourceRequests.map(row => String(row[key] ?? "").trim()).filter(Boolean))).sort();
-    const years = sourceRequests.flatMap(row => { const day = calendarDate(row.request_date); return day ? [Number(day.slice(0,4))] : []; });
+    const years = sourceRequests.flatMap(row => { const day = calendarDate(row.request_date); return day ? [Number(day.slice(0, 4))] : []; });
     const areas = Array.from(new Set(sourceRequests.map(row => String(row.dc_code ?? "").trim()).filter(Boolean))).sort();
     const companies = new Map<string, string>();
     for (const row of sourceRequests) {
@@ -748,8 +780,8 @@ function FleetStatusByDc({
       const name = String(row.approved_company_name ?? "").trim();
       if (id) companies.set(id, name || `FBP ${id}`);
     }
-    const fbps = Array.from(companies, ([id, name]) => ({ id, name })).sort((a,b) => a.name.localeCompare(b.name, "th"));
-    return { areas, fbps, trucks: values("new_truck_type"), statuses: values("status"), years: Array.from(new Set([currentYear, ...years])).sort((a,b) => b-a) };
+    const fbps = Array.from(companies, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th"));
+    return { areas, fbps, trucks: values("new_truck_type"), statuses: values("status"), years: Array.from(new Set([currentYear, ...years])).sort((a, b) => b - a) };
   }, [sourceRequests, currentYear]);
   const dcTypeOptions = useMemo(() => Array.from(new Set(sourceRequests.map(row => String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง"))).sort(), [sourceRequests]);
   const typeRequests = useMemo(() => sourceRequests.filter(row =>
@@ -757,17 +789,28 @@ function FleetStatusByDc({
     (requestTypeFilter === "all" || (String(row.fleet_type ?? "").trim() || "ไม่ระบุประเภทคำขอ") === requestTypeFilter)
   ), [sourceRequests, dcTypeFilter, requestTypeFilter]);
   const requestTypeOptions = useMemo(
-    () => Array.from(new Set([
-      ...apiFleetTypes,
-      ...sourceRequests.map(item => String(item.fleet_type ?? "").trim() || "ไม่ระบุประเภทคำขอ"),
-    ])).sort((a,b) => a.localeCompare(b, "th")),
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...apiFleetTypes,
+            ...sourceRequests.map(
+              item =>
+                String(item.fleet_type ?? "").trim() ||
+                "ไม่ระบุประเภทคำขอ",
+            ),
+          ]
+            .map(type => type.trim())
+            .filter(type => type !== "" && type !== "รถเสริม"),
+        ),
+      ).sort((a, b) => a.localeCompare(b, "th")),
     [sourceRequests, apiFleetTypes],
   );
   const filteredRequests = useMemo(
     () => typeRequests.filter(item => {
       const date = calendarDate(item.request_date);
-      return date !== null && Number(date.slice(0,4)) === selectedYear &&
-        (monthFilter === "all" || date.slice(5,7) === monthFilter) &&
+      return date !== null && Number(date.slice(0, 4)) === selectedYear &&
+        (monthFilter === "all" || date.slice(5, 7) === monthFilter) &&
         (areaFilter === "all" || String(item.dc_code ?? "").trim() === areaFilter) &&
         (fbpFilter === "all" || String(item.approved_company_id ?? "").trim() === fbpFilter) &&
         matchesDashboardStatus(item.status, statusFilter) &&
@@ -800,33 +843,27 @@ function FleetStatusByDc({
   const [showClosedSteps, setShowClosedSteps] = useState(false);
   const stageColumns = useMemo(() => {
     const columns = new Map<string, { key: string; level: string; name: string }>();
-    for (const row of typeRequests) {
-      const level = String(row.latest_process_level ?? "").trim();
-      const name = String(row.latest_process_name ?? "").trim() || "ไม่ระบุชื่อขั้นตอน";
+    // หัวตารางจาก master_flow: รวมชื่อซ้ำข้าม fleet_type
+    for (const row of [...processes, ...apiProcesses]) {
+      if (String(row.fleet_type ?? "").trim() === "รถเสริม") continue;
+      const level = String(row.process_level ?? "").trim();
+      const name = String(row.process ?? "").trim();
+      if (!level || !name) continue;
       const key = JSON.stringify([level, name]);
       columns.set(key, { key, level, name });
     }
-
-    // Always include steps 1–8, even when no vehicle currently occupies them.
-    // Keep the original level/name key so existing vehicle counts still match.
-    for (let step = 1; step <= 8; step++) {
-      const exists = Array.from(columns.values()).some(
-        column => Number(column.level) === step
-      );
-      if (!exists) {
-        const level = String(step);
-        const name = `ขั้นตอนที่ ${step}`;
-        const key = JSON.stringify([level, name]);
-        columns.set(key, { key, level, name });
-      }
+    // ใช้ key เดียวกับเซลล์จำนวนรถเดิม
+    for (const row of typeRequests) {
+      const level = String(row.latest_process_level ?? "").trim();
+      const name = String(row.latest_process_name ?? "").trim();
+      if (!level || !name) continue;
+      const key = JSON.stringify([level, name]);
+      columns.set(key, { key, level, name });
     }
-
-    return Array.from(columns.values()).sort((a, b) => {
-      const left = a.level && Number.isFinite(Number(a.level)) ? Number(a.level) : Infinity;
-      const right = b.level && Number.isFinite(Number(b.level)) ? Number(b.level) : Infinity;
-      return (left === right ? 0 : left - right) || a.name.localeCompare(b.name, "th");
-    });
-  }, [typeRequests]);
+    return Array.from(columns.values()).sort((a, b) =>
+      Number(a.level) - Number(b.level) || a.name.localeCompare(b.name, "th"),
+    );
+  }, [processes, apiProcesses, typeRequests]);
 
   const visibleStageColumns = stageColumns.filter(column => {
     const level = Number(column.level);
@@ -841,27 +878,88 @@ function FleetStatusByDc({
   const toggleSummaryMonth = (month: number) => {
     setSelectedSummaryMonths(current => current.includes(month)
       ? (current.length > 1 ? current.filter(value => value !== month) : current)
-      : (current.length < 6 ? [...current, month].sort((a,b) => a-b) : current));
+      : (current.length < 6 ? [...current, month].sort((a, b) => a - b) : current));
     setVendorTooltip(null);
   };
   const monthlyTruckCounts = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();
-    for (const row of typeRequests) {
-      if ((areaFilter !== "all" && String(row.dc_code ?? "").trim() !== areaFilter) ||
-          (fbpFilter !== "all" && String(row.approved_company_id ?? "").trim() !== fbpFilter) ||
-          !matchesDashboardStatus(row.status, statusFilter) ||
-          (truckTypeFilter !== "all" && row.new_truck_type !== truckTypeFilter)) continue;
-      const day = calendarDate(row.request_date), level = Number(row.latest_process_level), qty = Number(row.qty);
-      if (!day || !Number.isInteger(level) || level < 2 || level > 7 || !Number.isFinite(qty) || qty <= 0) continue;
-      const month = day.slice(0,7);
-      if (!sixMonthSummary.some(item => item.key === month)) continue;
-      const key = JSON.stringify([String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง", String(row.dc_code ?? "").trim() || "ไม่ระบุคลัง", String(row.new_truck_type ?? "").trim() || "ไม่ระบุประเภทรถ"]);
-      const months = counts.get(key) ?? new Map<string, number>();
-      months.set(month, (months.get(month) ?? 0) + qty);
-      counts.set(key, months);
+    const selectedMonths = new Set(
+      sixMonthSummary.map(month => month.key),
+    );
+
+    // ใช้ข้อมูลแผนชุดเดียวกับกราฟ
+    const planDates = new Map<string, string>();
+
+    const planRecords = filteredRequests
+      .flatMap<WarehouseRecord>(request =>
+        asRecords(
+          request.vehicle_warehouse_info ?? request.vehicle_info,
+        ).map(record => ({
+          ...record,
+          request_id: record.request_id ?? request.id,
+        })),
+      )
+      .concat(warehouseRecords);
+
+    for (const record of planRecords) {
+      const key = vehicleKey(record.request_id, record.vehicle_no);
+      const day = calendarDate(record.warehouse_plan_date);
+
+      if (key && day) {
+        planDates.set(key, day);
+      }
     }
+
+    // จับคู่รถกับคลังและประเภทรถของแถวที่ผ่านตัวกรอง
+    const vehicles = new Map<string, FleetRequest>();
+
+    for (const request of filteredRequests) {
+      const records = asRecords(
+        request.vehicle_warehouse_info ?? request.vehicle_info,
+      );
+
+      const vehicleNumbers = new Set(
+        [
+          request.vehicle_no,
+          ...records.map(record => record.vehicle_no),
+        ]
+          .filter(value => value != null && String(value).trim() !== "")
+          .map(value => String(value).trim()),
+      );
+
+      for (const vehicleNo of vehicleNumbers) {
+        const key = vehicleKey(request.id, vehicleNo);
+
+        if (key) vehicles.set(key, request);
+      }
+    }
+
+    // นับรถแต่ละคันครั้งเดียว ตามเดือนที่วางแผนเข้าคลัง
+    for (const [vehicleId, request] of vehicles) {
+      const day = planDates.get(vehicleId);
+      if (!day) continue;
+
+      const month = day.slice(0, 7);
+      if (!selectedMonths.has(month)) continue;
+
+      const groupKey = JSON.stringify([
+        String(request.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง",
+        String(request.dc_code ?? "").trim() || "ไม่ระบุคลัง",
+        String(request.new_truck_type ?? "").trim() || "ไม่ระบุประเภทรถ",
+      ]);
+
+      const months = counts.get(groupKey) ?? new Map<string, number>();
+
+      months.set(month, (months.get(month) ?? 0) + 1);
+      counts.set(groupKey, months);
+    }
+
     return counts;
-  }, [typeRequests, sixMonthSummary, areaFilter, fbpFilter, statusFilter, truckTypeFilter]);
+  }, [
+    filteredRequests,
+    warehouseRecords,
+    sixMonthSummary,
+  ]);
 
   const stageGroups = useMemo(() => {
     const groups = new Map<string, { dcCode: string; dcType: string; trucks: Map<string, { truckType: string; total: number; stages: Map<string, { count: number; vendors: Map<string, number>; companies: Map<string, number> }> }> }>();
@@ -946,9 +1044,9 @@ function FleetStatusByDc({
       color: string;
       qty: number;
     }[] = [
-      ...FLEET_STATUSES.map(status => ({ ...status, qty: 0 })),
-      { key: "other", label: "สถานะอื่น", color: "#64748b", qty: 0 },
-    ];
+        ...FLEET_STATUSES.map(status => ({ ...status, qty: 0 })),
+        { key: "other", label: "สถานะอื่น", color: "#64748b", qty: 0 },
+      ];
     for (const item of filteredRequests) {
       const qty = Number(item.qty);
       if (
@@ -999,9 +1097,8 @@ function FleetStatusByDc({
     .map((point, index) =>
       point.actual === null
         ? ""
-        : `${
-            index === 0 || timeline[index - 1].actual === null ? "M" : "L"
-          }${chartX(index)},${chartY(point.actual)}`,
+        : `${index === 0 || timeline[index - 1].actual === null ? "M" : "L"
+        }${chartX(index)},${chartY(point.actual)}`,
     )
     .join(" ");
   return (
@@ -1138,22 +1235,22 @@ function FleetStatusByDc({
         )}
       </header>
       <section className="fleet-filter-shell" aria-label="ตัวกรองข้อมูล"><div className="fleet-filter-heading"><span className="fleet-filter-emblem" aria-hidden="true"><FleetFilterGlyph kind="sliders" /></span><h3>ตัวกรองข้อมูล</h3><span className="fleet-filter-context">{selectedYear + 543} · {monthFilter === "all" ? "ทุกเดือน" : MONTH_NAMES[Number(monthFilter) - 1]}</span></div>
-      <div className="fleet-filters">
-        <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={selectedYear} onChange={e => { setSelectedYear(Number(e.target.value)); setHoveredMonth(null); }}>{yearOptions.map(year => <option key={year} value={year}>{year}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">ทุกเดือน</option>{MONTH_NAMES.map((month,index) => <option key={month} value={String(index+1).padStart(2,"0")}>{month}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={dcTypeFilter} onChange={e => setDcTypeFilter(e.target.value)}><option value="all">ทุกกลุ่ม DC</option>{dcTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><select className="fleet-field" value={areaFilter} disabled={filterOptions.areas.length === 0} onChange={e => setAreaFilter(e.target.value)}><option value="all">{filterOptions.areas.length ? "ทุกพื้นที่" : "ไม่พบพื้นที่"}</option>{filterOptions.areas.map(area => <option key={area} value={area}>{area}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><select className="fleet-field" value={fbpFilter} disabled={filterOptions.fbps.length === 0} onChange={e => setFbpFilter(e.target.value)}><option value="all">{filterOptions.fbps.length ? "ทุก FBP" : "ไม่พบ FBP"}</option>{filterOptions.fbps.map(fbp => <option key={fbp.id} value={fbp.id}>{fbp.name}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={requestTypeFilter} onChange={e => setRequestTypeFilter(e.target.value)}><option value="all">ทุกประเภทคำขอ</option>{requestTypeFilter !== "all" && !requestTypeOptions.includes(requestTypeFilter) && <option value={requestTypeFilter}>{requestTypeFilter}</option>}{requestTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><select className="fleet-field" value={truckTypeFilter} onChange={e => setTruckTypeFilter(e.target.value)}><option value="all">ทุกประเภทรถ</option>{filterOptions.trucks.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-        <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}><FleetFilterGlyph kind="clear" />ล้างตัวกรอง</button>
-      </div>
-      <p className="fleet-filter-note">ปีและเดือนกรองตามวันที่สร้างคำขอ (request_date) · กราฟแสดง ม.ค.–ธ.ค. ของปีที่เลือก</p>
-      {hasFilters && (
-        <p className="fleet-filter-note">
-          แสดงผลตามตัวกรองที่เลือก · {dcSummary.length} คลัง
-        </p>
-      )}
+        <div className="fleet-filters">
+          <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={selectedYear} onChange={e => { setSelectedYear(Number(e.target.value)); setHoveredMonth(null); }}>{yearOptions.map(year => <option key={year} value={year}>{year}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">ทุกเดือน</option>{MONTH_NAMES.map((month, index) => <option key={month} value={String(index + 1).padStart(2, "0")}>{month}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={dcTypeFilter} onChange={e => setDcTypeFilter(e.target.value)}><option value="all">ทุกกลุ่ม DC</option>{dcTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><select className="fleet-field" value={areaFilter} disabled={filterOptions.areas.length === 0} onChange={e => setAreaFilter(e.target.value)}><option value="all">{filterOptions.areas.length ? "ทุกพื้นที่" : "ไม่พบพื้นที่"}</option>{filterOptions.areas.map(area => <option key={area} value={area}>{area}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><select className="fleet-field" value={fbpFilter} disabled={filterOptions.fbps.length === 0} onChange={e => setFbpFilter(e.target.value)}><option value="all">{filterOptions.fbps.length ? "ทุก FBP" : "ไม่พบ FBP"}</option>{filterOptions.fbps.map(fbp => <option key={fbp.id} value={fbp.id}>{fbp.name}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={requestTypeFilter} onChange={e => setRequestTypeFilter(e.target.value)}><option value="all">ทุกประเภทคำขอ</option>{requestTypeFilter !== "all" && !requestTypeOptions.includes(requestTypeFilter) && <option value={requestTypeFilter}>{requestTypeFilter}</option>}{requestTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><select className="fleet-field" value={truckTypeFilter} onChange={e => setTruckTypeFilter(e.target.value)}><option value="all">ทุกประเภทรถ</option>{filterOptions.trucks.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}><FleetFilterGlyph kind="clear" />ล้างตัวกรอง</button>
+        </div>
+        <p className="fleet-filter-note">ปีและเดือนกรองตามวันที่สร้างคำขอ (request_date) · กราฟแสดง ม.ค.–ธ.ค. ของปีที่เลือก</p>
+        {hasFilters && (
+          <p className="fleet-filter-note">
+            แสดงผลตามตัวกรองที่เลือก · {dcSummary.length} คลัง
+          </p>
+        )}
       </section>
       {activeError && (
         <div className="fleet-error" role="alert">
@@ -1356,87 +1453,85 @@ function FleetStatusByDc({
                     strokeLinejoin="round"
                     fill="none"
                   />
-{timeline.map((point, index) => {
-  const tooltip = [
-    `${point.label} ${activeYear}`,
-    `แผนสะสม: ${formatNumber(point.planned)} คัน`,
-    `ส่งมอบจริงสะสม: ${
-      point.actual === null
-        ? "ไม่มีข้อมูล"
-        : `${formatNumber(point.actual)} คัน`
-    }`,
-    ...(point.actual !== null
-      ? [
-          `ส่วนต่างจริง − แผน: ${formatNumber(
-            point.actual - point.planned,
-          )} คัน`,
-        ]
-      : []),
-  ].join("\n");
-  return (
-    <g key={point.label}>
-      <circle
-        cx={chartX(index)}
-        cy={chartY(point.planned)}
-        r="3"
-        fill="#94a3b8"
-      />
-      {point.actual !== null && (
-        <circle
-          cx={chartX(index)}
-          cy={chartY(point.actual)}
-          r="4"
-          fill="#2563eb"
-          stroke="white"
-          strokeWidth="1"
-        />
-      )}
-      <text
-        x={chartX(index)}
-        y="247"
-        textAnchor="middle"
-        fill="#62738a"
-        fontSize="12"
-      >
-        {point.label.slice(0, 3)}
-      </text>
-      {/* พื้นที่รับเมาส์ครอบคลุมทั้งแนวของเดือน */}
-      <rect
-        x={chartX(index) - 28}
-        y="30"
-        width="56"
-        height="194"
-        fill="transparent"
-        pointerEvents="all"
-        style={{ cursor: "pointer", outline: "none" }}
-        tabIndex={0}
-        role="button"
-        aria-label={tooltip}
-        onMouseEnter={() => setHoveredMonth(index)}
-        onFocus={() => setHoveredMonth(index)}
-        onBlur={() => setHoveredMonth(null)}
-        onClick={() => setHoveredMonth(index)}
-        onKeyDown={event => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setHoveredMonth(index);
-          }
-          if (event.key === "Escape") setHoveredMonth(null);
-        }}
-      >
-        <title>{tooltip}</title>
-      </rect>
-    </g>
-  );
-})}
+                  {timeline.map((point, index) => {
+                    const tooltip = [
+                      `${point.label} ${activeYear}`,
+                      `แผนสะสม: ${formatNumber(point.planned)} คัน`,
+                      `ส่งมอบจริงสะสม: ${point.actual === null
+                        ? "ไม่มีข้อมูล"
+                        : `${formatNumber(point.actual)} คัน`
+                      }`,
+                      ...(point.actual !== null
+                        ? [
+                          `ส่วนต่างจริง − แผน: ${formatNumber(
+                            point.actual - point.planned,
+                          )} คัน`,
+                        ]
+                        : []),
+                    ].join("\n");
+                    return (
+                      <g key={point.label}>
+                        <circle
+                          cx={chartX(index)}
+                          cy={chartY(point.planned)}
+                          r="3"
+                          fill="#94a3b8"
+                        />
+                        {point.actual !== null && (
+                          <circle
+                            cx={chartX(index)}
+                            cy={chartY(point.actual)}
+                            r="4"
+                            fill="#2563eb"
+                            stroke="white"
+                            strokeWidth="1"
+                          />
+                        )}
+                        <text
+                          x={chartX(index)}
+                          y="247"
+                          textAnchor="middle"
+                          fill="#62738a"
+                          fontSize="12"
+                        >
+                          {point.label.slice(0, 3)}
+                        </text>
+                        {/* พื้นที่รับเมาส์ครอบคลุมทั้งแนวของเดือน */}
+                        <rect
+                          x={chartX(index) - 28}
+                          y="30"
+                          width="56"
+                          height="194"
+                          fill="transparent"
+                          pointerEvents="all"
+                          style={{ cursor: "pointer", outline: "none" }}
+                          tabIndex={0}
+                          role="button"
+                          aria-label={tooltip}
+                          onMouseEnter={() => setHoveredMonth(index)}
+                          onFocus={() => setHoveredMonth(index)}
+                          onBlur={() => setHoveredMonth(null)}
+                          onClick={() => setHoveredMonth(index)}
+                          onKeyDown={event => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setHoveredMonth(index);
+                            }
+                            if (event.key === "Escape") setHoveredMonth(null);
+                          }}
+                        >
+                        </rect>
+                      </g>
+                    );
+                  })}
                   {hoveredMonth !== null && timeline[hoveredMonth] && (() => {
                     const item = timeline[hoveredMonth];
                     const x = Math.min(480, Math.max(50, chartX(hoveredMonth) - 140));
                     const gap = item.actual === null ? null : item.actual - item.planned;
                     const gapLabel = gap === null ? "ส่วนต่าง: ไม่มีข้อมูล"
                       : gap < 0 ? `ต่ำกว่าแผน: ${formatNumber(-gap)} คัน`
-                      : gap > 0 ? `สูงกว่าแผน: ${formatNumber(gap)} คัน`
-                      : "ส่งมอบเท่ากับแผน";
+                        : gap > 0 ? `สูงกว่าแผน: ${formatNumber(gap)} คัน`
+                          : "ส่งมอบเท่ากับแผน";
                     return (
                       <g pointerEvents="none">
                         <line x1={chartX(hoveredMonth)} x2={chartX(hoveredMonth)} y1="30" y2="220" stroke="#93c5fd" strokeDasharray="4 4" />
@@ -1563,59 +1658,62 @@ function FleetStatusByDc({
         </article>
       </div>
       <div className="fleet-stage-layout">
-      <article className="fleet-panel fleet-stage-panel">
-        <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมรวมทุกขั้นตอน</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
-        {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={event => { setVendorTooltip(null); if (monthScrollRef.current && monthScrollRef.current.scrollTop !== event.currentTarget.scrollTop) monthScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
-          <table className="fleet-stage-table fleet-locked-table">
-            <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{visibleStageColumns.map(column => <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}<th scope="col" className="fleet-total-heading">รวม<span className="fleet-header-unit">จำนวนคัน</span></th></tr></thead>
-            <tbody>{stageGroups.map(([key, group], groupIndex) => <Fragment key={key}>
-              <tr className="fleet-dc-group">
-                {(groupIndex === 0 || stageGroups[groupIndex - 1][1].dcType !== group.dcType) && <th className="fleet-dc-merged fleet-lock-dc" scope="rowgroup" rowSpan={stageGroups.filter(([, item]) => item.dcType === group.dcType).reduce((sum, [, item]) => sum + 1 + item.trucks.size, 0)}><span className="fleet-dc-pill">{group.dcType}</span></th>}
-                <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 1}><span className="fleet-group-quantity">{formatNumber(Array.from(group.trucks.values()).reduce((sum, truck) => sum + truck.total, 0))} คัน</span></td>
-              </tr>
-              {Array.from(group.trucks.values()).sort((a,b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">
-                <th scope="row" className="fleet-lock-truck"><span className="fleet-truck-label">{truck.truckType}</span></th>
-                {visibleStageColumns.map(column => {
-                  const cell = truck.stages.get(column.key);
-                  return <td key={column.key} data-stage={column.level} className={column.level === "8" ? "fleet-stage-completed" : undefined}>
-                    {cell ? <button
-                      type="button"
-                      className="fleet-count-button"
-                      aria-label={`${formatNumber(cell.count)} คัน · ${Array.from(cell.vendors.entries()).map(([name, count]) => `${name}: ${formatNumber(count)} คัน`).join(", ")}`}
-                      onMouseEnter={event => {
-                        const box = event.currentTarget.getBoundingClientRect();
-                        setVendorTooltip({ left: Math.max(12, Math.min(window.innerWidth - 300, box.left)), top: box.bottom + 8, entries: Array.from(cell.vendors.entries()).sort((a,b) => a[0].localeCompare(b[0], "th")), companies: Array.from(cell.companies.entries()).sort((a,b) => a[0].localeCompare(b[0], "th")) });
-                      }}
-                      onMouseLeave={() => setVendorTooltip(null)}
-                      onFocus={event => {
-                        const box = event.currentTarget.getBoundingClientRect();
-                        setVendorTooltip({ left: Math.max(12, Math.min(window.innerWidth - 300, box.left)), top: box.bottom + 8, entries: Array.from(cell.vendors.entries()).sort((a,b) => a[0].localeCompare(b[0], "th")), companies: Array.from(cell.companies.entries()).sort((a,b) => a[0].localeCompare(b[0], "th")) });
-                      }}
-                      onBlur={() => setVendorTooltip(null)}
-                      onKeyDown={event => { if (event.key === "Escape") setVendorTooltip(null); }}
-                    >{formatNumber(cell.count)}</button> : <span className="fleet-cell-empty">—</span>}
-                  </td>;
-                })}
-                <td className="fleet-stage-total">{formatNumber(truck.total)}</td>
-              </tr>)}
-            </Fragment>)}</tbody>
-          </table>
-        </div>}
-      </article>
+        <article className="fleet-panel fleet-stage-panel">
+          <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมรวมทุกขั้นตอน</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={event => { setVendorTooltip(null); if (monthScrollRef.current && monthScrollRef.current.scrollTop !== event.currentTarget.scrollTop) monthScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
+            <table className="fleet-stage-table fleet-locked-table">
+              <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{visibleStageColumns.map(column => <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}<th scope="col" className="fleet-total-heading">รวม<span className="fleet-header-unit">จำนวนคัน</span></th></tr></thead>
+              <tbody>{stageGroups.map(([key, group], groupIndex) => <Fragment key={key}>
+                <tr className="fleet-dc-group">
+                  {(groupIndex === 0 || stageGroups[groupIndex - 1][1].dcType !== group.dcType) && <th className="fleet-dc-merged fleet-lock-dc" scope="rowgroup" rowSpan={stageGroups.filter(([, item]) => item.dcType === group.dcType).reduce((sum, [, item]) => sum + 1 + item.trucks.size, 0)}><span className="fleet-dc-pill">{group.dcType}</span></th>}
+                  <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 1}><span className="fleet-group-quantity">{formatNumber(Array.from(group.trucks.values()).reduce((sum, truck) => sum + truck.total, 0))} คัน</span></td>
+                </tr>
+                {Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">
+                  <th scope="row" className="fleet-lock-truck"><span className="fleet-truck-label">{truck.truckType}</span></th>
+                  {visibleStageColumns.map(column => {
+                    const cell = truck.stages.get(column.key);
+                    return <td key={column.key} data-stage={column.level} className={column.level === "8" ? "fleet-stage-completed" : undefined}>
+                      {cell ? <button
+                        type="button"
+                        className="fleet-count-button"
+                        aria-label={`${formatNumber(cell.count)} คัน · ${Array.from(cell.vendors.entries()).map(([name, count]) => `${name}: ${formatNumber(count)} คัน`).join(", ")}`}
+                        onMouseEnter={event => {
+                          const box = event.currentTarget.getBoundingClientRect();
+                          setVendorTooltip({ left: Math.max(12, Math.min(window.innerWidth - 300, box.left)), top: box.bottom + 8, entries: Array.from(cell.vendors.entries()).sort((a, b) => a[0].localeCompare(b[0], "th")), companies: Array.from(cell.companies.entries()).sort((a, b) => a[0].localeCompare(b[0], "th")) });
+                        }}
+                        onMouseLeave={() => setVendorTooltip(null)}
+                        onFocus={event => {
+                          const box = event.currentTarget.getBoundingClientRect();
+                          setVendorTooltip({ left: Math.max(12, Math.min(window.innerWidth - 300, box.left)), top: box.bottom + 8, entries: Array.from(cell.vendors.entries()).sort((a, b) => a[0].localeCompare(b[0], "th")), companies: Array.from(cell.companies.entries()).sort((a, b) => a[0].localeCompare(b[0], "th")) });
+                        }}
+                        onBlur={() => setVendorTooltip(null)}
+                        onKeyDown={event => { if (event.key === "Escape") setVendorTooltip(null); }}
+                      >{formatNumber(cell.count)}</button> : <span className="fleet-cell-empty">—</span>}
+                    </td>;
+                  })}
+                  <td className="fleet-stage-total">{formatNumber(truck.total)}</td>
+                </tr>)}
+              </Fragment>)}</tbody>
+            </table>
+          </div>}
+        </article>
 
-      <article className="fleet-panel fleet-month-panel">
-        <div className="fleet-panel-header"><div><h3>สรุป 6 เดือน</h3><p className="fleet-panel-description">STEP 2–7 · ตามวันที่สร้างคำขอ · ปี {selectedYear + 543}</p></div><button type="button" className="fleet-month-counter fleet-month-open" aria-haspopup="dialog" onClick={() => monthPickerDialogRef.current?.showModal()}>เลือกเดือน · {selectedSummaryMonths.length}/6 ▾</button></div>
-        {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={event => { setVendorTooltip(null); if (stageScrollRef.current && stageScrollRef.current.scrollTop !== event.currentTarget.scrollTop) stageScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
-          <table className="fleet-stage-table fleet-month-table"><thead><tr>{sixMonthSummary.map(month => <th key={month.key} scope="col"><span className="fleet-step-name">{month.label}</span></th>)}</tr></thead>
-          <tbody>{stageGroups.map(([key,group]) => <Fragment key={key}>
-            <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
-            {Array.from(group.trucks.values()).sort((a,b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">{sixMonthSummary.map(month => {
-              const count = monthlyTruckCounts.get(JSON.stringify([group.dcType,group.dcCode,truck.truckType]))?.get(month.key) ?? 0;
-              return <td key={month.key} title={`${group.dcCode} · ${truck.truckType} · ${month.label}: ${count} คัน`}>{count ? formatNumber(count) : <span className="fleet-cell-empty">—</span>}</td>;
-            })}</tr>)}
-          </Fragment>)}</tbody></table>
-        </div>}
-      </article>
+        <article className="fleet-panel fleet-month-panel">
+          <div className="fleet-panel-header"><h3>แผนเข้าคลังรายเดือน</h3>
+            <p className="fleet-panel-description">
+              ตาม warehouse_plan_date · จำนวนรายเดือน · ปี {selectedYear + 543}
+            </p><button type="button" className="fleet-month-counter fleet-month-open" aria-haspopup="dialog" onClick={() => monthPickerDialogRef.current?.showModal()}>เลือกเดือน · {selectedSummaryMonths.length}/6 ▾</button></div>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={event => { setVendorTooltip(null); if (stageScrollRef.current && stageScrollRef.current.scrollTop !== event.currentTarget.scrollTop) stageScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
+            <table className="fleet-stage-table fleet-month-table"><thead><tr>{sixMonthSummary.map(month => <th key={month.key} scope="col"><span className="fleet-step-name">{month.label}</span></th>)}</tr></thead>
+              <tbody>{stageGroups.map(([key, group]) => <Fragment key={key}>
+                <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
+                {Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">{sixMonthSummary.map(month => {
+                  const count = monthlyTruckCounts.get(JSON.stringify([group.dcType, group.dcCode, truck.truckType]))?.get(month.key) ?? 0;
+                  return <td key={month.key} title={`${group.dcCode} · ${truck.truckType} · ${month.label}: ${count} คัน`}>{count ? formatNumber(count) : <span className="fleet-cell-empty">—</span>}</td>;
+                })}</tr>)}
+              </Fragment>)}</tbody></table>
+          </div>}
+        </article>
 
       </div>
 
@@ -1788,12 +1886,17 @@ function SlaOverduePanel({ requests: visibleRequests, parentLoading, parentError
 
         catch { throw new Error(`API ไม่ได้ส่ง JSON กลับมา (HTTP ${response.status}) กรุณาตรวจสอบตำแหน่งไฟล์ dashboard_sla_overdue.php`); }
 
+        console.log("บันทึกวันที่:", {
+          httpStatus: response.status,
+          ok: response.ok,
+          result,
+        });
+        
         if (!response.ok || result.status !== "success") {
-
-          throw new Error(result.message || `โหลดข้อมูลไม่สำเร็จ (HTTP ${response.status})`);
-
+          throw new Error(
+            result.message || `บันทึกวันที่ไม่สำเร็จ (${response.status})`
+          );
         }
-
         if (!Array.isArray(result.data)) throw new Error("รูปแบบข้อมูล API ไม่ถูกต้อง: ไม่พบรายการ data");
 
         const normalized: OverdueRow[] = result.data.map((row: OverdueRow) => ({
@@ -1930,91 +2033,101 @@ function SlaOverduePanel({ requests: visibleRequests, parentLoading, parentError
         </header>
 
         <div className="sla-workspace">
-        <aside className="sla-kpis">
+          <aside className="sla-kpis">
 
-          {[{label: "คำขอรถที่เกิน SLA", value: `${requests} คำขอ`, icon: <SlaInlineIcon type="alert" size={20} />, color: "rose"},
-            {label: "เกิน SLA มากที่สุด", value: `${longest} วัน`, icon: <SlaInlineIcon type="clock" size={20} />, color: "blue"}]
-            .map((card) => <div key={card.label} className="sla-kpi">
+            {[{ label: "คำขอรถที่เกิน SLA", value: `${requests} คำขอ`, icon: <SlaInlineIcon type="alert" size={20} />, color: "rose" },
+            { label: "เกิน SLA มากที่สุด", value: `${longest} วัน`, icon: <SlaInlineIcon type="clock" size={20} />, color: "blue" }]
+              .map((card) => <div key={card.label} className="sla-kpi">
 
-              <span className={`sla-kpi-icon ${card.color}`}>{card.icon}</span>
+                <span className={`sla-kpi-icon ${card.color}`}>{card.icon}</span>
 
-              <div><p className="sla-kpi-label">{card.label}</p><p className="sla-kpi-value">{scopeLoading || scopeError ? "—" : card.value}</p></div>
+                <div><p className="sla-kpi-label">{card.label}</p><p className="sla-kpi-value">{scopeLoading || scopeError ? "—" : card.value}</p></div>
 
-            </div>)}
+              </div>)}
 
-        </aside>
+          </aside>
 
-        <section className="sla-table-section">
+          <section className="sla-table-section">
 
-          <div className="sla-toolbar">
+            <div className="sla-toolbar">
 
-            <label className="sla-search"><SlaInlineIcon type="search" size={16} className="sla-search-icon" />
+              <label className="sla-search"><SlaInlineIcon type="search" size={16} className="sla-search-icon" />
 
-              <input aria-label="ค้นหารายการ" placeholder="ค้นหาเลขคำขอ ทะเบียน ประเภทรถ หรือขั้นตอน" value={search} onChange={(event) => setSearch(event.target.value)} className={`${controlClass}`} />
+                <input aria-label="ค้นหารายการ" placeholder="ค้นหาเลขคำขอ ทะเบียน ประเภทรถ หรือขั้นตอน" value={search} onChange={(event) => setSearch(event.target.value)} className={`${controlClass}`} />
 
-            </label>
+              </label>
 
-            <select aria-label="กรอง DC" value={dc} onChange={(event) => setDc(event.target.value)} className={controlClass}><option value="">ทุก DC</option>{dcOptions.map((value) => <option key={value}>{value}</option>)}</select>
+              <select aria-label="กรอง DC" value={dc} onChange={(event) => setDc(event.target.value)} className={controlClass}><option value="">ทุก DC</option>{dcOptions.map((value) => <option key={value}>{value}</option>)}</select>
 
-            <select aria-label="กรอง Fleet Type" value={fleet} onChange={(event) => setFleet(event.target.value)} className={controlClass}><option value="">ทุก Fleet Type</option>{fleetOptions.map((value) => <option key={value}>{value}</option>)}</select>
+              <select aria-label="กรอง Fleet Type" value={fleet} onChange={(event) => setFleet(event.target.value)} className={controlClass}><option value="">ทุก Fleet Type</option>{fleetOptions.map((value) => <option key={value}>{value}</option>)}</select>
 
-            {(search || dc || fleet) && <button type="button" onClick={() => {setSearch("");setDc("");setFleet("");}} className="sla-clear">ล้างตัวกรอง</button>}
+              {(search || dc || fleet) && <button type="button" onClick={() => { setSearch(""); setDc(""); setFleet(""); }} className="sla-clear">ล้างตัวกรอง</button>}
 
-          </div>
+            </div>
 
-          {scopeError && <div role="alert" className="sla-error"><SlaInlineIcon type="alert" size={20} className="sla-alert-icon" /><div><p className="sla-strong">โหลดข้อมูลไม่สำเร็จ</p><p className="sla-error-message">{scopeError}</p><p className="sla-error-api">API: {DASHBOARD_API_URL}</p></div></div>}
+            {scopeError && <div role="alert" className="sla-error"><SlaInlineIcon type="alert" size={20} className="sla-alert-icon" /><div><p className="sla-strong">โหลดข้อมูลไม่สำเร็จ</p><p className="sla-error-message">{scopeError}</p><p className="sla-error-api">API: {DASHBOARD_API_URL}</p></div></div>}
 
-          <div className="sla-table-scroll">
+            <div className="sla-table-scroll">
 
-            <table aria-busy={scopeLoading} className="sla-table">
+              <table aria-busy={scopeLoading} className="sla-table">
 
-              <thead className="sla-table-head"><tr>{headers.map((label) => <th key={label} scope="col" className="sla-table-th">{label}</th>)}</tr></thead>
+                <thead className="sla-table-head"><tr>{headers.map((label) => <th key={label} scope="col" className="sla-table-th">{label}</th>)}</tr></thead>
 
-              <tbody className="sla-table-body">
+                <tbody className="sla-table-body">
 
-                {!scopeLoading && !scopeError && filtered.map((row) => <tr key={`${row.request_id}-${row.vehicle_no}-${row.flow_id}`} className="sla-table-row">
+                  {!scopeLoading && !scopeError && filtered.map((row) => <tr key={`${row.request_id}-${row.vehicle_no}-${row.flow_id}`} className="sla-table-row">
 
-                  <td className="sla-strong">{row.dc_code || "—"}<p className="sla-secondary">{row.running_doc}</p><p className="sla-id">ID {row.request_id}</p></td>
+                    <td className="sla-strong">{row.dc_code || "—"}<p className="sla-secondary">{row.running_doc}</p><p className="sla-id">ID {row.request_id}</p></td>
 
-                  <td className="sla-cell">{row.fleet_type || "—"}</td>
+                    <td className="sla-cell">{row.fleet_type || "—"}</td>
 
-                  <td className="sla-strong">{row.truck_type || "—"}<p className="sla-secondary">{row.license || "—"} · คันที่ {row.vehicle_no}</p></td>
+                    <td className="sla-strong">{row.truck_type || "—"}<p className="sla-secondary">{row.license || "—"} · คันที่ {row.vehicle_no}</p></td>
 
-                  <td className="sla-strong">{row.process_level}. {row.process}<p className="sla-secondary">เริ่ม {formatDate(row.str_date)}</p></td>
+                    <td className="sla-strong">{row.process_level}. {row.process}<p className="sla-secondary">เริ่ม {formatDate(row.str_date)}</p></td>
 
-                  <td className="sla-days"><span className="sla-days-value">{row.days_in_status} วัน<SlaInlineIcon type="alert" size={16} /></span><p className="sla-overdue-days">เกิน SLA {row.overdue_days} วัน</p></td>
+                    <td className="sla-days"><span className="sla-days-value">{row.days_in_status} วัน<SlaInlineIcon type="alert" size={16} /></span><p className="sla-overdue-days">เกิน SLA {row.overdue_days} วัน</p></td>
 
-                  <td className="sla-limit">{row.sla_limit} วัน</td>
+                    <td className="sla-limit">{row.sla_limit} วัน</td>
 
-                  <td className="sla-action">{row.detail?.trim() || row.action_required?.trim() || "—"}</td>
-                  <td className="sla-detail-cell">
-                    <button type="button" className="sla-detail-button" onClick={() => handleOpenDetail(row)} aria-label={`เปิดรายละเอียดคำขอ ${row.running_doc || row.request_id} คันที่ ${row.vehicle_no}`}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12s3-7 9-7 9 7 9 7-3 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="3" /></svg>
-                      ดู Flow
-                    </button>
-                  </td>
+                    <td className="sla-action">{row.detail?.trim() || row.action_required?.trim() || "—"}</td>
+                    <td className="sla-detail-cell">
+                      <button type="button" className="sla-detail-button" onClick={() => handleOpenDetail(row)} aria-label={`เปิดรายละเอียดคำขอ ${row.running_doc || row.request_id} คันที่ ${row.vehicle_no}`}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12s3-7 9-7 9 7 9 7-3 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+                        ดู Flow
+                      </button>
+                    </td>
 
-                </tr>)}
+                  </tr>)}
 
-                {(scopeLoading || scopeError || filtered.length === 0) && <tr><td colSpan={8} className="sla-state"><span className="sla-state-message">{scopeLoading ? "กำลังโหลดรายการเกิน SLA จากทุกคำขอ..." : scopeError ? "ยังไม่สามารถแสดงข้อมูลได้ กรุณาตรวจสอบข้อความด้านบน" : scopedRows.length ? "ไม่พบรายการตามตัวกรอง" : "ไม่พบรายการที่เกิน SLA ตามตัวกรองด้านบน"}</span></td></tr>}
+                  {(scopeLoading || scopeError || filtered.length === 0) && <tr><td colSpan={8} className="sla-state"><span className="sla-state-message">{scopeLoading ? "กำลังโหลดรายการเกิน SLA จากทุกคำขอ..." : scopeError ? "ยังไม่สามารถแสดงข้อมูลได้ กรุณาตรวจสอบข้อความด้านบน" : scopedRows.length ? "ไม่พบรายการตามตัวกรอง" : "ไม่พบรายการที่เกิน SLA ตามตัวกรองด้านบน"}</span></td></tr>}
 
-              </tbody>
+                </tbody>
 
-            </table>
+              </table>
 
-          </div>
+            </div>
 
-          <div className="sla-table-footer"><p>แสดง {filtered.length} ขั้นตอน · {vehicles} คัน{search || dc || fleet ? " ตามตัวกรอง" : " ตามตัวกรองด้านบน"}</p><p>ข้อมูลวันที่ {formatDate(asOf)} · นับวันเริ่มต้นเป็นวันที่ 1</p></div>
+            <div className="sla-table-footer"><p>แสดง {filtered.length} ขั้นตอน · {vehicles} คัน{search || dc || fleet ? " ตามตัวกรอง" : " ตามตัวกรองด้านบน"}</p><p>ข้อมูลวันที่ {formatDate(asOf)} · นับวันเริ่มต้นเป็นวันที่ 1</p></div>
 
-        </section>
+          </section>
         </div>
       </div>
-      <FlowAssessmentModal
-        open={openDetailModal}
-        requestId={selectedRequest?.request_id ?? selectedRequest?.id ?? null}
-        vehicleNo={selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null}
-        onClose={handleCloseDetail}
-      />
+      {openDetailModal && typeof document !== "undefined" &&
+        createPortal(
+          <div style={{ position: "relative", zIndex: 10000 }}>
+            <FlowAssessmentModal
+              open={openDetailModal}
+              requestId={
+                selectedRequest?.request_id ?? selectedRequest?.id ?? null
+              }
+              vehicleNo={
+                selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null
+              }
+              onClose={handleCloseDetail}
+            />
+          </div>,
+          document.body
+        )}
     </section>
 
   );

@@ -1948,52 +1948,75 @@ export default function FlowAssessmentModal({
   }, [data.steps]);
 
   const flowRows = useMemo<DisplayFlowRow[]>(() => {
-    if (data.flow_data.length > 0) {
-      return data.flow_data
-        .map((flow) => {
-          const step = stepMap.get(String(flow.process_id));
-
+    const key = (value: unknown) => String(value ?? "").trim();
+  
+    // ถ้าเปิดเฉพาะคัน ให้ใช้รถคันที่เลือก
+    const cars = data.cars.filter((car) => {
+      if (vehicleNo === null || vehicleNo === undefined || vehicleNo === "") {
+        return true;
+      }
+  
+      return (
+        key(car.vehicle_no) === key(vehicleNo) ||
+        key(car.unit_code) === key(vehicleNo)
+      );
+    });
+  
+    return cars.flatMap((car) => {
+      const carFlows = data.flow_data.filter((flow) => {
+        if (key(flow.request_id) !== key(data.request.id)) {
+          return false;
+        }
+  
+        // ใช้ unit_code ก่อน ถ้ามีทั้งสองฝั่ง
+        if (key(flow.unit_code) && key(car.unit_code)) {
+          return key(flow.unit_code) === key(car.unit_code);
+        }
+  
+        return key(flow.vehicle_no) === key(car.vehicle_no);
+      });
+  
+      return [...data.steps]
+        .sort(
+          (a, b) => Number(a.process_level) - Number(b.process_level)
+        )
+        .map((step): DisplayFlowRow => {
+          // จับคู่ flow_data.process_id กับ steps.id
+          const flow = carFlows.find(
+            (item) => key(item.process_id) === key(step.id)
+          );
+  
           return {
-            ...flow,
-            process: step?.process || `Process ID ${flow.process_id}`,
-            detail: step?.detail ?? null,
-            process_level: step?.process_level || flow.process_id,
-            target_sla: step?.sla ?? null,
+            id: flow
+              ? key(flow.id)
+              : `missing-${key(car.vehicle_no)}-${key(step.id)}`,
+  
+            request_id: key(data.request.id),
+            process_id: key(step.id),
+            unit_code: car.unit_code,
+  
+            str_date: flow?.str_date ?? null,
+            end_date: flow?.end_date ?? null,
+            sla: flow?.sla ?? null,
+  
+            created_by: flow?.created_by ?? null,
+            created_at: flow?.created_at ?? null,
+            updated_by: flow?.updated_by ?? null,
+            updated_at: flow?.updated_at ?? null,
+  
+            vehicle_no: car.vehicle_no,
+            license: flow?.license || car.license,
+            request_truck_detail_id:
+              flow?.request_truck_detail_id ?? car.detail_id ?? null,
+  
+            process: step.process,
+            detail: step.detail,
+            process_level: key(step.process_level),
+            target_sla: step.sla ?? null,
           };
-        })
-        .sort((a, b) => {
-          const vehicleCompare =
-            Number(a.vehicle_no || 0) - Number(b.vehicle_no || 0);
-
-          if (vehicleCompare !== 0) return vehicleCompare;
-
-          return Number(a.process_level || 0) - Number(b.process_level || 0);
         });
-    }
-
-    // กรณียังไม่ Initialize Flow ให้แสดงขั้นตอน Master แยกตามรถ
-    return data.cars.flatMap((car) =>
-      data.steps.map((step) => ({
-        id: `${car.vehicle_no}-${step.id}`,
-        request_id: data.request?.id || String(requestId || ""),
-        process_id: step.id,
-        str_date: null,
-        end_date: null,
-        sla: "0",
-        created_by: null,
-        created_at: null,
-        updated_by: null,
-        updated_at: null,
-        vehicle_no: car.vehicle_no,
-        license: car.license,
-        request_truck_detail_id: car.detail_id,
-        process: step.process,
-        detail: step.detail,
-        process_level: step.process_level,
-        target_sla: step.sla ?? null,
-      }))
-    );
-  }, [data, requestId, stepMap]);
+    });
+  }, [data, vehicleNo]);
 
   const flowRowsByVehicle = useMemo(() => {
     const vehicleMap = new Map<
