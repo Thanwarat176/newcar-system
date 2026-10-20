@@ -172,7 +172,7 @@ interface StepItem {
 
 interface FlowItem {
   unit_code?: string | number | null; // เพิ่มบรรทัดนี้
-
+  process_level?: number | string | null;
   id: string;
   request_id: string;
   process_id: string;
