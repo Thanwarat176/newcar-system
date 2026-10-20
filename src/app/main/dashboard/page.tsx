@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import FlowAssessmentModal from "../trackFleet/component/FlowAssessmentModal";
 import { createPortal } from "react-dom";
 
@@ -36,6 +36,9 @@ interface ProcessDefinition {
   fleet_type?: string | null;
 }
 interface FleetRequest {
+  running_doc?: string | null;
+  raw_unit_code?: unknown;
+  incoming_truck_id?: FleetId;
   id: FleetId;
   vehicle_no?: FleetId;
   unit_code?: string | null;
@@ -49,6 +52,8 @@ interface FleetRequest {
   fbp?: string | null;
   approved_company_id?: number | string | null;
   approved_company_name?: string | null;
+  approved_company_short_name?: string | null;
+  approved_company_display_name?: string | null;
   workload?: number | string | null;
   latest_process_name?: string | null;
   latest_process_level?: number | string | null;
@@ -210,7 +215,10 @@ function normalizeFleetRow(value: unknown): FleetRequest {
   return {
     // Dashboard records are joined by the original request ID, not incoming_truck_id.
     id: requestId,
+    running_doc: row.running_doc == null ? null : String(row.running_doc).trim(),
+    incoming_truck_id: typeof (row.incoming_truck_id ?? row.id) === "number" || typeof (row.incoming_truck_id ?? row.id) === "string" ? (row.incoming_truck_id ?? row.id) as number | string : null,
     vehicle_no: validVehicleNo,
+    raw_unit_code: row.unit_code,
     unit_code: row.unit_code == null ? null : String(row.unit_code).trim(),
     dc_code: row.dc_code == null ? null : String(row.dc_code),
     dc_type: row.dc_type == null ? null : String(row.dc_type),
@@ -220,6 +228,8 @@ function normalizeFleetRow(value: unknown): FleetRequest {
     area: row.dc_code == null ? null : String(row.dc_code).trim(),
     approved_company_id: row.approved_company_id == null ? null : String(row.approved_company_id).trim(),
     approved_company_name: row.approved_company_name == null ? null : String(row.approved_company_name).trim(),
+    approved_company_short_name: row.approved_company_short_name == null ? null : String(row.approved_company_short_name).trim(),
+    approved_company_display_name: row.approved_company_display_name == null ? null : String(row.approved_company_display_name).trim(),
     status,
     workload: typeof row.workload === "string" || typeof row.workload === "number" ? row.workload : null,
     latest_process_name: row.latest_process_name == null ? null : String(row.latest_process_name),
@@ -324,8 +334,14 @@ async function fetchAllFleetRequests(apiUrl: string, signal: AbortSignal, onFlee
     const root = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
     const pagination = typeof root.pagination === "object" && root.pagination !== null
       ? root.pagination as Record<string, unknown> : {};
-    const totalPages = Number(pagination.total_pages);
-    if (!Number.isInteger(totalPages) || totalPages < 1 || page >= totalPages) break;
+    // Support pagination metadata at the root or inside pagination/meta.
+    // Without metadata, keep loading until the API returns an empty page.
+    const meta = typeof root.meta === "object" && root.meta !== null
+      ? root.meta as Record<string, unknown> : {};
+    const totalPages = Number(pagination.total_pages ?? pagination.last_page ?? root.total_pages ?? meta.total_pages ?? meta.last_page);
+    const hasNext = pagination.has_next ?? pagination.has_more ?? root.has_next ?? meta.has_next;
+    if (Number.isInteger(totalPages) && totalPages > 0 && page >= totalPages) break;
+    if (hasNext === false || hasNext === 0 || hasNext === "false" || hasNext === "0") break;
     page += 1;
   }
   return results;
@@ -748,6 +764,26 @@ function FleetStatusByDc({
     void fetchRequests(controller.signal);
     return () => controller.abort();
   }, [fetchRequests, suppliedRequests, reloadKey]);
+  // Filter by request_date year first; then inspect the 102nd record.
+  useEffect(() => {
+    if (suppliedRequests === undefined && loading) return;
+    const data2016 = (suppliedRequests ?? requests).filter(item => {
+      const day = calendarDate(item.request_date);
+      return day !== null && day.slice(0, 4) === "2016";
+    });
+    const row = data2016[101];
+    const unit: unknown = row?.raw_unit_code ?? row?.unit_code;
+    const nestedUnit = typeof unit === "object" && unit !== null && "unit_code" in unit
+      ? (unit as Record<string, unknown>).unit_code : undefined;
+    console.group("Dashboard · ปี 2016 · index 101 (รายการที่ 102)");
+    console.log("จำนวนรายการปี 2016:", data2016.length);
+    console.log("2016 [101] full record:", row);
+    console.log("2016 [101].unit_code:", unit);
+    console.log("2016 [101].unit_code.unit_code:", nestedUnit);
+    if (!row) console.warn("ข้อมูลปี 2016 มีไม่ถึง 102 รายการ จึงไม่มี [101]");
+    else if (typeof unit === "string") console.info("unit_code เป็นข้อความ จึงไม่มี unit_code.unit_code; ค่าคือ:", unit);
+    console.groupEnd();
+  }, [suppliedRequests, requests, loading]);
   // Scope the common source before calculating cards, charts, tables and SLA.
   const sourceRequests = useMemo(() => {
     if (!warehouseScope.ready) return [];
@@ -773,16 +809,24 @@ function FleetStatusByDc({
   const filterOptions = useMemo(() => {
     const values = (key: "area" | "fbp" | "new_truck_type" | "status") => Array.from(new Set(sourceRequests.map(row => String(row[key] ?? "").trim()).filter(Boolean))).sort();
     const years = sourceRequests.flatMap(row => { const day = calendarDate(row.request_date); return day ? [Number(day.slice(0, 4))] : []; });
-    const areas = Array.from(new Set(sourceRequests.map(row => String(row.dc_code ?? "").trim()).filter(Boolean))).sort();
+    const areaRows = sourceRequests.filter(row => dcTypeFilter === "all" ||
+      (String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง") === dcTypeFilter);
+    const areas = Array.from(new Set(areaRows.map(row => String(row.dc_code ?? "").trim()).filter(Boolean))).sort();
     const companies = new Map<string, string>();
     for (const row of sourceRequests) {
       const id = String(row.approved_company_id ?? "").trim();
       const name = String(row.approved_company_name ?? "").trim();
-      if (id) companies.set(id, name || `FBP ${id}`);
+      const shortName = String(row.approved_company_short_name ?? "").trim();
+      const displayName = String(row.approved_company_display_name ?? "").trim()
+        || (shortName ? `[${shortName}] ${name}` : name);
+      if (id) companies.set(id, displayName || `FBP ${id}`);
     }
     const fbps = Array.from(companies, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "th"));
     return { areas, fbps, trucks: values("new_truck_type"), statuses: values("status"), years: Array.from(new Set([currentYear, ...years])).sort((a, b) => b - a) };
-  }, [sourceRequests, currentYear]);
+  }, [sourceRequests, currentYear, dcTypeFilter]);
+  useEffect(() => {
+    if (areaFilter !== "all" && !filterOptions.areas.includes(areaFilter)) setAreaFilter("all");
+  }, [areaFilter, filterOptions.areas]);
   const dcTypeOptions = useMemo(() => Array.from(new Set(sourceRequests.map(row => String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง"))).sort(), [sourceRequests]);
   const typeRequests = useMemo(() => sourceRequests.filter(row =>
     (dcTypeFilter === "all" || (String(row.dc_type ?? "").trim() || "ไม่ระบุประเภทคลัง") === dcTypeFilter) &&
@@ -806,25 +850,54 @@ function FleetStatusByDc({
       ).sort((a, b) => a.localeCompare(b, "th")),
     [sourceRequests, apiFleetTypes],
   );
-  const filteredRequests = useMemo(
+  const cardScopeRequests = useMemo(
     () => typeRequests.filter(item => {
       const date = calendarDate(item.request_date);
       return date !== null && Number(date.slice(0, 4)) === selectedYear &&
         (monthFilter === "all" || date.slice(5, 7) === monthFilter) &&
         (areaFilter === "all" || String(item.dc_code ?? "").trim() === areaFilter) &&
         (fbpFilter === "all" || String(item.approved_company_id ?? "").trim() === fbpFilter) &&
-        matchesDashboardStatus(item.status, statusFilter) &&
         (truckTypeFilter === "all" || item.new_truck_type === truckTypeFilter);
     }),
-    [typeRequests, selectedYear, monthFilter, areaFilter, fbpFilter, statusFilter, truckTypeFilter],
+    [typeRequests, selectedYear, monthFilter, areaFilter, fbpFilter, truckTypeFilter],
   );
-  // Use the same filtered vehicle rows as the charts and tables.
+  // Selecting a card filters the detail views, while every card keeps its total.
+  const filteredRequests = useMemo(
+    () => cardScopeRequests.filter(item => matchesDashboardStatus(item.status, statusFilter)),
+    [cardScopeRequests, statusFilter],
+  );
+  // Inspect these two known requests without changing the selected scope.
+  useEffect(() => {
+    if (suppliedRequests === undefined && loading) return;
+    const all = suppliedRequests ?? requests;
+    console.table(["9947", "9948"].map(id => {
+      const row = all.find(item => String(item.id) === id);
+      return {
+        request_id: id,
+        loaded_vehicles: all.filter(item => String(item.id) === id).length,
+        after_warehouse_scope: sourceRequests.filter(item => String(item.id) === id).length,
+        after_type_filters: typeRequests.filter(item => String(item.id) === id).length,
+        after_all_filters: filteredRequests.filter(item => String(item.id) === id).length,
+        request_date: row?.request_date ?? "ไม่พบวันที่/รายการ",
+        status: row?.status ?? "ไม่พบรายการ",
+        dc_code: row?.dc_code ?? "",
+        approved_company_id: row?.approved_company_id ?? "",
+      };
+    }));
+    console.debug("Dashboard active filters", {
+      selectedYear, monthFilter, dcTypeFilter, areaFilter, fbpFilter,
+      requestTypeFilter, truckTypeFilter, statusFilter, warehouseScope,
+    });
+  }, [suppliedRequests, requests, loading, sourceRequests, typeRequests, filteredRequests,
+    selectedYear, monthFilter, dcTypeFilter, areaFilter, fbpFilter, requestTypeFilter,
+    truckTypeFilter, statusFilter, warehouseScope]);
+  // Card totals use toolbar filters, before the selected status is applied.
   // Incoming API rows normalize to qty=1; grouped request rows retain their qty.
-  const filteredCardSummary = useMemo(() => {
+  const localCardSummary = useMemo(() => {
     const totals = Object.fromEntries(
       DASHBOARD_SUMMARY_CARDS.map(({ key }) => [key, { qty: 0, items: 0 }]),
     ) as DashboardSummary;
-    for (const row of filteredRequests) {
+    for (const row of cardScopeRequests) {
       const qty = Number(row.qty);
       if (!Number.isFinite(qty) || qty <= 0) continue;
       totals.all.qty += qty;
@@ -836,7 +909,61 @@ function FleetStatusByDc({
       }
     }
     return totals;
-  }, [filteredRequests]);
+  }, [cardScopeRequests]);
+  // Use exact incoming vehicle IDs so filtering one vehicle never includes its siblings.
+  const summaryScope = useMemo(() => {
+    const ids = cardScopeRequests.map(row => String(row.incoming_truck_id ?? "").trim());
+    return ids.length > 0 && ids.every(id => /^[1-9][0-9]*$/.test(id))
+      ? Array.from(new Set(ids)).sort().join(",") : "";
+  }, [cardScopeRequests]);
+  const [apiCardState, setApiCardState] = useState<{
+    scope: string; summary: DashboardSummary | null; error: string;
+  }>({ scope: "", summary: null, error: "" });
+  useEffect(() => {
+    if (!summaryScope) return;
+    const controller = new AbortController();
+    setApiCardState({ scope: summaryScope, summary: null, error: "" });
+    async function loadSummary() {
+      try {
+        const totals = Object.fromEntries(DASHBOARD_SUMMARY_CARDS.map(({ key }) =>
+          [key, { qty: 0, items: 0 }])) as DashboardSummary;
+        const ids = summaryScope.split(",");
+        for (let offset = 0; offset < ids.length; offset += 100) {
+          const url = new URL(dashboardApiUrl, window.location.href);
+          url.searchParams.delete("request_ids");
+          url.searchParams.delete("warehouse");
+          url.searchParams.set("incoming_truck_ids", ids.slice(offset, offset + 100).join(","));
+          url.searchParams.set("summary_only", "1");
+          const response = await fetch(url.toString(), { cache: "no-store", signal: controller.signal });
+          const payload = await response.json();
+          if (!response.ok || payload?.status !== "success" || !payload.summary) {
+            throw new Error(payload?.message || "โหลด summary ไม่สำเร็จ");
+          }
+          for (const { key } of DASHBOARD_SUMMARY_CARDS) {
+            const qty = Number(payload.summary[key]?.qty);
+            const items = Number(payload.summary[key]?.items);
+            if (!Number.isFinite(qty) || qty < 0 || !Number.isFinite(items) || items < 0) {
+              throw new Error("รูปแบบ summary ไม่ถูกต้อง");
+            }
+            totals[key].qty += qty;
+            totals[key].items += items;
+          }
+        }
+        if (!controller.signal.aborted) setApiCardState({ scope: summaryScope, summary: totals, error: "" });
+      } catch (error) {
+        if (!controller.signal.aborted) setApiCardState({ scope: summaryScope, summary: null,
+          error: error instanceof Error ? error.message : "โหลด summary ไม่สำเร็จ" });
+      }
+    }
+    void loadSummary();
+    return () => controller.abort();
+  }, [summaryScope, dashboardApiUrl, reloadKey]);
+  const cardSummaryError = summaryScope && apiCardState.scope === summaryScope ? apiCardState.error : "";
+  const cardSummaryLoading = Boolean(summaryScope &&
+    (apiCardState.scope !== summaryScope || (!apiCardState.summary && !apiCardState.error)));
+  // Supplied request-level rows have no incoming IDs; retain their quantity-based summary.
+  const filteredCardSummary = summaryScope && apiCardState.scope === summaryScope && apiCardState.summary
+    ? apiCardState.summary : localCardSummary;
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const monthScrollRef = useRef<HTMLDivElement>(null);
   const monthPickerDialogRef = useRef<HTMLDialogElement>(null);
@@ -881,8 +1008,11 @@ function FleetStatusByDc({
       : (current.length < 6 ? [...current, month].sort((a, b) => a - b) : current));
     setVendorTooltip(null);
   };
-  const monthlyTruckCounts = useMemo(() => {
+  const { counts: monthlyTruckCounts, details: monthlyTruckDetails } = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();
+    const details = new Map<string, Map<string, Map<string, {
+      runningDoc: string; fleetType: string; count: number;
+    }>>>();
     const selectedMonths = new Set(
       sixMonthSummary.map(month => month.key),
     );
@@ -952,9 +1082,21 @@ function FleetStatusByDc({
 
       months.set(month, (months.get(month) ?? 0) + 1);
       counts.set(groupKey, months);
+
+      // Build hover details from exactly the vehicles counted in this cell.
+      const detailMonths = details.get(groupKey) ?? new Map();
+      const requestsInMonth = detailMonths.get(month) ?? new Map();
+      const fleetType = String(request.fleet_type ?? "").trim() || "ไม่ระบุประเภทคำขอ";
+      const runningDoc = String(request.running_doc ?? "").trim() || `คำขอ ID ${request.id ?? "—"} (ไม่มีเลขหนังสือ)`;
+      const detailKey = JSON.stringify([String(request.id ?? ""), runningDoc, fleetType]);
+      const detail = requestsInMonth.get(detailKey) ?? { runningDoc, fleetType, count: 0 };
+      detail.count += 1;
+      requestsInMonth.set(detailKey, detail);
+      detailMonths.set(month, requestsInMonth);
+      details.set(groupKey, detailMonths);
     }
 
-    return counts;
+    return { counts, details };
   }, [
     filteredRequests,
     warehouseRecords,
@@ -1184,7 +1326,7 @@ function FleetStatusByDc({
 @media(max-width:850px){.fleet-filter-shell .fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:13px;gap:12px}.fleet-filter-shell .fleet-filter-heading{padding:12px 13px}.fleet-filter-shell .fleet-filter-note{padding-left:13px;padding-right:13px}}
 @media(max-width:560px){.fleet-filter-shell{border-radius:16px}.fleet-filter-emblem{width:32px;height:32px;border-radius:10px}.fleet-filter-shell .fleet-filter-heading{gap:8px}.fleet-filter-shell .fleet-filter-heading h3{font-size:12px}.fleet-filter-shell .fleet-filter-context{font-size:9px;padding:4px 7px}.fleet-filter-shell .fleet-field{height:39px;min-height:39px;font-size:10px;padding-left:32px;padding-right:24px}.fleet-filter-input-icon{left:10px}.fleet-filter-input-icon svg{width:15px;height:15px}.fleet-filter-chevron{right:10px}.fleet-filter-shell .fleet-filters{gap:11px 9px}.fleet-filter-shell .fleet-filters>.fleet-button{height:39px;font-size:10px}}
 
-/* Shorter status cards and a single horizontal filter toolbar. */
+/* Compact status cards and wrapping responsive filters. */
 .fleet-api-summary-card{min-height:119px!important;padding:11px 12px!important}
 .fleet-api-summary-top{min-height:32px!important}
 .fleet-api-summary-label{font-size:10px;line-height:1.45}
@@ -1195,11 +1337,14 @@ function FleetStatusByDc({
 .fleet-api-summary-icon svg{width:88px;height:88px}
 .fleet-filter-shell .fleet-filter-heading{min-height:54px;padding:10px 15px}
 .fleet-filter-emblem{width:31px;height:31px;border-radius:10px}
-.fleet-filter-shell .fleet-filters{display:flex;flex-wrap:nowrap;align-items:flex-end;gap:10px;padding:12px 15px 10px;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#c4d5ed transparent}
-.fleet-filter-shell .fleet-filters>label{flex:1 0 128px;min-width:128px}
-.fleet-filter-shell .fleet-filters>label:first-child{flex:.65 0 90px;min-width:90px}
-.fleet-filter-shell .fleet-filters>label:nth-child(6),.fleet-filter-shell .fleet-filters>label:nth-child(7){flex:1.3 0 156px;min-width:156px}
-.fleet-filter-shell .fleet-filters>.fleet-button{flex:0 0 113px;min-width:113px}
+.fleet-filter-shell{min-width:0;max-width:100%}
+.fleet-filter-shell .fleet-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));align-items:end;gap:12px;padding:12px 15px 10px;overflow:visible}
+.fleet-filter-shell .fleet-filters>label,.fleet-filter-shell .fleet-filters>label:first-child,.fleet-filter-shell .fleet-filters>label:nth-child(6),.fleet-filter-shell .fleet-filters>label:nth-child(7),.fleet-filter-shell .fleet-filters>.fleet-button{min-width:0;width:100%;max-width:100%}
+.fleet-filter-shell .fleet-filter-input{min-width:0;max-width:100%}
+.fleet-filter-shell .fleet-field{width:100%;min-width:0;max-width:100%;text-overflow:ellipsis}
+.fleet-filter-shell .fleet-filter-heading{flex-wrap:wrap;min-width:0}
+.fleet-filter-shell .fleet-filter-context{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.fleet-filter-shell .fleet-filter-note{overflow-wrap:anywhere}
 .fleet-filter-shell .fleet-field{height:36px;min-height:36px;font-size:10.5px;padding-top:5px;padding-bottom:5px;border-radius:10px}
 .fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px;font-size:10px;border-radius:10px}
 .fleet-filter-shell .fleet-label{font-size:9px;margin-bottom:5px}
@@ -1236,13 +1381,13 @@ function FleetStatusByDc({
       </header>
       <section className="fleet-filter-shell" aria-label="ตัวกรองข้อมูล"><div className="fleet-filter-heading"><span className="fleet-filter-emblem" aria-hidden="true"><FleetFilterGlyph kind="sliders" /></span><h3>ตัวกรองข้อมูล</h3><span className="fleet-filter-context">{selectedYear + 543} · {monthFilter === "all" ? "ทุกเดือน" : MONTH_NAMES[Number(monthFilter) - 1]}</span></div>
         <div className="fleet-filters">
-          <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={selectedYear} onChange={e => { setSelectedYear(Number(e.target.value)); setHoveredMonth(null); }}>{yearOptions.map(year => <option key={year} value={year}>{year}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><select className="fleet-field" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">ทุกเดือน</option>{MONTH_NAMES.map((month, index) => <option key={month} value={String(index + 1).padStart(2, "0")}>{month}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={dcTypeFilter} onChange={e => setDcTypeFilter(e.target.value)}><option value="all">ทุกกลุ่ม DC</option>{dcTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><select className="fleet-field" value={areaFilter} disabled={filterOptions.areas.length === 0} onChange={e => setAreaFilter(e.target.value)}><option value="all">{filterOptions.areas.length ? "ทุกพื้นที่" : "ไม่พบพื้นที่"}</option>{filterOptions.areas.map(area => <option key={area} value={area}>{area}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><select className="fleet-field" value={fbpFilter} disabled={filterOptions.fbps.length === 0} onChange={e => setFbpFilter(e.target.value)}><option value="all">{filterOptions.fbps.length ? "ทุก FBP" : "ไม่พบ FBP"}</option>{filterOptions.fbps.map(fbp => <option key={fbp.id} value={fbp.id}>{fbp.name}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><select className="fleet-field" value={requestTypeFilter} onChange={e => setRequestTypeFilter(e.target.value)}><option value="all">ทุกประเภทคำขอ</option>{requestTypeFilter !== "all" && !requestTypeOptions.includes(requestTypeFilter) && <option value={requestTypeFilter}>{requestTypeFilter}</option>}{requestTypeOptions.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><select className="fleet-field" value={truckTypeFilter} onChange={e => setTruckTypeFilter(e.target.value)}><option value="all">ทุกประเภทรถ</option>{filterOptions.trucks.map(type => <option key={type} value={type}>{type}</option>)}</select><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="ปี" value={String(selectedYear)} onChange={value => { setSelectedYear(Number(value)); setHoveredMonth(null); }} options={yearOptions.map(year => ({ value: String(year), label: String(year) }))} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="เดือน" value={monthFilter} onChange={setMonthFilter} options={[{ value: "all", label: "ทุกเดือน" }, ...MONTH_NAMES.map((month, index) => ({ value: String(index + 1).padStart(2, "0"), label: month }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><FleetSearchFilter label="กลุ่ม DC" value={dcTypeFilter} onChange={value => { setDcTypeFilter(value); setAreaFilter("all"); }} options={[{ value: "all", label: "ทุกกลุ่ม DC" }, ...dcTypeOptions.map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><FleetSearchFilter label="พื้นที่" value={areaFilter} onChange={setAreaFilter} options={[{ value: "all", label: "ทุกพื้นที่" }, ...filterOptions.areas.map(area => ({ value: area, label: area }))]} disabled={filterOptions.areas.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><FleetSearchFilter label="FBP" value={fbpFilter} onChange={setFbpFilter} options={[{ value: "all", label: "ทุก FBP" }, ...filterOptions.fbps.map(fbp => ({ value: fbp.id, label: fbp.name }))]} disabled={filterOptions.fbps.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><FleetSearchFilter label="ประเภทคำขอ" value={requestTypeFilter} onChange={setRequestTypeFilter} options={[{ value: "all", label: "ทุกประเภทคำขอ" }, ...Array.from(new Set([...(requestTypeFilter === "all" ? [] : [requestTypeFilter]), ...requestTypeOptions])).map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><FleetSearchFilter label="ประเภทรถ" value={truckTypeFilter} onChange={setTruckTypeFilter} options={[{ value: "all", label: "ทุกประเภทรถ" }, ...filterOptions.trucks.map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
           <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}><FleetFilterGlyph kind="clear" />ล้างตัวกรอง</button>
         </div>
         <p className="fleet-filter-note">ปีและเดือนกรองตามวันที่สร้างคำขอ (request_date) · กราฟแสดง ม.ค.–ธ.ค. ของปีที่เลือก</p>
@@ -1258,7 +1403,7 @@ function FleetStatusByDc({
           <p>{activeError}</p>
         </div>
       )}
-      <section className="fleet-api-summary" aria-label="สรุปสถานะคำขอตามตัวกรอง" aria-busy={isLoading}>
+      <section className="fleet-api-summary" aria-label="สรุปสถานะคำขอตามตัวกรอง" aria-busy={isLoading || cardSummaryLoading}>
         <div className="fleet-api-summary-header">
           <div className="fleet-summary-heading-line"><span className="fleet-section-mark" aria-hidden="true">02</span><div><h3 className="fleet-api-summary-heading">สรุปสถานะคำขอ</h3><p className="fleet-api-summary-subtitle">ภาพรวมการจัดรถในแต่ละขั้นตอน</p></div></div>
           <span className="fleet-api-summary-badge">6 กลุ่มสถานะ</span>
@@ -1272,7 +1417,7 @@ function FleetStatusByDc({
                 <span className="fleet-api-summary-icon"><DashboardStatusIcon status={card.key} /></span>
               </div>
               <div className="fleet-api-summary-number">
-                <strong>{isLoading || activeError ? "—" : filteredCardSummary[card.key].qty.toLocaleString("th-TH")}</strong>
+                <strong>{isLoading || activeError || cardSummaryLoading || cardSummaryError ? "—" : filteredCardSummary[card.key].qty.toLocaleString("th-TH")}</strong>
                 <span>คัน</span>
               </div>
               <span className="fleet-api-summary-detail">{card.detail}</span>
@@ -1280,7 +1425,7 @@ function FleetStatusByDc({
           ))}
         </div>
         <p className="fleet-api-summary-note" role="status">
-          {isLoading ? "กำลังโหลดสรุปสถานะ…" : activeError ? `โหลดสรุปสถานะไม่สำเร็จ: ${activeError}` : "ยอดตามตัวกรองด้านบนและสถานะที่เลือก · คลิกการ์ดเดิมอีกครั้งเพื่อแสดงทุกสถานะ"}
+          {isLoading || cardSummaryLoading ? "กำลังโหลดสรุปสถานะ…" : cardSummaryError ? `โหลดสรุปสถานะไม่สำเร็จ: ${cardSummaryError}` : activeError ? `โหลดสรุปสถานะไม่สำเร็จ: ${activeError}` : "ยอดทุกการ์ดตามตัวกรองด้านบน · คลิกการ์ดเพื่อกรองรายละเอียด หรือคลิกซ้ำเพื่อแสดงทุกสถานะ"}
         </p>
       </section>
       <SlaOverduePanel requests={filteredRequests} parentLoading={isLoading} parentError={activeError} reloadKey={reloadKey} />
@@ -1708,8 +1853,33 @@ function FleetStatusByDc({
               <tbody>{stageGroups.map(([key, group]) => <Fragment key={key}>
                 <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
                 {Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">{sixMonthSummary.map(month => {
-                  const count = monthlyTruckCounts.get(JSON.stringify([group.dcType, group.dcCode, truck.truckType]))?.get(month.key) ?? 0;
-                  return <td key={month.key} title={`${group.dcCode} · ${truck.truckType} · ${month.label}: ${count} คัน`}>{count ? formatNumber(count) : <span className="fleet-cell-empty">—</span>}</td>;
+                  const groupKey = JSON.stringify([group.dcType, group.dcCode, truck.truckType]);
+                  const count = monthlyTruckCounts.get(groupKey)?.get(month.key) ?? 0;
+                  const details = Array.from(monthlyTruckDetails.get(groupKey)?.get(month.key)?.values() ?? [])
+                    .sort((a, b) => a.runningDoc.localeCompare(b.runningDoc, "th") || a.fleetType.localeCompare(b.fleetType, "th"));
+                  const hoverText = [
+                    `${group.dcCode} · ${truck.truckType} · ${month.label}: ${count} คัน`,
+                    ...(details.length ? ["เลขหนังสือ | ประเภทคำขอ | จำนวนรถ", ...details.map(item =>
+                      `${item.runningDoc} | ${item.fleetType} | ${formatNumber(item.count)} คัน`)] : ["ไม่มีแผนเข้าคลังในเดือนนี้"]),
+                  ].join("\n");
+                  return <td key={month.key} title={hoverText} style={{ cursor: count ? "help" : undefined }}
+                    onMouseEnter={() => {
+                      console.groupCollapsed(`แผนเข้าคลังรายเดือน · ${group.dcCode} · ${truck.truckType} · ${month.label}`);
+                      console.log("สรุปช่องที่เลือก:", {
+                        dc_type: group.dcType,
+                        dc_code: group.dcCode,
+                        truck_type: truck.truckType,
+                        month: month.key,
+                        total_vehicles: count,
+                      });
+                      console.table(details.map(item => ({
+                        running_doc: item.runningDoc,
+                        fleet_type: item.fleetType,
+                        vehicle_count: item.count,
+                      })));
+                      if (details.length === 0) console.log("ไม่มีแผนเข้าคลังในช่องนี้");
+                      console.groupEnd();
+                    }}>{count ? formatNumber(count) : <span className="fleet-cell-empty">—</span>}</td>;
                 })}</tr>)}
               </Fragment>)}</tbody></table>
           </div>}
@@ -2145,4 +2315,103 @@ function FleetFilterGlyph({ kind }: { kind: string }) {
     clear: "M3 14 12 4l9 8-8 9H9l-6-7z M7 10l10 9 M13 21h8",
   };
   return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]} /></svg>;
+}
+
+interface FleetSearchOption { value: string; label: string }
+function FleetSearchFilter({ label, value, options, onChange, disabled = false }: {
+  label: string;
+  value: string;
+  options: FleetSearchOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const [position, setPosition] = useState({ left: 0, top: 0, width: 0, height: 240 });
+  const selected = options.find(option => option.value === value);
+  const keyword = query.trim().toLocaleLowerCase();
+  const matches = options.filter(option =>
+    !keyword || `${option.label} ${option.value}`.toLocaleLowerCase().includes(keyword));
+  const activeIndex = Math.min(active, matches.length - 1);
+  const choose = (option: FleetSearchOption) => {
+    onChange(option.value);
+    setOpen(false);
+    setQuery("");
+  };
+  useEffect(() => { setOpen(false); setQuery(""); setActive(0); }, [value, disabled]);
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      const rect = inputRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const height = Math.min(240, Math.max(0, below >= 160 || below >= above ? below : above));
+      setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)),
+        top: below >= 160 || below >= above ? rect.bottom + 4 : rect.top - height - 4,
+        width: Math.min(rect.width, window.innerWidth - 16), height });
+    };
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (!inputRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    reposition();
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      document.removeEventListener("pointerdown", outside);
+    };
+  }, [open]);
+  useEffect(() => {
+    if (open && activeIndex >= 0) menuRef.current?.children[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, query]);
+  return <>
+    <input ref={inputRef} className="fleet-field" type="text" role="combobox"
+      aria-label={label} aria-autocomplete="list" aria-expanded={open}
+      aria-controls={open ? listId : undefined}
+      aria-activedescendant={open && matches.length ? `${listId}-${activeIndex}` : undefined}
+      autoComplete="off" disabled={disabled}
+      placeholder={open ? "พิมพ์ค้นหา..." : label}
+      value={open ? query : selected?.label ?? value}
+      onFocus={() => { setQuery(""); setActive(0); setOpen(true); }}
+      onClick={() => { if (!open) { setQuery(""); setActive(0); setOpen(true); } }}
+      onChange={event => { setQuery(event.target.value); setActive(0); setOpen(true); }}
+      onBlur={() => setOpen(false)}
+      onKeyDown={event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (!open) { setOpen(true); setActive(0); return; }
+          setActive(current => Math.max(0, Math.min(matches.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))));
+        } else if (event.key === "Enter" && open) {
+          event.preventDefault();
+          if (matches[activeIndex]) choose(matches[activeIndex]);
+        } else if (event.key === "Escape") { setOpen(false); setQuery(""); }
+        else if (event.key === "Tab") setOpen(false);
+      }} />
+    {open && !disabled && typeof document !== "undefined" && createPortal(
+      <div ref={menuRef} id={listId} role="listbox" aria-label={label}
+        style={{ position: "fixed", left: position.left, top: position.top,
+          width: position.width, maxHeight: position.height, overflowY: "auto", overflowX: "hidden",
+          zIndex: 10050, padding: 4, boxSizing: "border-box", background: "#fff", color: "#304c70",
+          border: "1px solid #dce5f0", borderRadius: 10, boxShadow: "0 8px 24px #17315326",
+          fontFamily: "inherit", fontSize: 12 }}>
+        {matches.length ? matches.map((option, index) => <div key={option.value}
+          id={`${listId}-${index}`} role="option" aria-selected={option.value === value}
+          onPointerDown={event => event.preventDefault()}
+          onClick={() => choose(option)}
+          onMouseEnter={() => setActive(index)}
+          style={{ padding: "9px 10px", borderRadius: 6, cursor: "pointer", overflowWrap: "anywhere",
+            background: index === activeIndex ? "#edf4ff" : "transparent",
+            fontWeight: option.value === value ? 700 : 400 }}>
+          {option.label}
+        </div>) : <div style={{ padding: 10, color: "#73839a" }}>ไม่พบตัวเลือก</div>}
+      </div>, document.body)}
+  </>;
 }

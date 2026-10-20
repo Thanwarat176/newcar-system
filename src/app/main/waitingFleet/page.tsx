@@ -1,827 +1,439 @@
 "use client";
+
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DateRange, RangeKeyDict } from "react-date-range";
+import { DateRange } from "react-date-range";
+import type { RangeKeyDict } from "react-date-range";
+import { th } from "date-fns/locale";
+import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
-import { th } from "date-fns/locale";
-import {
-  ClipboardList, Clock, CircleCheck, CircleX,
-  ArrowUpDown, ChevronDown, ChevronUp, CalendarDays, Eraser, Eye,
-  Filter, PencilLine, Search, SlidersHorizontal, Truck, Warehouse, X, Download,
-} from "lucide-react";
 import FleetModalDetail from "./components/FleetModalDetail";
 import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
+
 interface SelectedDC {
-  DC_CODE?: string;
-  DC_NAME?: string;
-  DC_TYPE?: string;
-  dc_code?: string;
-  dc_name?: string;
-  dc_type?: string;
+  DC_CODE?: string; DC_NAME?: string; DC_TYPE?: string;
+  dc_code?: string; dc_name?: string; dc_type?: string;
 }
-interface RequestDetailItem {
-  id?: string | number;
-  request_id?: string | number;
-  status?: string | null;
-}
+interface UserInfo { warehouse?: string; WAREHOUSE?: string; team?: string; TEAM?: string }
+interface RequestDetailItem { id?: string | number; request_id?: string | number; status?: string | null }
 interface RequestItem {
-  id: number | null;
-  running_doc: string;
-  dc_type: string;
-  dc_code: string;
-  date: string;
-  request_date?: string;
-  fleet_type: string;
-  fleet_truck_type: string;
-  license_replace: string[] | string;
-  qty: number;
-  approve_qty_gm?: number | string | null;
-  approved_qty?: number | string | null;
-  usage_date: string;
-  workload: number;
-  truckturn: number;
-  status: string;
-  request_by: string;
-  remark: string;
-  details?: RequestDetailItem[];
-  summary?: {
-    total_requested: number;
-    total_approved: number;
-    total_rejected: number;
-  };
-  approved_trucks?: {
-    old_license: string;
-    new_truck_type: string;
-    new_vendor_name: string;
-    new_vendor_id: string;
-  }[];
-  rejected_trucks?: {
-    old_license: string;
-    reason: string;
-  }[];
-}
-interface UserInfo {
-  warehouse?: string;
-  WAREHOUSE?: string;
-  team?: string;
-  TEAM?: string;
+  id: number | null; running_doc: string; dc_type: string; dc_code: string;
+  date: string; request_date?: string; fleet_type: string; fleet_truck_type: string;
+  license_replace: string[] | string; qty: number;
+  approve_qty_gm?: number | string | null; approved_qty?: number | string | null;
+  usage_date: string; workload: number; truckturn: number; status: string;
+  request_by: string; remark: string; details?: RequestDetailItem[];
+  summary?: { total_requested: number; total_approved: number; total_rejected: number };
+  approved_trucks?: { old_license: string; new_truck_type: string; new_vendor_name: string; new_vendor_id: string }[];
+  rejected_trucks?: { old_license: string; reason: string }[];
 }
 type StatusFilter = "all" | "fbp_pending" | "reject_by_fbp" | "approved";
 type SortKey = "request_date" | "running_doc" | "usage_date";
 type SortDirection = "asc" | "desc";
+interface DateSelection { startDate: Date; endDate: Date; key: "selection" }
+interface Row {
+  item: RequestItem; status: string; requestedQty: number;
+  licenses: string[]; requestDate: string; searchText: string;
+}
+type Counts = Record<StatusFilter, { qty: number; items: number }>;
+const API_URL = "http://192.168.158.210/api_new_truck/api/waiting_fleet_get.php";
+const NO_DATE = "ไม่ระบุวันที่";
+const text = (value: unknown) => String(value ?? "").trim();
+const code = (value: unknown) => text(value).toUpperCase();
+const quantity = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(Number(value), 0) : 0;
+const number = (value: unknown) => value == null || value === "" ? "-" : Number.isFinite(Number(value)) ? Number(value).toLocaleString("en-US") : String(value);
+const INPUT = "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const CELL = "whitespace-nowrap px-3 py-3";
+const LABELS: Record<StatusFilter, string> = { all: "ทั้งหมด", fbp_pending: "รอทีม FBP ประเมินข้อมูล", reject_by_fbp: "ทีม FBP ไม่อนุมัติ", approved: "อนุมัติแล้ว" };
+const CARDS: { key: StatusFilter; icon: LucideIcon; active: string; inactive: string }[] = [
+  { key: "all", icon: ClipboardList, active: "bg-slate-800 text-white ring-slate-700", inactive: "bg-white text-slate-800 ring-slate-200" },
+  { key: "fbp_pending", icon: Clock, active: "bg-amber-500 text-white ring-amber-400", inactive: "bg-amber-50 text-amber-800 ring-amber-100" },
+  { key: "reject_by_fbp", icon: CircleX, active: "bg-rose-600 text-white ring-rose-500", inactive: "bg-rose-50 text-rose-800 ring-rose-100" },
+  { key: "approved", icon: CircleCheck, active: "bg-emerald-600 text-white ring-emerald-500", inactive: "bg-emerald-50 text-emerald-800 ring-emerald-100" },
+];
+const COLUMNS: { label: string; sort?: SortKey }[] = [
+  { label: "ลำดับ" }, { label: "เลขที่เอกสาร", sort: "running_doc" },
+  { label: "DC Type" }, { label: "DC" }, { label: "ประเภทคำขอ" },
+  { label: "ประเภทรถ" }, { label: "ทะเบียนทดแทน" }, { label: "จำนวน" },
+  { label: "วันที่ใช้งาน", sort: "usage_date" }, { label: "ผู้ขอ" },
+  { label: "สถานะ" }, { label: "รายละเอียด" },
+];
+
+// Only these three raw API statuses belong to the approved card.
+function normalizeStatus(value: unknown): string {
+  const status = text(value).toLowerCase();
+  return ["process", "progress", "succes"].includes(status) ? "approved" : status === "approved" ? "unmapped_approved" : status;
+}
+function statusLabel(raw: string): string {
+  const status = normalizeStatus(raw);
+  if (status === "fbp_pending" || status === "reject_by_fbp" || status === "approved") return LABELS[status];
+  return raw || "-";
+}
+function statusClass(status: string): string {
+  if (status === "fbp_pending") return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (status === "reject_by_fbp") return "bg-rose-50 text-rose-700 ring-rose-200";
+  if (status === "approved") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  return "bg-slate-100 text-slate-600 ring-slate-200";
+}
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function normalizeDate(value: unknown): string {
+  const raw = text(value);
+  if (!raw || raw === NO_DATE) return NO_DATE;
+  const only = raw.split(/[T ]/)[0];
+  let parts: string[];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(only)) parts = only.split("-");
+  else if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(only)) {
+    const [day, month, year] = only.split(/[/-]/); parts = [year, month, day];
+  } else {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? NO_DATE : dateKey(parsed);
+  }
+  const year = Number(parts[0]);
+  return `${year > 2400 ? year - 543 : year}-${parts[1]}-${parts[2]}`;
+}
+function formatDate(value: unknown): string {
+  const key = normalizeDate(value);
+  if (key === NO_DATE) return NO_DATE;
+  const [year, month, day] = key.split("-"); return `${day}/${month}/${year}`;
+}
+function timestamp(value: unknown): number {
+  const result = new Date(normalizeDate(value)).getTime();
+  return Number.isFinite(result) ? result : 0;
+}
+function newSelection(): DateSelection { const today = new Date(); return { startDate: today, endDate: today, key: "selection" }; }
+function licensesOf(value: string[] | string): string[] {
+  if (Array.isArray(value)) return value.map(text).filter(Boolean);
+  const raw = text(value); if (!raw) return [];
+  try { const parsed: unknown = JSON.parse(raw); return Array.isArray(parsed) ? parsed.map(text).filter(Boolean) : [raw]; }
+  catch { return raw.split(",").map(text).filter(Boolean); }
+}
+function makeRow(item: RequestItem): Row {
+  const licenses = licensesOf(item.license_replace);
+  // Count requested vehicles consistently for every status card.
+  const requestedQty = item.summary?.total_requested != null
+    ? quantity(item.summary.total_requested)
+    : quantity(item.approve_qty_gm) > 0 ? quantity(item.approve_qty_gm) : quantity(item.qty);
+  return { item, status: normalizeStatus(item.status), requestedQty, licenses,
+    requestDate: normalizeDate(item.request_date || item.date),
+    searchText: [item.running_doc, item.dc_type, item.dc_code, item.fleet_type, item.fleet_truck_type, item.request_by, item.remark, licenses.join(" ")].map(text).join(" ").toLowerCase() };
+}
+function optionsOf(values: string[]): string[] { return [...new Set(values.map(text).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th", { numeric: true })); }
+function stored<T>(keys: string[]): T | null {
+  for (const key of keys) { const raw = localStorage.getItem(key); if (!raw) continue;
+    try { return JSON.parse(raw) as T; } catch { console.error(`อ่าน ${key} ไม่ได้`); }
+  } return null;
+}
+function FilterSelect({ label, value, options, onChange, icon: Icon, className = "" }: {
+  label: string; value: string; options: string[]; onChange: (value: string) => void; icon: LucideIcon; className?: string;
+}) {
+  return <label className={`block ${className}`}><span className="mb-1.5 block text-[11px] font-bold text-slate-400">{label}</span>
+    <span className="relative block"><Icon size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
+      <select value={value} onChange={e => onChange(e.target.value)} className={`${INPUT} appearance-none pl-9 pr-7`}><option value="all">ทั้งหมด</option>{options.map(option => <option key={option} value={option}>{option}</option>)}</select>
+      <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+    </span></label>;
+}
+function QuantityCell({ row }: { row: Row }) {
+  const { item } = row;
+  const approved = quantity(item.summary?.total_approved);
+  const rejected = quantity(item.summary?.total_rejected);
+  if (!approved && !rejected) return <span className="rounded-lg bg-slate-100 px-3 py-1 font-semibold">{number(row.requestedQty)}</span>;
+  return <div className="space-y-2">
+    <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 text-center">
+      <div className="p-2"><p className="text-[11px] text-slate-400">จำนวนขอ</p><strong>{number(row.requestedQty)}</strong></div>
+      <div className="bg-emerald-50 p-2 text-emerald-700"><p className="text-[11px]">อนุมัติ</p><strong>{number(approved)}</strong></div>
+      <div className="bg-rose-50 p-2 text-rose-700"><p className="text-[11px]">ไม่อนุมัติ</p><strong>{number(rejected)}</strong></div>
+    </div>
+    {!!item.approved_trucks?.length && <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-2"><p className="mb-1 font-semibold text-emerald-700">รายการที่อนุมัติ:</p><ul className="space-y-1">{item.approved_trucks.map((truck, index) => <li key={index} className="text-[11px] text-slate-600"><strong>{truck.old_license}</strong> → {truck.new_truck_type} ({truck.new_vendor_name || "ไม่ระบุ Vendor"})</li>)}</ul></div>}
+    {!!item.rejected_trucks?.length && <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-2"><p className="mb-1 font-semibold text-rose-700">รายการที่ไม่อนุมัติ:</p><ul className="space-y-1">{item.rejected_trucks.map((truck, index) => <li key={index} className="text-[11px] text-slate-600"><strong>{truck.old_license}</strong> ({truck.reason})</li>)}</ul></div>}
+  </div>;
+}
+
 export default function WaitingFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => { setPortalTarget(document.body); }, []);
-  const [openExportModal, setOpenExportModal] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [openExportModal, setOpenExportModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
-  const [openDetailModal, setOpenDetailModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchText, setSearchText] = useState("");
   const [requestTypeFilter, setRequestTypeFilter] = useState("all");
   const [truckTypeFilter, setTruckTypeFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [dcFilter, setDcFilter] = useState("all");
-  const [requestDateRange, setRequestDateRange] = useState([
-    { startDate: new Date(), endDate: new Date(), key: "selection" },
-  ]);
-  const [sortConfig, setSortConfig] = useState<{
-    key: SortKey;
-    direction: SortDirection;
-  }>({ key: "request_date", direction: "desc" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({ key: "request_date", direction: "desc" });
+  const [requestDateRange, setRequestDateRange] = useState<DateSelection[]>(() => [newSelection()]);
   const [hasRequestDateRange, setHasRequestDateRange] = useState(false);
-  const [showRequestDatePicker, setShowRequestDatePicker] = useState(false);
-  const requestDateButtonRef = useRef<HTMLButtonElement | null>(null);
-  const requestDatePickerRef = useRef<HTMLDivElement | null>(null);
-  const [requestDatePickerPosition, setRequestDatePickerPosition] = useState({
-    top: 0, left: 0,
-  });
-  const requestsFetchIdRef = useRef(0);
-  const previousDetailOpenRef = useRef(openDetailModal);
-  const fetchRequests = useCallback(async () => {
-    const fetchId = ++requestsFetchIdRef.current;
-    setLoading(true);
-    setError("");
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerPosition, setPickerPosition] = useState({ top: 0, left: 0 });
+  const dateButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const fetchIdRef = useRef(0);
+  const previousDetailOpenRef = useRef(false);
+  const detailOpen = selectedRequest !== null;
+  const [showSystemUpdateModal, setShowSystemUpdateModal] = useState(true);
+  
+  const fetchRequests = useCallback(async (): Promise<boolean> => {
+    const id = ++fetchIdRef.current; setLoading(true); setError("");
     try {
-      const res = await fetch(
-        `http://192.168.158.210/api_new_truck/api/waiting_fleet_get.php?_refresh=${Date.now()}-${fetchId}`,
-        { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store" },
-      );
-      if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลได้");
-      const data = await res.json();
-      if (data?.status === "error" || data?.success === false) {
-        throw new Error(data.message || "ไม่สามารถดึงข้อมูลได้");
-      }
-      const list = Array.isArray(data) ? data
-        : Array.isArray(data.data) ? data.data
-        : Array.isArray(data.result) ? data.result : null;
+      const response = await fetch(`${API_URL}?_refresh=${Date.now()}-${id}`, { method: "GET", cache: "no-store" });
+      if (!response.ok) throw new Error("ไม่สามารถดึงข้อมูลได้");
+      const data = await response.json();
+      if (data?.status === "error" || data?.success === false) throw new Error(data.message || "ไม่สามารถดึงข้อมูลได้");
+      const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.result) ? data.result : null;
       if (!list) throw new Error("รูปแบบข้อมูลจาก API ไม่ถูกต้อง");
-      // A previous refresh must never overwrite the latest refresh.
-      if (fetchId === requestsFetchIdRef.current) setRequests(list);
+      if (id === fetchIdRef.current) setRequests(list);
       return true;
     } catch (err) {
-      console.error(err);
-      if (fetchId === requestsFetchIdRef.current) {
-        setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก API");
-      }
+      if (id === fetchIdRef.current) setError(err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการดึงข้อมูล");
       return false;
-    } finally {
-      if (fetchId === requestsFetchIdRef.current) setLoading(false);
-    }
+    } finally { if (id === fetchIdRef.current) setLoading(false); }
   }, []);
-  useEffect(() => { void fetchRequests(); }, [fetchRequests]);
-  // Reload for every transition from open to closed, including X and Escape.
+  useEffect(() => { void fetchRequests(); return () => { fetchIdRef.current += 1; }; }, [fetchRequests]);
   useEffect(() => {
-    const wasOpen = previousDetailOpenRef.current;
-    previousDetailOpenRef.current = openDetailModal;
-    if (wasOpen && !openDetailModal) void fetchRequests();
-  }, [openDetailModal, fetchRequests]);
+    const wasOpen = previousDetailOpenRef.current; previousDetailOpenRef.current = detailOpen;
+    if (wasOpen && !detailOpen) void fetchRequests();
+  }, [detailOpen, fetchRequests]);
   useEffect(() => {
-    const loadSelectedDC = () => {
-      const savedSelectedDC = localStorage.getItem("selected_dc");
-      if (!savedSelectedDC) { setSelectedDC(null); return; }
-      try {
-        setSelectedDC(JSON.parse(savedSelectedDC));
-      } catch (error) {
-        console.error("อ่าน selected_dc ไม่ได้:", error);
-        localStorage.removeItem("selected_dc");
-        setSelectedDC(null);
-      }
-    };
-    loadSelectedDC();
-    window.addEventListener("selectedDCChanged", loadSelectedDC);
-    return () => window.removeEventListener("selectedDCChanged", loadSelectedDC);
+    setPortalTarget(document.body); setUserInfo(stored<UserInfo>(["user_info", "user", "userInfo"]));
+    const loadDC = () => setSelectedDC(stored<SelectedDC>(["selected_dc"])); loadDC();
+    window.addEventListener("selectedDCChanged", loadDC);
+    return () => window.removeEventListener("selectedDCChanged", loadDC);
   }, []);
   useEffect(() => {
-    if (!showRequestDatePicker) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const clickedButton = requestDateButtonRef.current?.contains(target);
-      const clickedPicker = requestDatePickerRef.current?.contains(target);
-      if (!clickedButton && !clickedPicker) setShowRequestDatePicker(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showRequestDatePicker]);
-  useEffect(() => {
-    const savedUser = localStorage.getItem("user_info") ||
-      localStorage.getItem("user") || localStorage.getItem("userInfo");
-    if (!savedUser) { setUserInfo(null); return; }
-    try {
-      setUserInfo(JSON.parse(savedUser));
-    } catch (error) {
-      console.error("อ่าน user info ไม่ได้:", error);
-      setUserInfo(null);
-    }
-  }, []);
-  const selectedDcFromSidebar = useMemo(() => String(
-    selectedDC?.DC_CODE || selectedDC?.dc_code || "",
-  ).trim().toUpperCase(), [selectedDC]);
-  const selectedDcNameFromSidebar = useMemo(() => String(
-    selectedDC?.DC_NAME || selectedDC?.dc_name || "",
-  ).trim(), [selectedDC]);
-  const selectedDcTypeFromSidebar = useMemo(() => String(
-    selectedDC?.DC_TYPE || selectedDC?.dc_type || "",
-  ).trim(), [selectedDC]);
-  const userWarehouse = useMemo(() => String(
-    userInfo?.warehouse || userInfo?.WAREHOUSE ||
-    userInfo?.team || userInfo?.TEAM || "",
-  ).trim().toUpperCase(), [userInfo]);
-  const isCenterUser = userWarehouse === "CENTER" || selectedDcFromSidebar === "CENTER";
-  const handleSort = (key: SortKey) => {
-    setSortConfig((current) => ({
-      key,
-      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
-    }));
-  };
-  const renderSortIcon = (key: SortKey) => {
-    if (sortConfig.key !== key) return <ArrowUpDown size={13} className="opacity-50" />;
-    return sortConfig.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
-  };
-  const sidebarFilteredRequests = useMemo(() => {
-    if (isCenterUser) return requests;
-    if (selectedDcFromSidebar) {
-      return requests.filter((item) => String(item.dc_code || "").trim().toUpperCase() === selectedDcFromSidebar);
-    }
-    if (userWarehouse) {
-      return requests.filter((item) => String(item.dc_code || "").trim().toUpperCase() === userWarehouse);
-    }
-    return [];
-  }, [requests, selectedDcFromSidebar, isCenterUser, userWarehouse]);
-  const normalizeDateKey = (value?: string) => {
-    if (!value) return "ไม่ระบุวันที่";
-    const raw = String(value).trim();
-    if (!raw) return "ไม่ระบุวันที่";
-    const dateOnly = raw.includes("T") ? raw.split("T")[0] : raw.split(" ")[0];
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return dateOnly;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateOnly)) {
-      const [day, month, year] = dateOnly.split("/");
-      return `${year}-${month}-${day}`;
-    }
-    if (/^\d{2}-\d{2}-\d{4}$/.test(dateOnly)) {
-      const [day, month, year] = dateOnly.split("-");
-      return `${year}-${month}-${day}`;
-    }
-    const parsedDate = new Date(raw);
-    if (!Number.isNaN(parsedDate.getTime())) {
-      const year = parsedDate.getFullYear();
-      const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
-      const day = String(parsedDate.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    }
-    return dateOnly;
-  };
-  const formatThaiDate = (value?: string) => {
-    if (!value || value === "ไม่ระบุวันที่") return "ไม่ระบุวันที่";
-    const dateKey = normalizeDateKey(value);
-    if (dateKey === "ไม่ระบุวันที่") return "ไม่ระบุวันที่";
-    const [year, month, day] = dateKey.split("-");
-    return year && month && day ? `${day}/${month}/${year}` : value;
-  };
-  const formatDateToKey = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-  const getRequestDateKey = (item: RequestItem) => {
-    const dateKey = normalizeDateKey(item.request_date || item.date || "");
-    if (dateKey === "ไม่ระบุวันที่") return dateKey;
-    const [year, month, day] = dateKey.split("-");
-    if (!year || !month || !day) return dateKey;
-    let fixedYear = Number(year);
-    if (fixedYear > 2400) fixedYear -= 543;
-    return `${fixedYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  };
-  const formatThaiDateRange = () => {
-    if (!hasRequestDateRange) return "เลือกช่วงวันที่ขอ";
-    const { startDate, endDate } = requestDateRange[0];
-    if (!startDate || !endDate) return "เลือกช่วงวันที่ขอ";
-    return `${formatThaiDate(formatDateToKey(startDate))} - ${formatThaiDate(formatDateToKey(endDate))}`;
-  };
-  const formatNumber = (value?: number | string | null) => {
-    if (value === null || value === undefined || value === "") return "-";
-    const numberValue = Number(value);
-    return Number.isNaN(numberValue) ? String(value) : numberValue.toLocaleString("en-US");
-  };
-  const normalizeStatus = (status?: string) => {
-    const value = String(status || "").trim().toLowerCase();
-    if (value === "fbp_pending" || value === "partial_approved" || value === "รอทีม FBP ประเมินข้อมูล") return "fbp_pending";
-    if (value === "reject_by_fbp" || value === "ทีม FBP ไม่อนุมัติ") return "reject_by_fbp";
-    if (value === "progress" || value === "approved" || value === "อนุมัติแล้ว") return "approved";
-    return value;
-  };
-  const isReplacementRequest = (item: RequestItem) => String(item.fleet_type || "").trim() === "รถทดแทน";
-  const getDetailStatus = (detail: RequestDetailItem) => String(detail.status || "").trim().toLowerCase();
-  const getQtySummary = (item: RequestItem) => {
-    if (item.summary) {
-      const requestedQty = Math.max(Number(item.summary.total_requested || item.qty || 0), 0);
-      const approvedQty = Math.max(Number(item.summary.total_approved || 0), 0);
-      const notApprovedQty = Math.max(Number(item.summary.total_rejected || 0), 0);
-      return { requestedQty, approvedQty, notApprovedQty,
-        pendingQty: normalizeStatus(item.status) === "fbp_pending" ? Math.max(requestedQty - approvedQty - notApprovedQty, 0) : 0 };
-    }
-    const originalQty = Math.max(Number(item.qty || 0), 0);
-    const gmApprovedQty = Math.max(Number(item.approve_qty_gm || 0), 0);
-    const requestedQty = gmApprovedQty > 0 ? gmApprovedQty : originalQty;
-    const details = isReplacementRequest(item) && Array.isArray(item.details) ? item.details : [];
-    if (details.length > 0) {
-      return {
-        requestedQty,
-        approvedQty: details.filter((detail) => normalizeStatus(getDetailStatus(detail)) === "approved").length,
-        notApprovedQty: details.filter((detail) => getDetailStatus(detail) === "reject_by_fbp").length,
-        pendingQty: details.filter((detail) => {
-          const status = normalizeStatus(getDetailStatus(detail));
-          return status === "fbp_pending" || (
-            normalizeStatus(item.status) === "fbp_pending" &&
-            !["approved", "reject_by_fbp", "rejected", "cancelled", "canceled"].includes(status)
-          );
-        }).length,
-      };
-    }
-    const rawApprVal = Number(item.approved_qty || 0);
-    const cleanApprQty = rawApprVal > 0 && rawApprVal <= 100 ? rawApprVal : 0;
-    const approvedQty = Math.max(cleanApprQty, 0);
-    return { requestedQty, approvedQty,
-      notApprovedQty: Math.max(requestedQty - approvedQty, 0),
-      pendingQty: normalizeStatus(item.status) === "fbp_pending" ? requestedQty : 0 };
-  };
-  const isFbpPendingItem = (item: RequestItem) => {
-    const { requestedQty, approvedQty } = getQtySummary(item);
-    if (requestedQty > 0 && approvedQty === requestedQty) {
-      return false;
-    }
-    const parentPending = normalizeStatus(item.status) === "fbp_pending";
-    if (
-      isReplacementRequest(item) &&
-      Array.isArray(item.details) &&
-      item.details.length > 0
-    ) {
-      return item.details.some((detail) => {
-        const detailStatus = normalizeStatus(getDetailStatus(detail));
-        return (
-          detailStatus === "fbp_pending" ||
-          (parentPending && !["approved", "reject_by_fbp", "rejected", "cancelled", "canceled"].includes(detailStatus))
-        );
-      });
-    }
-    return parentPending;
-  };
-  const isFbpRejectedItem = (item: RequestItem) => {
-    const { requestedQty, approvedQty, notApprovedQty } = getQtySummary(item);
-    if (requestedQty > 0 && approvedQty === requestedQty) return false;
-    const normalizedStatus = normalizeStatus(item.status);
-    return normalizedStatus === "reject_by_fbp" ||
-      (isReplacementRequest(item) && normalizedStatus === "approved" && notApprovedQty > 0);
-  };
-  const isApprovedItem = (item: RequestItem) => {
-    const { requestedQty, approvedQty } = getQtySummary(item);
-    if (requestedQty > 0 && approvedQty === requestedQty) return true;
-    return normalizeStatus(item.status) === "approved";
-  };
-  const formatStatusText = (status?: string) => {
-    const value = normalizeStatus(status);
-    if (value === "fbp_pending") return "รอทีม FBP ประเมินข้อมูล";
-    if (value === "reject_by_fbp") return "ทีม FBP ไม่อนุมัติ";
-    if (value === "approved") return "อนุมัติแล้ว";
-    return status || "-";
-  };
-  const getStatusVisual = (status?: string) => {
-    const value = normalizeStatus(status);
-    if (value === "fbp_pending") return { dotClass: "bg-amber-500", textClass: "text-amber-700", hint: "รอการพิจารณา" };
-    if (value === "reject_by_fbp") return { dotClass: "bg-rose-500", textClass: "text-rose-700", hint: "ไม่ผ่านการประเมิน" };
-    if (value === "approved") return { dotClass: "bg-emerald-500", textClass: "text-emerald-700", hint: "ผ่านการประเมิน" };
-    return { dotClass: "bg-slate-400", textClass: "text-slate-600", hint: "สถานะรายการ" };
-  };
-  const getLicenseList = (licenseReplace: string[] | string) => {
-    if (Array.isArray(licenseReplace)) return licenseReplace.map((item) => String(item).trim()).filter(Boolean);
-    if (typeof licenseReplace === "string") {
-      const value = licenseReplace.trim();
-      if (!value) return [];
-      try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed.map((item) => String(item).trim()).filter(Boolean) : [value];
-      } catch {
-        return value.split(",").map((item) => item.trim()).filter(Boolean);
-      }
-    }
-    return [];
-  };
-  const statusCounts = useMemo(() => {
-    const allItems = sidebarFilteredRequests.filter((item) => isFbpPendingItem(item) || isFbpRejectedItem(item) || isApprovedItem(item));
-    const pendingItems = sidebarFilteredRequests.filter(isFbpPendingItem);
-    const rejectedItems = sidebarFilteredRequests.filter(isFbpRejectedItem);
-    const approvedItems = sidebarFilteredRequests.filter(isApprovedItem);
-    const pendingQty = pendingItems.reduce((sum, item) => sum + getQtySummary(item).pendingQty, 0);
-    const rejectedQty = rejectedItems.reduce((sum, item) => sum + getQtySummary(item).notApprovedQty, 0);
-    const approvedQty = approvedItems.reduce((sum, item) => {
-      const qtySummary = getQtySummary(item);
-      return sum + (qtySummary.approvedQty > 0 ? qtySummary.approvedQty : qtySummary.requestedQty);
-    }, 0);
-    return {
-      all: { qty: pendingQty + rejectedQty + approvedQty, items: allItems.length },
-      fbpPending: { qty: pendingQty, items: pendingItems.length },
-      rejected: { qty: rejectedQty, items: rejectedItems.length },
-      approved: { qty: approvedQty, items: approvedItems.length },
-    };
-  }, [sidebarFilteredRequests]);
-  const requestTypeOptions = useMemo(() => Array.from(new Set(sidebarFilteredRequests
-    .map((item) => String(item.fleet_type || "").trim()).filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, "th")), [sidebarFilteredRequests]);
-  const truckTypeOptions = useMemo(() => Array.from(new Set(sidebarFilteredRequests
-    .filter((item) => requestTypeFilter === "all" || String(item.fleet_type || "").trim() === requestTypeFilter)
-    .map((item) => String(item.fleet_truck_type || "").trim()).filter(Boolean)))
-    .sort((a, b) => a.localeCompare(b, "th")), [sidebarFilteredRequests, requestTypeFilter]);
-  const dcTypeOptions = useMemo(() => Array.from(new Set(sidebarFilteredRequests
-    .map((item) => String(item.dc_type || "").trim()).filter(Boolean))).sort(), [sidebarFilteredRequests]);
-  const dcOptions = useMemo(() => Array.from(new Set(sidebarFilteredRequests
-    .filter((item) => dcTypeFilter === "all" || String(item.dc_type || "").trim().toUpperCase() === dcTypeFilter.trim().toUpperCase())
-    .map((item) => String(item.dc_code || "").trim()).filter(Boolean))).sort(), [sidebarFilteredRequests, dcTypeFilter]);
-  const filteredRequests = useMemo(() => {
-    let list = sidebarFilteredRequests;
-    if (statusFilter === "all") list = list.filter((item) => isFbpPendingItem(item) || isFbpRejectedItem(item) || isApprovedItem(item));
-    if (statusFilter === "fbp_pending") list = list.filter(isFbpPendingItem);
-    if (statusFilter === "reject_by_fbp") list = list.filter(isFbpRejectedItem);
-    if (statusFilter === "approved") list = list.filter(isApprovedItem);
-    if (requestTypeFilter !== "all") list = list.filter((item) => String(item.fleet_type || "").trim() === requestTypeFilter);
-    if (truckTypeFilter !== "all") list = list.filter((item) => String(item.fleet_truck_type || "").trim() === truckTypeFilter);
-    if (dcTypeFilter !== "all") list = list.filter((item) => String(item.dc_type || "").trim().toUpperCase() === dcTypeFilter.trim().toUpperCase());
-    if (dcFilter !== "all") list = list.filter((item) => String(item.dc_code || "").trim().toUpperCase() === dcFilter.trim().toUpperCase());
+    if (!showPicker) return;
+    const outside = (event: MouseEvent) => { const target = event.target as Node; if (!dateButtonRef.current?.contains(target) && !pickerRef.current?.contains(target)) setShowPicker(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setShowPicker(false); };
+    const close = () => setShowPicker(false);
+    document.addEventListener("mousedown", outside); document.addEventListener("keydown", escape); window.addEventListener("resize", close);
+    return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); window.removeEventListener("resize", close); };
+  }, [showPicker]);
+
+  const selectedDcCode = code(selectedDC?.DC_CODE || selectedDC?.dc_code);
+  const userWarehouse = code(userInfo?.warehouse || userInfo?.WAREHOUSE || userInfo?.team || userInfo?.TEAM);
+  const isCenterUser = userWarehouse === "CENTER" || selectedDcCode === "CENTER";
+  const scopeCode = selectedDcCode || userWarehouse;
+  const dcName = text(selectedDC?.DC_NAME || selectedDC?.dc_name);
+  const dcType = text(selectedDC?.DC_TYPE || selectedDC?.dc_type);
+  const dcLabel = isCenterUser ? "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด" : scopeCode ? `${scopeCode}${dcName ? ` - ${dcName}` : ""}${dcType ? ` (${dcType})` : ""}` : "ไม่พบข้อมูล DC ของผู้ใช้งาน";
+  const scopedRequests = useMemo(() => isCenterUser ? requests : scopeCode ? requests.filter(item => code(item.dc_code) === scopeCode) : [], [requests, isCenterUser, scopeCode]);
+  const rows = useMemo(() => scopedRequests.map(makeRow), [scopedRequests]);
+  const requestTypes = useMemo(() => optionsOf(scopedRequests.map(item => item.fleet_type)), [scopedRequests]);
+  const truckTypes = useMemo(() => optionsOf(scopedRequests.filter(item => requestTypeFilter === "all" || text(item.fleet_type) === requestTypeFilter).map(item => item.fleet_truck_type)), [scopedRequests, requestTypeFilter]);
+  const dcTypes = useMemo(() => optionsOf(scopedRequests.map(item => item.dc_type)), [scopedRequests]);
+  const dcOptions = useMemo(() => optionsOf(scopedRequests.filter(item => dcTypeFilter === "all" || code(item.dc_type) === code(dcTypeFilter)).map(item => item.dc_code)), [scopedRequests, dcTypeFilter]);
+
+  const filteredRows = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
-    if (keyword) {
-      list = list.filter((item) => {
-        const licenseText = getLicenseText(item?.license_replace);
-        const searchableText = [item?.running_doc, item?.dc_type, item?.dc_code,
-          item?.fleet_type, item?.fleet_truck_type, item?.request_by, item?.remark, licenseText]
-          .map((value) => {
-            if (Array.isArray(value)) return value.join(" ");
-            if (typeof value === "object" && value !== null) return JSON.stringify(value);
-            return String(value ?? "");
-          }).join(" ").toLowerCase();
-        return searchableText.includes(keyword);
-      });
-    }
-    if (hasRequestDateRange) {
-      const startDateKey = formatDateToKey(requestDateRange[0].startDate);
-      const endDateKey = formatDateToKey(requestDateRange[0].endDate);
-      list = list.filter((item) => {
-        const dateKey = getRequestDateKey(item);
-        return dateKey >= startDateKey && dateKey <= endDateKey;
-      });
-    }
-    return list;
-  }, [sidebarFilteredRequests, statusFilter, requestTypeFilter, truckTypeFilter,
-    dcTypeFilter, dcFilter, searchText, hasRequestDateRange, requestDateRange]);
-  const pageTitle = useMemo(() => {
-    const dcSuffix = isCenterUser && dcFilter !== "all" ? `ของ ${dcFilter}`
-      : !isCenterUser && selectedDcFromSidebar ? `ของ ${selectedDcFromSidebar}` : "";
-    if (statusFilter === "fbp_pending") return `รายการรอทีม FBP ประเมินข้อมูล${dcSuffix}`;
-    if (statusFilter === "reject_by_fbp") return `รายการทีม FBP ไม่อนุมัติ${dcSuffix}`;
-    if (statusFilter === "approved") return `รายการอนุมัติแล้ว${dcSuffix}`;
-    return `รายการรอประเมินกองรถ${dcSuffix}`;
-  }, [statusFilter, dcFilter, isCenterUser, selectedDcFromSidebar]);
-  const sortedRequests = useMemo(() => {
-    return [...filteredRequests].sort((a, b) => {
-      let comparison = 0;
-      if (sortConfig.key === "running_doc") {
-        comparison = String(a.running_doc || "").localeCompare(String(b.running_doc || ""), "th", { numeric: true, sensitivity: "base" });
-      }
-      if (sortConfig.key === "request_date") {
-        const requestDateA = getRequestDateKey(a);
-        const requestDateB = getRequestDateKey(b);
-        const dateA = requestDateA === "ไม่ระบุวันที่" ? 0 : new Date(requestDateA).getTime();
-        const dateB = requestDateB === "ไม่ระบุวันที่" ? 0 : new Date(requestDateB).getTime();
-        comparison = dateA - dateB;
-      }
-      if (sortConfig.key === "usage_date") {
-        const dateA = normalizeDateKey(a.usage_date) === "ไม่ระบุวันที่" ? 0 : new Date(normalizeDateKey(a.usage_date)).getTime();
-        const dateB = normalizeDateKey(b.usage_date) === "ไม่ระบุวันที่" ? 0 : new Date(normalizeDateKey(b.usage_date)).getTime();
-        comparison = dateA - dateB;
-      }
-      return sortConfig.direction === "asc" ? comparison : -comparison;
+    const start = dateKey(requestDateRange[0].startDate), end = dateKey(requestDateRange[0].endDate);
+    return rows.filter(row => {
+      const { item } = row;
+      // all does not exclude any API status.
+      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      // Raw 'approved' is not one of the three approved API statuses.
+      if (statusFilter === "approved" && !["process", "progress", "succes"].includes(text(item.status).toLowerCase())) return false;
+      if (requestTypeFilter !== "all" && text(item.fleet_type) !== requestTypeFilter) return false;
+      if (truckTypeFilter !== "all" && text(item.fleet_truck_type) !== truckTypeFilter) return false;
+      if (dcTypeFilter !== "all" && code(item.dc_type) !== code(dcTypeFilter)) return false;
+      if (dcFilter !== "all" && code(item.dc_code) !== code(dcFilter)) return false;
+      if (keyword && !row.searchText.includes(keyword)) return false;
+      return !hasRequestDateRange || (row.requestDate !== NO_DATE && row.requestDate >= start && row.requestDate <= end);
     });
-  }, [filteredRequests, sortConfig]);
-  // แบ่งหน้าหลังกรองและเรียงข้อมูลแล้ว
-  const totalPages = Math.max(1, Math.ceil(sortedRequests.length / pageSize));
+  }, [rows, statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange]);
+  const sortedRows = useMemo(() => [...filteredRows].sort((a, b) => {
+    const comparison = sortConfig.key === "running_doc" ? text(a.item.running_doc).localeCompare(text(b.item.running_doc), "th", { numeric: true, sensitivity: "base" }) : sortConfig.key === "usage_date" ? timestamp(a.item.usage_date) - timestamp(b.item.usage_date) : timestamp(a.requestDate) - timestamp(b.requestDate);
+    return sortConfig.direction === "asc" ? comparison : -comparison;
+  }), [filteredRows, sortConfig]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const activePage = Math.min(Math.max(currentPage, 1), totalPages);
   const pageStart = (activePage - 1) * pageSize;
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter,
-    dcFilter, hasRequestDateRange, requestDateRange, selectedDcFromSidebar,
-    userWarehouse, sortConfig, pageSize]);
-  useEffect(() => {
-    setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
-  }, [totalPages]);
-  const paginatedRequests = useMemo(() => sortedRequests.slice(pageStart, pageStart + pageSize),
-    [sortedRequests, pageStart, pageSize]);
-  const groupedByRequestDate = useMemo(() => {
-    return paginatedRequests.reduce<Record<string, RequestItem[]>>((groups, item) => {
-      const dateKey = getRequestDateKey(item);
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(item);
-      return groups;
-    }, {});
-  }, [paginatedRequests]);
-  const sortedDates = useMemo(() => {
-    const dates = Object.keys(groupedByRequestDate);
-    if (sortConfig.key !== "request_date") return dates;
-    return dates.sort((a, b) => {
-      if (a === "ไม่ระบุวันที่") return 1;
-      if (b === "ไม่ระบุวันที่") return -1;
-      const comparison = new Date(a).getTime() - new Date(b).getTime();
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-  }, [groupedByRequestDate, sortConfig]);
-  // ลำดับต่อเนื่อง แม้มีหลายกลุ่มวันที่ในหน้าเดียวกัน
-  const dateGroupOffsets = useMemo(() => {
-    const offsets: Record<string, number> = {};
-    let offset = 0;
-    for (const date of sortedDates) {
-      offsets[date] = offset;
-      offset += groupedByRequestDate[date].length;
-    }
-    return offsets;
-  }, [sortedDates, groupedByRequestDate]);
-  const selectedDcLabel = useMemo(() => {
-    if (selectedDcFromSidebar === "CENTER") return "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด";
-    if (!selectedDcFromSidebar) return "ไม่ได้เลือก DC จาก Sidebar / แสดงทั้งหมด";
-    return `${selectedDcFromSidebar}${selectedDcNameFromSidebar ? ` - ${selectedDcNameFromSidebar}` : ""}${selectedDcTypeFromSidebar ? ` (${selectedDcTypeFromSidebar})` : ""}`;
-  }, [selectedDcFromSidebar, selectedDcNameFromSidebar, selectedDcTypeFromSidebar]);
-  const handleOpenDetail = (item: RequestItem) => {
-    setSelectedRequest(item);
-    setOpenDetailModal(true);
+  useEffect(() => { setCurrentPage(1); }, [statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange, selectedDcCode, userWarehouse, pageSize, sortConfig]);
+  useEffect(() => { setCurrentPage(page => Math.min(Math.max(page, 1), totalPages)); }, [totalPages]);
+  const pageRows = useMemo(() => sortedRows.slice(pageStart, pageStart + pageSize), [sortedRows, pageStart, pageSize]);
+  const groups = useMemo(() => {
+    // Adjacent date groups preserve the selected document/usage-date sort order.
+    const result: { date: string; offset: number; rows: Row[] }[] = [];
+    pageRows.forEach((row, index) => {
+      const last = result[result.length - 1];
+      if (last && last.date === row.requestDate) last.rows.push(row);
+      else result.push({ date: row.requestDate, offset: index, rows: [row] });
+    }); return result;
+  }, [pageRows]);
+  const statusCounts = useMemo<Counts>(() => {
+    const counts: Counts = { all: { qty: 0, items: 0 }, fbp_pending: { qty: 0, items: 0 }, reject_by_fbp: { qty: 0, items: 0 }, approved: { qty: 0, items: 0 } };
+    for (const row of pageRows) {
+      counts.all.items++; counts.all.qty += row.requestedQty;
+      const raw = text(row.item.status).toLowerCase();
+      const key = raw === "fbp_pending" ? "fbp_pending" : raw === "reject_by_fbp" ? "reject_by_fbp" : ["process", "progress", "succes"].includes(raw) ? "approved" : null;
+      if (key) { counts[key].items++; counts[key].qty += row.requestedQty; }
+    } return counts;
+  }, [pageRows]);
+
+  const clearDates = () => { setHasRequestDateRange(false); setRequestDateRange([newSelection()]); };
+  const clearFilters = () => { setStatusFilter("all"); setSearchText(""); setRequestTypeFilter("all"); setTruckTypeFilter("all"); setDcTypeFilter("all"); setDcFilter("all"); setShowPicker(false); clearDates(); };
+  const sort = (key: SortKey) => setSortConfig(old => ({ key, direction: old.key === key && old.direction === "asc" ? "desc" : "asc" }));
+  const togglePicker = () => {
+    if (showPicker) { setShowPicker(false); return; }
+    const rect = dateButtonRef.current?.getBoundingClientRect(); if (!rect) return;
+    const width = Math.min(330, window.innerWidth - 32);
+    setPickerPosition({ top: Math.max(16, Math.min(rect.bottom + 8, window.innerHeight - 406)), left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) }); setShowPicker(true);
   };
-  const handleCloseDetail = () => {
-    setOpenDetailModal(false);
-    setSelectedRequest(null);
-  };
-  const handleToggleRequestDatePicker = () => {
-    if (!requestDateButtonRef.current) return;
-    const rect = requestDateButtonRef.current.getBoundingClientRect();
-    const calendarWidth = 330;
-    const calendarHeight = 390;
-    const gap = 8;
-    const padding = 16;
-    let top = rect.bottom + gap;
-    let left = rect.right - calendarWidth;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
-    if (spaceBelow < calendarHeight && spaceAbove > calendarHeight) top = rect.top - calendarHeight - gap;
-    if (left + calendarWidth > window.innerWidth - padding) left = window.innerWidth - calendarWidth - padding;
-    if (left < padding) left = padding;
-    if (top < padding) top = padding;
-    setRequestDatePickerPosition({ top, left });
-    setShowRequestDatePicker((prev) => !prev);
-  };
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
-        {/* HEADER */}
-        <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)]" />
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p>
-            </div>
-            <h1 className="mt-1.5 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Truck size={18} className="shrink-0" /></span>
-              <span className="truncate">รอประเมินกองรถ</span>
-            </h1>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-600 shadow-sm">
-                <Warehouse size={12} className="shrink-0 text-slate-400" />
-                <span className="truncate">{isCenterUser ? "CENTER - ส่วนกลาง / แสดงข้อมูลทั้งหมด" : selectedDcFromSidebar ? selectedDcLabel : "แสดงข้อมูลตามสิทธิ์ผู้ใช้งาน"}</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-600 shadow-sm">
-                <Filter size={12} />
-                {statusFilter === "all" ? "ดูทั้งหมด" : statusFilter === "fbp_pending" ? "รอทีม FBP ประเมินข้อมูล" : statusFilter === "reject_by_fbp" ? "ทีม FBP ไม่อนุมัติ" : "อนุมัติแล้ว"}
-              </span>
-            </div>
+  const changeDate = (ranges: RangeKeyDict) => { const selection = ranges.selection; if (!selection) return; const startDate = selection.startDate || new Date(); setRequestDateRange([{ startDate, endDate: selection.endDate || startDate, key: "selection" }]); setHasRequestDateRange(true); };
+  const dateLabel = hasRequestDateRange ? `${formatDate(dateKey(requestDateRange[0].startDate))} - ${formatDate(dateKey(requestDateRange[0].endDate))}` : "เลือกช่วงวันที่ขอ";
+  const title = statusFilter === "all" ? "รายการกองรถทั้งหมด" : `รายการ${LABELS[statusFilter]}`;
+
+  return <div className="min-h-screen bg-slate-50 text-slate-800"><main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
+    <header className="mb-4 flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center">
+      <div><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p><h1 className="mt-2 flex items-center gap-2 text-lg font-semibold"><Truck size={20} className="text-blue-600" />รอประเมินกองรถ</h1>
+        <div className="mt-2 flex flex-wrap gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold"><Warehouse size={12} />{dcLabel}</span><span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">{LABELS[statusFilter]}</span></div></div>
+      <div className="flex gap-2"><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
+    </header>
+    {error && <div role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-600">{error}</div>}
+    <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปเฉพาะรายการในตารางหน้าปัจจุบัน</span><span>หน้า {activePage} / {totalPages}</span></div>
+    <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{CARDS.map(card => {
+      const Icon = card.icon, active = statusFilter === card.key, count = statusCounts[card.key];
+      return <button key={card.key} type="button" aria-pressed={active} onClick={() => setStatusFilter(card.key)} className={`relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition hover:shadow-md ${active ? card.active : card.inactive}`}>
+        <Icon size={82} aria-hidden="true" className="pointer-events-none absolute right-2 top-3 opacity-10" /><div className="relative"><p className="text-[11px] font-semibold">{LABELS[card.key]}</p><p className="mt-1 text-[11px] opacity-60">เฉพาะตารางหน้านี้</p><div className="mt-4 flex items-end justify-between gap-2"><p className="text-2xl font-semibold">{number(count.qty)}<span className="ml-1 text-xs opacity-60">คัน</span></p><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${active ? "bg-white/15" : "bg-white/80"}`}>{number(count.items)} รายการ</span></div></div></button>;
+    })}</div>
+    <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-4 flex items-center gap-2"><SlidersHorizontal size={17} className="text-blue-600" /><h2 className="text-xs font-semibold">ค้นหาและตัวกรอง</h2></div>
+      <div className="grid gap-3 lg:grid-cols-12">
+        <label className="block lg:col-span-3"><span className="mb-1.5 block text-[11px] font-bold text-slate-400">ค้นหา</span><span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" /><input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..." className={`${INPUT} pl-9 pr-8`} />{searchText && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearchText("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X size={13} /></button>}</span></label>
+        <FilterSelect label="ประเภทคำขอ" value={requestTypeFilter} options={requestTypes} icon={Filter} className="lg:col-span-2" onChange={value => { setRequestTypeFilter(value); setTruckTypeFilter("all"); }} />
+        <FilterSelect label="ประเภทรถ" value={truckTypeFilter} options={truckTypes} icon={Truck} className="lg:col-span-2" onChange={setTruckTypeFilter} />
+        <FilterSelect label="DC Type" value={dcTypeFilter} options={dcTypes} icon={Filter} className="lg:col-span-1" onChange={value => { setDcTypeFilter(value); setDcFilter("all"); }} />
+        <FilterSelect label="DC" value={dcFilter} options={dcOptions} icon={Warehouse} className="lg:col-span-1" onChange={setDcFilter} />
+        <div className="lg:col-span-2"><span className="mb-1.5 block text-[11px] font-bold text-slate-400">วันที่ขอ</span><div className="relative"><button ref={dateButtonRef} type="button" aria-expanded={showPicker} onClick={togglePicker} title={dateLabel} className={`${INPUT} truncate pl-8 pr-7 text-left`}><CalendarDays size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400" />{dateLabel}</button>{hasRequestDateRange && <button type="button" aria-label="ล้างวันที่" onClick={clearDates} className="absolute right-2 top-1/2 -translate-y-1/2"><X size={13} /></button>}</div></div>
+        <div className="flex items-end lg:col-span-1"><button type="button" onClick={clearFilters} className={`${INPUT} flex items-center justify-center gap-1 hover:bg-rose-50`}><Eraser size={14} />ล้าง</button></div>
+      </div></section>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3"><div><h2 className="text-xs font-semibold">{title}</h2><p className="mt-1 text-[11px] text-slate-400">หน้านี้ {number(pageRows.length)} รายการ · พบทั้งหมด {number(filteredRows.length)} รายการ</p></div><span className="text-[11px] text-blue-600">เลือกปุ่มท้ายรายการเพื่อดูรายละเอียด</span></div>
+      <div className="max-h-[70vh] min-h-[360px] overflow-auto"><table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left text-xs"><thead className="sticky top-0 z-20"><tr>{COLUMNS.map((column, index) => {
+        const key = column.sort;
+        return <th key={column.label} aria-sort={key ? sortConfig.key === key ? sortConfig.direction === "asc" ? "ascending" : "descending" : "none" : undefined} className={`${CELL} bg-blue-800 text-[11px] font-semibold text-white ${index === 0 ? "sticky left-0 z-30 text-center" : ""}`}>{key ? <button type="button" onClick={() => sort(key)} className="inline-flex items-center gap-1">{column.label}{sortConfig.key !== key ? <ArrowUpDown size={13} /> : sortConfig.direction === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button> : column.label}</th>;
+      })}</tr></thead><tbody>
+        {loading ? <tr><td colSpan={12} className="py-12 text-center text-slate-400"><RefreshCw size={22} className="mx-auto mb-2 animate-spin text-blue-500" />กำลังโหลดข้อมูล...</td></tr> : !pageRows.length ? <tr><td colSpan={12} className="py-12 text-center text-slate-400"><Search size={24} className="mx-auto mb-2" />ไม่พบข้อมูลตามเงื่อนไขนี้</td></tr> : groups.map(group => <Fragment key={`${group.date}-${group.offset}`}>
+          <tr><td colSpan={12} className="bg-blue-50 px-4 py-2 text-[11px] font-semibold text-blue-600"><span className="inline-flex items-center gap-2"><CalendarDays size={13} />วันที่ขอ: {formatDate(group.date)}<span className="text-slate-400">· {group.rows.length} รายการ</span></span></td></tr>
+          {group.rows.map((row, index) => { const { item } = row; const pending = row.status === "fbp_pending"; return <tr key={`${item.id ?? item.running_doc}-${group.offset + index}`} className="group hover:bg-blue-50/30">
+            <td className={`${CELL} sticky left-0 z-10 bg-white text-center group-hover:bg-blue-50`}>{pageStart + group.offset + index + 1}</td>
+            <td className={CELL}><p className="font-semibold">{item.running_doc || "-"}</p><p className="mt-1 text-[11px] text-slate-400">ขอ: {formatDate(row.requestDate)}</p></td>
+            <td className={CELL}><span className="rounded-md bg-blue-50 px-2 py-1 text-blue-600">{item.dc_type || "-"}</span></td>
+            <td className={CELL}><span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-600">{item.dc_code || "-"}</span></td>
+            <td className={CELL}>{item.fleet_type || "-"}</td><td className={CELL}>{item.fleet_truck_type || "-"}</td>
+            <td className="max-w-[160px] px-3 py-3"><div className="flex flex-wrap gap-1">{row.licenses.length ? <>{row.licenses.slice(0, 2).map((license, i) => <span key={i} title={license} className="max-w-[90px] truncate rounded bg-slate-100 px-2 py-1 text-[11px]">{license}</span>)}{row.licenses.length > 2 && <span title={row.licenses.slice(2).join(", ")} className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-600">+{row.licenses.length - 2}</span>}</> : "-"}</div></td>
+            <td className="min-w-[280px] px-3 py-3"><QuantityCell row={row} /></td><td className={CELL}>{formatDate(item.usage_date)}</td><td className={CELL}>{item.request_by || "-"}</td>
+            <td className={CELL}><span title={`API status: ${item.status}`} className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ${statusClass(row.status)}`}>{statusLabel(item.status)}</span></td>
+            <td className={`${CELL} text-right`}><button type="button" onClick={() => setSelectedRequest(item)} className={`inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-semibold ${pending ? "bg-blue-700 text-white hover:bg-blue-800" : "border border-slate-200 hover:bg-blue-50"}`}>{pending ? <><PencilLine size={14} />อัปเดตสถานะ</> : <><Eye size={14} />ดูรายละเอียด</>}</button></td>
+          </tr>; })}
+        </Fragment>)}
+      </tbody></table></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
+    </section>
+    {portalTarget && showPicker && createPortal(<div ref={pickerRef} style={pickerPosition} className="fixed z-[99999] max-h-[calc(100vh-32px)] w-[330px] max-w-[calc(100vw-32px)] overflow-auto rounded-2xl border border-blue-100 bg-white shadow-2xl"><div className="flex items-center justify-between bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700"><span>เลือกช่วงวันที่ขอ</span><button type="button" onClick={clearDates}>ล้าง</button></div><DateRange locale={th} ranges={requestDateRange} onChange={changeDate} editableDateInputs={false} moveRangeOnFirstSelection={false} showDateDisplay={false} showPreview={false} maxDate={new Date()} rangeColors={["#2563eb"]} /><div className="flex items-center justify-between gap-2 border-t p-3"><span className="truncate text-[11px] text-blue-600">{dateLabel}</span><button type="button" onClick={() => setShowPicker(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] text-white">เสร็จสิ้น</button></div></div>, portalTarget)}
+    {portalTarget && createPortal(<div style={{ position: "relative", zIndex: 100000 }}><ExportWaitingFleetModal open={openExportModal} onClose={() => setOpenExportModal(false)} requests={scopedRequests} dcLabel={dcLabel} />{selectedRequest && <FleetModalDetail open={detailOpen} onClose={() => setSelectedRequest(null)} data={selectedRequest} allRequests={requests} onSuccess={async () => { if (!(await fetchRequests())) throw new Error("โหลดรายการล่าสุดไม่สำเร็จ"); }} />}</div>, portalTarget)}
+    {portalTarget &&
+  showSystemUpdateModal &&
+  createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      style={{ zIndex: 2147483647 }}
+    >
+      <section
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="system-update-title"
+        aria-describedby="system-update-description"
+        className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      >
+        <div className="h-1 bg-amber-400" />
+
+        <div className="p-5 sm:p-6">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="25"
+              height="25"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              className="text-amber-600"
+            >
+              <path d="m10.3 3.9-8.1 14a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3l-8.1-14a2 2 0 0 0-3.4 0Z" />
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+            </svg>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"><Download size={16} />ดึงรายงาน</button>
-            <button type="button" onClick={fetchRequests} disabled={loading} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"><span className={loading ? "animate-spin" : ""}>↻</span>{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button>
+
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">
+            แจ้งเตือนจากระบบ
+          </p>
+
+          <h2
+            id="system-update-title"
+            className="mt-2 text-base font-semibold text-slate-900"
+          >
+            อยู่ระหว่างปรับปรุงข้อมูล
+          </h2>
+
+          <p
+            id="system-update-description"
+            className="mt-3 text-xs leading-6 text-slate-600"
+          >
+            ขณะนี้กำลังปรับปรุงข้อมูลภายในระบบ
+            ซึ่งส่งผลต่อข้อมูลที่แสดงในหน้านี้
+            ทำให้ข้อมูลอาจยังไม่เป็นปัจจุบัน
+            และยังไม่สามารถอัปเดตได้ชั่วคราว
+          </p>
+
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-[11px] font-medium text-amber-700">
+              กำหนดอัปเดตข้อมูล
+            </p>
+
+            <p className="mt-1 text-sm font-semibold text-amber-950">
+              21/10/2569 (วันนี้) เวลา 18:00 น.
+            </p>
+
+            <p className="mt-1 text-[11px] text-amber-700">
+              ตามเวลาประเทศไทย
+            </p>
           </div>
+
+          <p className="mt-4 text-[11px] leading-5 text-slate-400">
+            ขออภัยในความไม่สะดวก
+            กรุณาตรวจสอบข้อมูลอีกครั้งหลังจากเวลาดังกล่าว
+          </p>
+
+          <button
+            type="button"
+            autoFocus
+            onKeyDown={event => {
+              // เก็บโฟกัสไว้ใน Modal ซึ่งมีปุ่มเดียว
+              if (event.key === "Tab") event.preventDefault();
+              if (event.key === "Escape") {
+                setShowSystemUpdateModal(false);
+              }
+            }}
+            onClick={() => setShowSystemUpdateModal(false)}
+            className="mt-5 flex h-10 w-full items-center justify-center rounded-xl bg-blue-600 text-xs font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            รับทราบ
+          </button>
         </div>
-        {error && <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600 shadow-[0_10px_30px_rgba(239,68,68,0.1)]">{error}</div>}
-        {/* STATUS CARDS */}
-        <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-          {([
-            {
-              key: "all", label: "ทั้งหมด", count: statusCounts.all.qty, itemCount: statusCounts.all.items, sub: "รวมจำนวนรถทั้งหมด",
-              activeClass: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
-              inactiveClass: "bg-gradient-to-br from-white to-slate-50 text-slate-800 ring-slate-200/80 hover:from-slate-50 hover:to-slate-100",
-              iconClass: "bg-slate-100 text-slate-600", activeIconClass: "bg-white/15 text-white", countClass: "text-slate-900", activeCountClass: "text-white", dotClass: "bg-slate-400", shortLabel: "ALL", backgroundIcon: ClipboardList,
-            },
-            {
-              key: "fbp_pending", label: "รอทีม FBP ประเมินข้อมูล", count: statusCounts.fbpPending.qty, itemCount: statusCounts.fbpPending.items, sub: "จำนวนรถที่รอการพิจารณา",
-              activeClass: "bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-500 text-white ring-amber-300/40",
-              inactiveClass: "bg-gradient-to-br from-white to-amber-50 text-amber-800 ring-amber-100 hover:from-amber-50 hover:to-orange-50",
-              iconClass: "bg-amber-100 text-amber-700", activeIconClass: "bg-white/20 text-white", countClass: "text-amber-900", activeCountClass: "text-white", dotClass: "bg-amber-500", shortLabel: "CT", backgroundIcon: Clock,
-            },
-            {
-              key: "reject_by_fbp", label: "ทีม FBP ไม่อนุมัติ", count: statusCounts.rejected.qty, itemCount: statusCounts.rejected.items, sub: "จำนวนรถที่ไม่ผ่านการประเมิน",
-              activeClass: "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
-              inactiveClass: "bg-gradient-to-br from-white to-rose-50 text-rose-800 ring-rose-100 hover:from-rose-50 hover:to-red-50",
-              iconClass: "bg-rose-100 text-rose-700", activeIconClass: "bg-white/20 text-white", countClass: "text-rose-900", activeCountClass: "text-white", dotClass: "bg-rose-500", shortLabel: "RJ", backgroundIcon: CircleX,
-            },
-            {
-              key: "approved", label: "อนุมัติแล้ว", count: statusCounts.approved.qty, itemCount: statusCounts.approved.items, sub: "จำนวนรถที่ผ่านการประเมิน",
-              activeClass: "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
-              inactiveClass: "bg-gradient-to-br from-white to-emerald-50 text-emerald-800 ring-emerald-100 hover:from-emerald-50 hover:to-green-50",
-              iconClass: "bg-emerald-100 text-emerald-700", activeIconClass: "bg-white/20 text-white", countClass: "text-emerald-900", activeCountClass: "text-white", dotClass: "bg-emerald-500", shortLabel: "OK", backgroundIcon: CircleCheck,
-            },
-          ] as const).map(({ key, label, count, itemCount, sub, activeClass, inactiveClass, iconClass, activeIconClass, countClass, activeCountClass, dotClass, shortLabel, backgroundIcon: BackgroundIcon }) => {
-            const isActive = statusFilter === key;
-            return (
-              <button key={key} aria-pressed={isActive} type="button" onClick={() => setStatusFilter(key)} className={`group relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition duration-200 hover:shadow-md ${isActive ? activeClass : inactiveClass}`}>
-                <BackgroundIcon aria-hidden="true" size={88} strokeWidth={1.2} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive ? "text-white opacity-[0.12]" : "opacity-[0.07]"}`} />
-                <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
-                <div className="pointer-events-none absolute -bottom-10 left-6 h-20 w-20 rounded-full bg-white/10 blur-2xl" />
-                <div className="relative flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${isActive ? "bg-white" : dotClass}`} /><p className={`truncate text-[11px] font-semibold ${isActive ? "text-white/90" : ""}`}>{label}</p></div>
-                    <p className={`mt-1 truncate text-[11px] font-bold ${isActive ? "text-white/60" : "text-slate-400"}`}>{sub}</p>
-                  </div>
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-xs font-semibold shadow-sm ${isActive ? activeIconClass : iconClass}`}>{shortLabel}</div>
-                </div>
-                <div className="relative mt-3 flex items-end justify-between">
-                  <p className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass}`}>{formatNumber(count)}<span className="ml-1 text-xs font-semibold opacity-60">คัน</span></p>
-                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive ? "bg-white/15 text-white" : "bg-white/80 text-slate-400 shadow-sm"}`}>{formatNumber(itemCount)} รายการ</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {/* FILTER */}
-        <div className="relative z-30 mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><SlidersHorizontal size={16} /></span>
-              <div className="min-w-0"><p className="text-xs font-semibold text-slate-800">ค้นหาและตัวกรอง</p><p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">เลือกเงื่อนไขเพื่อค้นหารายการรอประเมินกองรถ</p></div>
-            </div>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-12">
-            <div className="lg:col-span-3">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">ค้นหา</label>
-              <div className="relative">
-                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..." className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                {searchText && <button type="button" onClick={() => setSearchText("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"><X size={13} /></button>}
-              </div>
-            </div>
-            <div className="lg:col-span-2">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">ประเภทคำขอ</label>
-              <div className="relative">
-                <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <select value={requestTypeFilter} onChange={(e) => { setRequestTypeFilter(e.target.value); setTruckTypeFilter("all"); }} className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  <option value="all">ทุกประเภทคำขอ</option>{requestTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                </select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">▼</span>
-              </div>
-            </div>
-            <div className="lg:col-span-2">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">ประเภทรถ</label>
-              <div className="relative">
-                <Truck size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <select value={truckTypeFilter} onChange={(e) => setTruckTypeFilter(e.target.value)} className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  <option value="all">ทุกประเภทรถ</option>{truckTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                </select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">▼</span>
-              </div>
-            </div>
-            <div className="lg:col-span-1">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">DC Type</label>
-              <div className="relative">
-                <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <select value={dcTypeFilter} onChange={(e) => { setDcTypeFilter(e.target.value); setDcFilter("all"); }} className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  <option value="all">ทุก DC Type</option>{dcTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                </select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">▼</span>
-              </div>
-            </div>
-            <div className="lg:col-span-1">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">DC</label>
-              <div className="relative">
-                <Warehouse size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <select value={dcFilter} onChange={(e) => setDcFilter(e.target.value)} className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  <option value="all">ทุก DC</option>{dcOptions.map((dc) => <option key={dc} value={dc}>{dc}</option>)}
-                </select><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">▼</span>
-              </div>
-            </div>
-            <div className="lg:col-span-2">
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-400">วันที่ขอ</label>
-              <div className="relative">
-                <CalendarDays size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
-                <button ref={requestDateButtonRef} type="button" onClick={handleToggleRequestDatePicker} className={`h-10 w-full truncate rounded-xl border pl-9 pr-9 text-left text-xs font-semibold shadow-sm outline-none transition focus:ring-4 ${hasRequestDateRange ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-blue-100/70" : "border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:shadow-md focus:border-blue-400 focus:ring-blue-100/70"}`}>{formatThaiDateRange()}</button>
-                {hasRequestDateRange && <button type="button" onClick={() => { setHasRequestDateRange(false); setRequestDateRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }]); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 transition hover:text-rose-500"><X size={13} /></button>}
-              </div>
-              {showRequestDatePicker && (
-                <div ref={requestDatePickerRef} className="fixed z-[99999] w-[330px] overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.22)]" style={{ top: requestDatePickerPosition.top, left: requestDatePickerPosition.left }}>
-                  <div className="flex items-center justify-between bg-blue-50 px-4 py-2.5">
-                    <div><p className="text-xs font-semibold text-blue-700">เลือกช่วงวันที่ขอ</p><p className="mt-0.5 text-[11px] font-medium text-slate-400">Start Date – End Date</p></div>
-                    {hasRequestDateRange && <button type="button" onClick={() => { setHasRequestDateRange(false); setRequestDateRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }]); }} className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-blue-600 shadow-sm transition hover:bg-blue-100">ล้าง</button>}
-                  </div>
-                  <DateRange locale={th} editableDateInputs={false} moveRangeOnFirstSelection={false} ranges={requestDateRange} onChange={(item: RangeKeyDict) => {
-                    const selection = item.selection;
-                    setRequestDateRange([{ startDate: selection.startDate || new Date(), endDate: selection.endDate || selection.startDate || new Date(), key: "selection" }]);
-                    if (selection.startDate && selection.endDate) setHasRequestDateRange(true);
-                  }} showDateDisplay={false} showPreview={false} maxDate={new Date()} rangeColors={["#2563eb"]} />
-                  <div className="flex items-center justify-between bg-white px-4 py-2.5 shadow-[0_-1px_0_rgba(226,232,240,0.8)]"><p className="truncate pr-3 text-[11px] font-bold text-blue-600">{hasRequestDateRange ? formatThaiDateRange() : "เลือกวันเริ่มต้น–สิ้นสุด"}</p><button type="button" onClick={() => setShowRequestDatePicker(false)} className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700">เสร็จสิ้น</button></div>
-                </div>
-              )}
-            </div>
-            <div className="flex items-end lg:col-span-1">
-              <button type="button" onClick={() => {
-                setSearchText(""); setRequestTypeFilter("all"); setTruckTypeFilter("all");
-                setDcTypeFilter("all"); setDcFilter("all"); setStatusFilter("all"); setHasRequestDateRange(false);
-                setRequestDateRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }]);
-              }} className="group flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md" title="ล้างตัวกรอง"><Eraser size={13} className="transition group-hover:-rotate-6" /><span className="hidden xl:inline">ล้าง</span></button>
-            </div>
-          </div>
-        </div>
-        {/* TABLE */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div><h2 className="text-xs font-semibold text-slate-800">{pageTitle}</h2><p className="mt-0.5 text-[11px] font-medium text-slate-400">แสดง {filteredRequests.length} จากทั้งหมด {sidebarFilteredRequests.length} รายการ</p></div>
-            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600"><span className="h-1.5 w-1.5 rounded-full bg-blue-500" />เลือก “ประเมิน” เพื่อดูรายละเอียด</span>
-          </div>
-          <div className="relative">
-            <div className="bg-blue-50/70 px-3 py-1.5 text-[11px] font-bold text-blue-500 sm:hidden">เลื่อนซ้าย–ขวาเพื่อดูข้อมูลทั้งหมด →</div>
-            <div className="max-h-[70vh] min-h-[360px] overflow-auto [scrollbar-color:#94a3b8_#f1f5f9] [scrollbar-width:thin]">
-              <table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left">
-                <thead className="sticky top-0 z-20">
-                  <tr className="bg-blue-800 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
-                    {["ลำดับ", "เลขที่เอกสาร", "DC Type", "DC", "ประเภทคำขอ", "ประเภทรถ", "ทะเบียนทดแทน", "จำนวน", "วันที่ใช้งาน", "ผู้ขอ", "สถานะ", "รายละเอียด"].map((col, index) => {
-                      const sortKey: SortKey | null = col === "เลขที่เอกสาร" ? "running_doc" : col === "วันที่ใช้งาน" ? "usage_date" : null;
-                      return <th key={col} onClick={() => { if (sortKey) handleSort(sortKey); }} className={`whitespace-nowrap bg-transparent px-3 py-3 ${index === 0 ? "sticky left-0 z-30 w-[52px] text-center" : ""} ${index === 6 ? "text-center" : ""} ${index === 10 ? "text-right" : ""} ${sortKey ? "cursor-pointer select-none transition hover:bg-blue-700" : ""}`}><span className="inline-flex items-center gap-1.5">{col}{sortKey && renderSortIcon(sortKey)}</span></th>;
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={12} className="py-12 text-center"><div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-4 border-blue-100 border-t-blue-500" /><p className="text-xs font-medium text-slate-400">กำลังโหลดข้อมูล...</p></td></tr>
-                  ) : filteredRequests.length === 0 ? (
-                    <tr><td colSpan={12} className="py-12 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400"><Search size={20} /></span><p className="mt-3 text-sm font-bold text-slate-400">ไม่พบข้อมูลตามเงื่อนไขนี้</p></td></tr>
-                  ) : sortedDates.map((date) => (
-                    <Fragment key={date}>
-                      <tr><td colSpan={12} className="bg-gradient-to-r from-blue-50/80 to-slate-50 px-4 py-2 shadow-[0_1px_0_rgba(226,232,240,0.8)]"><div className="inline-flex items-center gap-2 text-[11px] font-semibold text-blue-600"><CalendarDays size={13} className="text-blue-400" />วันที่ขอ: {formatThaiDate(date)}<span className="font-semibold text-slate-400">· {groupedByRequestDate[date].length} รายการ</span></div></td></tr>
-                      {groupedByRequestDate[date].map((item, index) => {
-                        const isPending = isFbpPendingItem(item);
-                        const isApproved = isApprovedItem(item);
-                        const status = isApproved ? "progress" : isPending ? "fbp_pending" : item.status || "fbp_pending";
-                        const statusText = formatStatusText(status);
-                        const statusVisual = getStatusVisual(status);
-                        const licenseList = getLicenseList(item.license_replace);
-                        const visibleLicenses = licenseList.slice(0, 2);
-                        const hiddenLicenseCount = Math.max(licenseList.length - 2, 0);
-                        const rowKey = item.id !== null && item.id !== undefined ? String(item.id) : item.running_doc || `${date}-${index}`;
-                        return (
-                          <tr key={rowKey} className="group bg-white text-xs transition hover:bg-blue-50/30">
-                            <td className="sticky left-0 z-10 bg-white px-3 py-3 text-center group-hover:bg-blue-50/30"><span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-1 text-[11px] font-semibold text-slate-500">{pageStart + dateGroupOffsets[date] + index + 1}</span></td>
-                            <td className="whitespace-nowrap px-3 py-3"><p className="font-semibold text-slate-800">{item.running_doc || "-"}</p><p className="mt-0.5 text-[11px] font-medium text-slate-400">ขอ: {formatThaiDate(item.request_date || item.date)}</p></td>
-                            <td className="whitespace-nowrap px-3 py-3"><span className="inline-flex rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-blue-100">{item.dc_type || "-"}</span></td>
-                            <td className="whitespace-nowrap px-3 py-3"><span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-emerald-100">{item.dc_code || "-"}</span></td>
-                            <td className="whitespace-nowrap px-3 py-3"><p className="font-bold text-slate-700">{item.fleet_type || "-"}</p></td>
-                            <td className="whitespace-nowrap px-3 py-3"><p className="font-bold text-slate-700">{item.fleet_truck_type || "-"}</p></td>
-                            <td className="max-w-[150px] px-3 py-3">
-                              {licenseList.length > 0 ? <div className="flex flex-wrap gap-1">{visibleLicenses.map((license, licenseIndex) => <span key={`${rowKey}-license-${licenseIndex}`} title={license} className="inline-flex max-w-[86px] truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{license}</span>)}{hiddenLicenseCount > 0 && <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-500 ring-1 ring-blue-100">+{hiddenLicenseCount}</span>}</div> : <span className="text-slate-300">-</span>}
-                            </td>
-                            <td className="min-w-[300px] px-3 py-3">
-                              {(item.summary?.total_approved || 0) > 0 || (item.summary?.total_rejected || 0) > 0 ? (
-                                <div className="flex flex-col gap-2">
-                                  <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                                    <div className="px-2 py-2 text-center"><p className="text-[11px] font-bold text-slate-400">จำนวนขอ</p><p className="mt-0.5 text-xs font-semibold text-slate-700">{formatNumber(item.summary?.total_requested)}</p></div>
-                                    <div className="border-l border-slate-100 bg-emerald-50 px-2 py-2 text-center"><p className="text-[11px] font-bold text-emerald-500">อนุมัติ</p><p className="mt-0.5 text-xs font-semibold text-emerald-700">{formatNumber(item.summary?.total_approved)}</p></div>
-                                    <div className="border-l border-slate-100 bg-rose-50 px-2 py-2 text-center"><p className="text-[11px] font-bold text-rose-500">ไม่อนุมัติ</p><p className="mt-0.5 text-xs font-semibold text-rose-700">{formatNumber(item.summary?.total_rejected)}</p></div>
-                                  </div>
-                                  {item.approved_trucks && item.approved_trucks.length > 0 && <div className="mt-1 rounded border border-emerald-100 bg-emerald-50/50 p-2"><p className="mb-1 text-[11px] font-bold text-emerald-600">รายการที่อนุมัติ:</p><ul className="space-y-1">{item.approved_trucks.map((t, idx) => <li key={`app-${idx}`} className="flex items-start gap-1 text-[11px] text-slate-600"><span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" /><span><span className="font-bold">{t.old_license}</span> &rarr; {t.new_truck_type} ({t.new_vendor_name || "ไม่ระบุ Vendor"})</span></li>)}</ul></div>}
-                                  {item.rejected_trucks && item.rejected_trucks.length > 0 && <div className="mt-1 rounded border border-rose-100 bg-rose-50/50 p-2"><p className="mb-1 text-[11px] font-bold text-rose-600">รายการที่ไม่อนุมัติ:</p><ul className="space-y-1">{item.rejected_trucks.map((t, idx) => <li key={`rej-${idx}`} className="flex items-start gap-1 text-[11px] text-slate-600"><span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400" /><span><span className="font-bold">{t.old_license}</span> ({t.reason})</span></li>)}</ul></div>}
-                                </div>
-                              ) : <div className="text-center"><span className="rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">{formatNumber(item.summary?.total_requested || getQtySummary(item).requestedQty)}</span></div>}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-600">{formatThaiDate(item.usage_date)}</td>
-                            <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700">{item.request_by || "-"}</td>
-                            <td className="whitespace-nowrap px-3 py-3"><div className="flex min-w-[135px] items-center gap-2.5"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusVisual.dotClass}`} /><div className="min-w-0"><p className={`whitespace-nowrap text-[11px] font-semibold ${statusVisual.textClass}`}>{statusText}</p><p className="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-slate-400">{statusVisual.hint}</p></div></div></td>
-                            <td className="whitespace-nowrap px-3 py-3 text-right"><button type="button" onClick={() => handleOpenDetail(item)} className={isPending ? "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white shadow-md shadow-blue-700/20 transition hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-lg" : "inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"}>{isPending ? <><PencilLine size={14} />อัพเดตสถานะ</> : <><Eye size={14} />ดูรายละเอียด</>}</button></td>
-                          </tr>
-                        );
-                      })}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {/* PAGINATION: อยู่นอกพื้นที่เลื่อนตาราง */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">แสดง</span>
-                <select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 disabled:opacity-40">
-                  <option value={20}>20 รายการ</option><option value={25}>25 รายการ</option><option value={50}>50 รายการ</option><option value={100}>100 รายการ</option>
-                </select>
-                <span className="text-xs text-slate-400">{sortedRequests.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + pageSize, sortedRequests.length)} จากทั้งหมด {sortedRequests.length.toLocaleString("th-TH")} รายการ</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(Math.max(activePage - 1, 1))} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">ก่อนหน้า</button>
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-                  <span>หน้า</span>
-                  <select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || sortedRequests.length === 0} onChange={(event) => setCurrentPage(Number(event.target.value))} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-40">
-                    {Array.from({ length: totalPages }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
-                  </select><span>/ {totalPages.toLocaleString("th-TH")}</span>
-                </div>
-                <button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(Math.min(activePage + 1, totalPages))} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">ถัดไป</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        {portalTarget && createPortal(
-          <div style={{ position: "relative", zIndex: 100000 }}>
-        <ExportWaitingFleetModal open={openExportModal} onClose={() => setOpenExportModal(false)} requests={sidebarFilteredRequests} dcLabel={selectedDcLabel} />
-        {openDetailModal && selectedRequest && <FleetModalDetail open={openDetailModal} onClose={handleCloseDetail} data={selectedRequest} allRequests={requests} onSuccess={async () => { if (!(await fetchRequests())) throw new Error("โหลดรายการล่าสุดไม่สำเร็จ"); }} />}
-          </div>, portalTarget
-        )}
-        <style jsx>{`
-          main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) {
-            outline: 2px solid #2563eb; outline-offset: 3px;
-          }
-          @media (prefers-reduced-motion: reduce) { main :global(*) { transition: none !important; animation: none !important; } }
-        `}</style>
-      </main>
-    </div>
-  );
-}
-function getLicenseText(licenseReplace?: string[] | string | null): string {
-  if (Array.isArray(licenseReplace)) return licenseReplace.join(", ");
-  if (typeof licenseReplace === "string") {
-    try {
-      const parsed = JSON.parse(licenseReplace);
-      return Array.isArray(parsed) ? parsed.join(", ") : licenseReplace;
-    } catch { return licenseReplace; }
-  }
-  return "";
+      </section>
+    </div>,
+    portalTarget,
+  )}
+    <style jsx>{`main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { main :global(*) { animation: none !important; transition: none !important; } }`}</style>
+  </main></div>;
 }

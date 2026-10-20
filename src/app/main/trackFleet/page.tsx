@@ -180,6 +180,7 @@ export default function TrackFleetPage() {
   const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
   const [openExportModal, setOpenExportModal] = useState(false);
   const [exportApiUrl, setExportApiUrl] = useState("");
+  const [showSystemUpdateModal, setShowSystemUpdateModal] = useState(true);
 
   const [summary, setSummary] = useState({
     all: { qty: 0, items: 0 },
@@ -2062,7 +2063,107 @@ export default function TrackFleetPage() {
       />
         </div>, portalTarget
       )}
+{portalTarget &&
+  showSystemUpdateModal &&
+  createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      style={{ zIndex: 2147483647 }}
+    >
+      <section
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="system-update-title"
+        aria-describedby="system-update-description"
+        className="max-h-[calc(100dvh-32px)] w-full max-w-[420px] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      >
+        <div className="h-1 bg-amber-400" />
 
+        <div className="p-5 sm:p-6">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="25"
+              height="25"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m10.3 3.9-8.1 14a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3l-8.1-14a2 2 0 0 0-3.4 0Z" />
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+            </svg>
+          </div>
+
+          <p className="text-[10px] font-bold tracking-wide text-amber-600">
+            แจ้งเตือนจากระบบ
+          </p>
+
+          <h2
+            id="system-update-title"
+            className="mt-2 text-base font-semibold text-slate-900"
+          >
+            อยู่ระหว่างปรับปรุงข้อมูลภายในระบบ
+          </h2>
+
+          <p
+            id="system-update-description"
+            className="mt-3 text-xs leading-6 text-slate-600"
+          >
+            ขณะนี้กำลังปรับปรุงข้อมูลภายในระบบ
+            ส่งผลให้ข้อมูลที่แสดงในหน้านี้อาจยังไม่เป็นปัจจุบัน
+            และยังไม่สามารถอัปเดตได้ชั่วคราว
+          </p>
+
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <CalendarDays
+              size={18}
+              aria-hidden="true"
+              className="mt-0.5 shrink-0 text-amber-600"
+            />
+
+            <div>
+              <p className="text-[11px] font-medium text-amber-700">
+                กำหนดอัปเดตข้อมูล
+              </p>
+              <p className="mt-1 text-sm font-semibold text-amber-950">
+                21/10/2569 (วันนี้) เวลา 18:00 น.
+              </p>
+              <p className="mt-1 text-[11px] text-amber-700">
+                ตามเวลาประเทศไทย
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-4 text-[11px] leading-5 text-slate-400">
+            ขออภัยในความไม่สะดวก
+            กรุณาตรวจสอบข้อมูลอีกครั้งหลังจากเวลาดังกล่าว
+          </p>
+
+          <button
+            type="button"
+            autoFocus
+            onClick={() => setShowSystemUpdateModal(false)}
+            onKeyDown={(event) => {
+              // Modal นี้มีปุ่มเดียว ให้โฟกัสอยู่ที่ปุ่มรับทราบ
+              if (event.key === "Tab") event.preventDefault();
+              if (event.key === "Escape") {
+                setShowSystemUpdateModal(false);
+              }
+            }}
+            className="mt-5 flex h-10 w-full items-center justify-center rounded-xl bg-blue-600 text-xs font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            รับทราบ
+          </button>
+        </div>
+      </section>
+    </div>,
+    portalTarget,
+  )}
     </div>
   );
 }
