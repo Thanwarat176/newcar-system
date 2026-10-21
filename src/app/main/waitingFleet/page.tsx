@@ -180,7 +180,7 @@ export default function WaitingFleetPage() {
   const previousDetailOpenRef = useRef(false);
   const detailOpen = selectedRequest !== null;
   const [showSystemUpdateModal, setShowSystemUpdateModal] = useState(true);
-  
+
   const fetchRequests = useCallback(async (): Promise<boolean> => {
     const id = ++fetchIdRef.current; setLoading(true); setError("");
     try {
@@ -401,7 +401,7 @@ export default function WaitingFleetPage() {
             </p>
 
             <p className="mt-1 text-sm font-semibold text-amber-950">
-              21/10/2569 (วันนี้) เวลา 18:00 น.
+              26/10/2569 เวลา 10:00 น.
             </p>
 
             <p className="mt-1 text-[11px] text-amber-700">
