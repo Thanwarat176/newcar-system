@@ -20,27 +20,29 @@ const MASTER_FILE_API_URL = `${API_BASE}/master_file.php`;
 type Id = string | number;
 interface FlowAssessmentModalProps { open: boolean; requestId: Id | null; vehicleNo: Id | null; documentMode?: boolean; referenceVehicleNo?: Id | null; replacedOldLicenses?: string[]; onClose: () => void; }
 type MemoFileKey = "number_fbp" | "number_tis" | "number_til" | "number_ask" | "number_kleasing" | "number_ttb" | "number_thaiolix";
-type ExtraKey = MemoFileKey | `date_${MemoFileKey}` | "warehouse_plan_date" | "remark" | "car_model" | "car_brand" | "car_chassis" | "car_engine" | "car_license" | "car_province";
+type ExtraKey = MemoFileKey | `date_${MemoFileKey}` | "warehouse_plan_date" | "remark" | "car_model" | "car_brand" | "supplier_alloc" | "car_chassis" | "car_engine" | "car_license" | "car_province";
 type VehicleExtraForm = Record<ExtraKey, string>;
 type ExtraInfo = Partial<Record<ExtraKey | "number_feb" | "date_number_feb", string | null>>;
 interface ExistingMemoFile { id?: Id; file_name: string; file_url?: string | null; }
 type ExistingMemoFiles = Partial<Record<MemoFileKey, ExistingMemoFile>>;
 interface VehicleWarehouseInfoData extends ExtraInfo { id?: Id; request_id?: Id; vehicle_no?: Id; }
 interface RequestVehicleDetail extends ExtraInfo {
-  id?: Id; license?: string | null; province?: string | null; truck_type?: string | null; company_name?: string | null;
+  id?: Id; license?: string | null; province?: string | null; truck_type?: string | null; company_id?: Id | null; company_name?: string | null;
   license_replace?: string | null; province_replace?: string | null; truck_type_replace?: string | null; company_name_replace?: string | null;
   warehouse_info?: VehicleWarehouseInfoData | null;
 }
 interface RequestInfo {
   id: Id; running_doc?: string; dc_type?: string; dc_code?: string; fleet_type?: string; fleet_truck_type?: string;
   qty?: Id; usage_date?: string; request_date?: string; request_by?: string; approved_by?: string | null;
+  company_id?: Id | null; company_name?: string | null;
   approved_qty?: Id | null; approved_company_name?: string | null; approved_truck_type?: string | null;
   workload?: Id; truckturn?: Id; remark?: string; status?: string;
   details?: RequestVehicleDetail[]; vehicle_warehouse_info?: VehicleWarehouseInfoData[];
 }
 interface CarItem extends ExtraInfo {
   vehicle_no: Id; unit_code?: string | null; license: string; province?: string; truck_type?: string;
-  company_name?: string; detail_id: string | null; memo_files?: ExistingMemoFiles; warehouse_info?: VehicleWarehouseInfoData | null;
+  company_master_code?: Id | null; company_master_name?: string | null; company_rating?: string | null;
+  company_id?: Id | null; company_name?: string | null; detail_id: string | null; memo_files?: ExistingMemoFiles; warehouse_info?: VehicleWarehouseInfoData | null;
 }
 interface StepItem { id: Id; process: string; detail: string | null; process_level: Id; sla?: Id | null; }
 interface FlowItem {
@@ -72,7 +74,7 @@ const MEMO_FIELDS: { key: MemoFileKey; dateKey: `date_${MemoFileKey}`; label: st
 ];
 const VEHICLE_FIELDS: { key: ExtraKey; label: string }[] = [
   { key: "warehouse_plan_date", label: "แผนวันที่จะเข้าคลังได้" }, { key: "car_model", label: "รุ่น" },
-  { key: "car_brand", label: "ยี่ห้อ" }, { key: "car_chassis", label: "เลขที่ตัวถัง" },
+  { key: "car_brand", label: "ยี่ห้อ" }, { key: "supplier_alloc", label: "จัดสรรผู้ผลิต" }, { key: "car_chassis", label: "เลขที่ตัวถัง" },
   { key: "car_engine", label: "เลขที่เครื่อง" }, { key: "car_license", label: "ทะเบียนรถ" }, { key: "car_province", label: "จังหวัด" },
 ];
 const emptyVehicleExtraForm = Object.fromEntries([
@@ -103,12 +105,12 @@ function normalizeApiData(result: ApiResponse): FlowResponseData {
   const sourceCars: CarItem[] = source.cars?.length ? source.cars : details.map((d, i) => ({
     vehicle_no: d.warehouse_info?.vehicle_no ?? i + 1, detail_id: d.id == null ? null : String(d.id),
     license: d.license_replace || d.license || "-", province: d.province_replace || d.province || "-",
-    truck_type: d.truck_type_replace || d.truck_type || "-", company_name: d.company_name_replace || d.company_name || "-",
+    truck_type: d.truck_type_replace || d.truck_type || "-", company_id: d.company_id, company_name: d.company_name,
   }));
   const cars = sourceCars.map((car, i) => {
     const detail = details.find(d => d.id != null && same(d.id, car.detail_id)) || details[i];
     const warehouse = detail?.warehouse_info || warehouses.find(w => same(w.vehicle_no, car.vehicle_no)) || warehouses[i] || car.warehouse_info;
-    const merged = { ...car, warehouse_info: warehouse };
+    const merged = { ...car, company_id: car.company_id ?? detail?.company_id, company_name: car.company_name ?? detail?.company_name, warehouse_info: warehouse };
     for (const name of Object.keys(emptyVehicleExtraForm) as ExtraKey[]) merged[name] = warehouse?.[name] ?? detail?.[name] ?? car[name] ?? null;
     merged.number_fbp = warehouse?.number_fbp ?? warehouse?.number_feb ?? car.number_fbp ?? null;
     merged.date_number_fbp = warehouse?.date_number_fbp ?? warehouse?.date_number_feb ?? car.date_number_fbp ?? null;
@@ -121,7 +123,19 @@ function getUserInfo(): Record<string, unknown> {
 }
 function getCreatedBy() { const u = getUserInfo(); return [u.name, u.surname].map(key).filter(Boolean).join(" "); }
 function getDepartment() { const u = getUserInfo(); return key(u.department || u.DEPARTMENT || u.department_name || u.DEPARTMENT_NAME).toUpperCase(); }
-function canEditProcessLevel(level: Id) { const d = getDepartment(); return d === "FBP" ? Number(level) === 7 : d === "KA" ? Number(level) === 8 : true; }
+function canManageDocuments() {
+  const department = getDepartment();
+  return Boolean(department) && department !== "FBP" && department !== "KA";
+}
+
+function canEditProcessLevel(level: Id) {
+  const department = getDepartment();
+  const processLevel = Number(level);
+  if (!department || !Number.isInteger(processLevel) || processLevel < 1 || processLevel > 10) return false;
+  if (department === "FBP") return processLevel === 7;
+  if (department === "KA") return processLevel === 8;
+  return true;
+}
 function calendarPosition(target: HTMLElement): CalendarPosition {
   const r = target.getBoundingClientRect(), w = Math.min(340, window.innerWidth - 24), h = Math.min(470, window.innerHeight - 24);
   const above = window.innerHeight - r.bottom < h + 8 && r.top > window.innerHeight - r.bottom;
@@ -142,12 +156,21 @@ const buttonBase = "inline-flex h-10 items-center justify-center gap-2 rounded-x
 const inputClass = "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100";
 
 export default function FlowAssessmentModal({ open, requestId, vehicleNo, documentMode = false, referenceVehicleNo = null, replacedOldLicenses = [], onClose }: FlowAssessmentModalProps) {
+  const visibleOldLicenses = Array.from(new Set(replacedOldLicenses
+    .map(license => String(license ?? "").trim())
+    .filter(license => Boolean(license) && !["-", "—", "ไม่มีข้อมูลทะเบียนเก่า"].includes(license))));
   const [data, setData] = useState<FlowResponseData>(emptyData);
   const [loading, setLoading] = useState(false), [initializing, setInitializing] = useState(false);
   const [error, setError] = useState(""), [actionMessage, setActionMessage] = useState("");
   const [savingFlowId, setSavingFlowId] = useState<string | null>(null);
   const [dateDrafts, setDateDrafts] = useState<Record<string, FlowDateDraft>>({});
   const [vehicleExtraForm, setVehicleExtraForm] = useState<VehicleExtraForm>({ ...emptyVehicleExtraForm });
+  const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
+  const supplierChoices = Array.from(new Set([
+    ...supplierOptions, vehicleExtraForm.supplier_alloc,
+    ...data.cars.map(car => car.supplier_alloc ?? car.warehouse_info?.supplier_alloc ?? ""),
+    ...(data.request?.vehicle_warehouse_info ?? []).map(info => info.supplier_alloc ?? ""),
+  ].map(value => String(value ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "th"));
   const [memoFiles, setMemoFiles] = useState<Partial<Record<MemoFileKey, File>>>({});
   const [existingMemoFiles, setExistingMemoFiles] = useState<ExistingMemoFiles>({});
   const [savingMemoKey, setSavingMemoKey] = useState<MemoFileKey | null>(null);
@@ -157,6 +180,18 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   const loadVersion = useRef(0);
   const busy = loading || initializing || savingFlowId !== null || savingMemoKey !== null || savingWarehouseInfo;
   const selectedCar = data.cars[0];
+  const approvedCompanySource = selectedCar && (hasId(selectedCar.company_id) || key(selectedCar.company_name))
+    ? selectedCar : data.request;
+  const approvedCompanyId = key(selectedCar?.company_master_code) || key(approvedCompanySource?.company_id);
+  const approvedCompanyName = key(selectedCar?.company_master_name) || key(approvedCompanySource?.company_name);
+  const approvedCompanyDisplay = [approvedCompanyId ? `[${approvedCompanyId}]` : "", approvedCompanyName]
+    .filter(Boolean).join(" ") || "ไม่ระบุบริษัท";
+
+
+  const companyRatingLabels: Record<string, string> = {
+    E: "E (Excellent)", G: "G (Good)", P: "P (Pass)", I: "I (Improvement Required)",
+  };
+  const approvedCompanyRating = companyRatingLabels[key(selectedCar?.company_rating).toUpperCase()] || "ยังไม่มีข้อมูลเกรด";
 
   async function fetchFlowData(): Promise<CarItem | undefined> {
     if (!hasId(requestId)) throw new Error("ไม่พบ Request ID");
@@ -194,9 +229,12 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   }
   async function fetchVehicleWarehouseInfo(car = selectedCar) {
     if (!hasId(requestId) || !car) return;
-    const params = new URLSearchParams({ request_id: String(requestId), vehicle_no: String(car.unit_code || car.vehicle_no) });
-    const result = await readResponse<{ status?: string; message?: string; data?: VehicleWarehouseInfoData | null }>(await fetch(`${VEHICLE_WAREHOUSE_INFO_API_URL}?${params}`, { cache: "no-store" }));
+    const params = new URLSearchParams({ request_id: String(requestId), vehicle_no: String(car.unit_code || car.vehicle_no), include_supplier_options: "1" });
+    const result = await readResponse<{ status?: string; message?: string; data?: VehicleWarehouseInfoData | null; supplier_options?: string[] }>(await fetch(`${VEHICLE_WAREHOUSE_INFO_API_URL}?${params}`, { cache: "no-store" }));
     if (result.data) setVehicleExtraForm(toExtra(result.data));
+    if (Array.isArray(result.supplier_options)) {
+      setSupplierOptions(result.supplier_options.filter((value): value is string => typeof value === "string"));
+    }
   }
   async function handleRefreshData() {
     setLoading(true); setError("");
@@ -207,7 +245,7 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   useEffect(() => {
     if (!open) return;
     const version = ++loadVersion.current;
-    setData(emptyData); setDateDrafts({}); setPicker(null); setMemoFiles({}); setActionMessage(""); setError(""); setLoading(true);
+    setData(emptyData); setSupplierOptions([]); setDateDrafts({}); setPicker(null); setMemoFiles({}); setActionMessage(""); setError(""); setLoading(true);
     void (async () => { try { const car = await fetchFlowData(); if (loadVersion.current === version) await fetchVehicleWarehouseInfo(car); } catch (e) { if (loadVersion.current === version) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"); } finally { if (loadVersion.current === version) setLoading(false); } })();
     return () => { ++loadVersion.current; };
   }, [open, requestId, vehicleNo, documentMode, referenceVehicleNo]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -245,6 +283,10 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   }
   async function runFlowAction(flow: DisplayFlowRow, rollback: boolean, dates?: FlowDateDraft) {
     if (busyRef.current || busy) return;
+    if ((rollback || [9, 10].includes(Number(flow.process_level))) && !canManageDocuments()) {
+      setError("ติดต่อทีมสัญญาเพื่อแก้ไข");
+      return;
+    }
     if (!canEditProcessLevel(flow.process_level)) { setError("คุณไม่มีสิทธิ์แก้ไขขั้นตอนนี้"); return; }
     const level = Number(flow.process_level), special = [9, 10].includes(level), user = getCreatedBy();
     if (!user) { setError("ไม่พบข้อมูลผู้ใช้งานใน localStorage"); return; }
@@ -345,18 +387,66 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                 <InfoCard icon={<Truck size={17} />} label="ประเภทรถ" value={`${request.fleet_truck_type || "-"} | ${request.fleet_type || "-"} · ${formatNumber(request.qty)} คัน`} subValue="" />
                 <InfoCard icon={<CalendarDays size={17} />} label="วันที่ต้องการใช้งาน" value={formatDate(request.usage_date)} subValue={remaining(request.usage_date)} />
               </div>
-              {documentMode && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle>
-                {replacedOldLicenses.length ? <ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{Array.from(new Set(replacedOldLicenses)).map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul> : <p className="mt-3 text-slate-400">ไม่มีข้อมูลทะเบียนเก่า</p>}
+              {documentMode && visibleOldLicenses.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle>
+                <ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{visibleOldLicenses.map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul>
                 <p className="mt-3 text-[10px] leading-5 text-slate-500">ใช้แบบประเมินชุดเดียว อ้างอิง {selectedCar?.unit_code || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`} การบันทึกขั้นตอนและรายละเอียดรถจะบันทึกที่รายการอ้างอิงนี้</p>
               </section>}
-              <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ข้อมูลคำขอ</SectionTitle><div className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                {[ ["วันที่ขอ", formatDateTime(request.request_date)], ["ผู้ขอ", request.request_by], ["จำนวนรถที่ขอ", `${formatNumber(request.qty)} คัน`], ["จำนวนรถที่อนุมัติ", `${formatNumber(request.approved_qty ?? 0)} คัน`], ["จำนวนรถที่ไม่อนุมัติ", `${formatNumber(Math.max(Number(request.qty || 0) - Number(request.approved_qty || 0), 0))} คัน`], ["บริษัทที่อนุมัติ", request.approved_company_name || "รออนุมัติ"], ["ประเภทรถที่อนุมัติ", request.approved_truck_type], ["ผู้อนุมัติ", request.approved_by], ["Workload", formatNumber(request.workload)], ["Truck Turn", formatNumber(request.truckturn)], ["หมายเหตุ", request.remark] ].map(([label, value]) => <DetailItem key={label} label={label || ""} value={value} />)}
-              </div></section>
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="request-information-title">
+                <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3.5 sm:px-5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white text-blue-600"><ClipboardList size={17} /></span>
+                  <div className="min-w-0"><h3 id="request-information-title" className="text-xs font-semibold text-slate-800">ข้อมูลคำขอ</h3>
+                    <p className="mt-0.5 break-words text-[10px] text-slate-500">{request.running_doc || "ไม่ระบุเลขที่เอกสาร"}</p></div>
+                </div>
+                <div className="px-4 py-4 sm:px-5">
+                  {/* <div className="grid grid-cols-1 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-slate-50/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                    {[
+                      { label: "จำนวนรถที่ขอ", value: formatNumber(request.qty), color: "text-slate-800" },
+                      { label: "จำนวนรถที่อนุมัติ", value: formatNumber(request.approved_qty ?? 0), color: "text-emerald-700" },
+                      { label: "จำนวนรถที่ไม่อนุมัติ", value: formatNumber(Math.max(Number(request.qty || 0) - Number(request.approved_qty || 0), 0)), color: "text-rose-600" },
+                    ].map(item => <div key={item.label} className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
+                      <p className="text-[10px] text-slate-500">{item.label}</p>
+                      <p className={`text-xl font-semibold tabular-nums sm:mt-1 ${item.color}`}>{item.value}<span className="ml-1.5 text-[10px] font-normal text-slate-400">คัน</span></p>
+                    </div>)}
+                  </div> */}
+                  <div className="mt-4 grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {[
+                      ["วันที่ขอ", formatDateTime(request.request_date)],
+                      ["ผู้ขอ", request.request_by],
+                      ["ผู้อนุมัติ", request.approved_by],
+                    ].map(([label, value]) => <div key={label} className="min-w-0 border-b border-slate-100 py-3"><DetailItem label={label || ""} value={value} /></div>)}
+                    <div className="min-w-0 border-b border-slate-100 py-3 sm:col-span-2 lg:col-span-2">
+                      <p className="text-[10px] text-slate-400">บริษัทที่อนุมัติ</p>
+                      <p className="mt-1 break-words text-xs font-semibold leading-relaxed text-slate-700">
+                        {approvedCompanyId && <span className="mr-1.5 text-blue-700">[{approvedCompanyId}]</span>}{approvedCompanyName || "ไม่ระบุบริษัท"}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                        <span className="text-[10px] text-slate-500">เกรดผู้ให้บริการที่อนุมัติแล้ว</span>
+                        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold leading-relaxed ring-1 ring-inset ${
+                          ({ E: "bg-emerald-50 text-emerald-700 ring-emerald-200", G: "bg-blue-50 text-blue-700 ring-blue-200",
+                            P: "bg-amber-50 text-amber-700 ring-amber-200", I: "bg-rose-50 text-rose-700 ring-rose-200" } as Record<string, string>)[key(selectedCar?.company_rating).toUpperCase()]
+                          || "bg-slate-50 text-slate-500 ring-slate-200"
+                        }`}>{approvedCompanyRating}</span>
+                      </div>
+                    </div>
+                    <div className="min-w-0 border-b border-slate-100 py-3"><DetailItem label="ประเภทรถที่อนุมัติ" value={request.approved_truck_type} /></div>
+                    {[
+                      ["Workload", formatNumber(request.workload)],
+                      ["Truck Turn", formatNumber(request.truckturn)],
+                    ].map(([label, value]) => <div key={label} className="min-w-0 py-3"><DetailItem label={label} value={value} /></div>)}
+                  </div>
+                  <div className="mt-1 rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-3">
+                    <p className="text-[10px] text-slate-400">หมายเหตุ</p><p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-600">{request.remark || "-"}</p>
+                  </div>
+                </div>
+              </section>
               <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm">
                 <SectionTitle>ข้อมูลเพิ่มเติมของรถ</SectionTitle><p className="mt-1 text-[10px] text-slate-400">รถคันที่ {selectedCar?.vehicle_no || "-"} · {selectedCar?.unit_code || request.running_doc || "-"}</p>
                 <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.45fr)]">
                   <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"><h4 className="mb-3 font-semibold text-slate-800">ข้อมูลรายละเอียดรถ</h4><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                    {VEHICLE_FIELDS.map(field => <div key={field.key}><label htmlFor={`vehicle-${field.key}`} className="mb-1.5 block text-[10px] text-slate-500">{field.label}</label>{field.key === "warehouse_plan_date" ? <button id={`vehicle-${field.key}`} type="button" disabled={busy} onClick={e => setPicker({ kind: "warehouse", position: calendarPosition(e.currentTarget) })} className={`${inputClass} flex items-center gap-2 text-left`}><CalendarDays size={14} className="text-blue-500" />{formatDate(vehicleExtraForm.warehouse_plan_date) === "-" ? "เลือกวันที่จะเข้าคลัง" : formatDate(vehicleExtraForm.warehouse_plan_date)}</button> : <><input id={`vehicle-${field.key}`} type="text" list={field.key === "car_province" ? "vehicle-provinces" : undefined} disabled={busy} value={vehicleExtraForm[field.key]} onChange={e => updateExtra(field.key, e.target.value)} placeholder={`กรอก${field.label}`} className={inputClass} />{field.key === "car_province" && <ProvinceDatalist id="vehicle-provinces" />}</>}</div>)}
+                    {VEHICLE_FIELDS.map(field => <div key={field.key}><label htmlFor={`vehicle-${field.key}`} className="mb-1.5 block text-[10px] text-slate-500">{field.label}</label>{field.key === "warehouse_plan_date" ? <button id={`vehicle-${field.key}`} type="button" disabled={busy} onClick={e => setPicker({ kind: "warehouse", position: calendarPosition(e.currentTarget) })} className={`${inputClass} flex items-center gap-2 text-left`}><CalendarDays size={14} className="text-blue-500" />{formatDate(vehicleExtraForm.warehouse_plan_date) === "-" ? "เลือกวันที่จะเข้าคลัง" : formatDate(vehicleExtraForm.warehouse_plan_date)}</button> : <><input id={`vehicle-${field.key}`} type="text" list={field.key === "car_province" ? "vehicle-provinces" : field.key === "supplier_alloc" ? "vehicle-supplier-options" : undefined} disabled={busy} value={vehicleExtraForm[field.key]} onChange={e => updateExtra(field.key, e.target.value)} placeholder={field.key === "supplier_alloc" ? "พิมพ์หรือเลือกจัดสรรผู้ผลิต" : `กรอก${field.label}`} className={inputClass} />{field.key === "supplier_alloc" && <datalist id="vehicle-supplier-options">
+                      {supplierChoices.map(value => <option key={value} value={value} />)}
+                    </datalist>}
+                    {field.key === "car_province" && <ProvinceDatalist id="vehicle-provinces" />}</>}</div>)}
                     <div className="sm:col-span-2 xl:col-span-1 2xl:col-span-2"><label className="mb-1.5 block text-[10px] text-slate-500" htmlFor="vehicle-remark">หมายเหตุ</label><textarea id="vehicle-remark" rows={3} disabled={busy} value={vehicleExtraForm.remark} onChange={e => updateExtra("remark", e.target.value)} className={`${inputClass} h-auto py-2.5`} /></div>
                   </div><div className="mt-4 flex justify-end border-t border-slate-200 pt-4"><button type="button" disabled={busy || !selectedCar} onClick={handleSaveWarehouseInfo} className={`${buttonBase} bg-emerald-600 text-white shadow-md`}>{savingWarehouseInfo ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}บันทึกรายละเอียดรถ</button></div></section>
                   <section className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4"><h4 className="font-semibold text-slate-800">ข้อมูลเลขบันทึกเอกสาร</h4><p className="mb-3 mt-1 text-[10px] text-slate-400">กรอกเลขบันทึก เลือกวันที่ แนบไฟล์ และบันทึกแยกรายการ</p><div className="space-y-3">
@@ -381,9 +471,35 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                       <div className="flex flex-wrap items-center gap-2">{finals.map(flow => {
                         const saved = hasDate(flow), cancel = Number(flow.process_level) === 9, Icon = cancel ? Ban : FileWarning;
                         if (locked && !saved) return null;
-                        const saving = savingFlowId === key(flow.id), allowed = canEditProcessLevel(flow.process_level);
-                        return saved ? <div key={key(flow.id)} className="flex flex-wrap items-center gap-2"><span className={`${buttonBase} ring-1 ${cancel ? "bg-rose-100 text-rose-700 ring-rose-200" : "bg-amber-100 text-amber-700 ring-amber-200"}`}><Icon size={15} />{cancel ? "ยกเลิกหนังสือแล้ว" : "หนังสือหมดอายุแล้ว"}</span><button type="button" disabled={busy || !allowed} title={!allowed ? "ไม่มีสิทธิ์ย้อนกลับขั้นตอนนี้" : "ลบขั้นตอนนี้และตรวจสอบเพื่อคืนสถานะคำขอ"} onClick={() => runFlowAction(flow, true)} className={`${buttonBase} border border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>{saving ? <LoaderCircle size={14} className="animate-spin" /> : <Undo2 size={14} />}{saving ? "กำลังย้อนกลับ..." : "ย้อนกลับสถานะ"}</button></div>
-                          : <button key={key(flow.id)} type="button" disabled={busy || !allowed} onClick={() => { const today = toDateKey(new Date()); void runFlowAction(flow, false, { str_date: today, end_date: today }); }} className={`${buttonBase} text-white shadow-lg ${cancel ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-500 hover:bg-amber-600"}`}>{saving ? <LoaderCircle size={14} className="animate-spin" /> : <Icon size={15} />}{cancel ? "ยกเลิกหนังสือ" : "หนังสือหมดอายุ"}</button>;
+                        const saving = savingFlowId === key(flow.id);
+                        const allowed = canManageDocuments();
+                        const hintId = `document-action-hint-${key(flow.id)}`;
+                        return <div key={key(flow.id)} className="group relative inline-flex items-center gap-2"
+                          tabIndex={!allowed ? 0 : undefined}
+                          aria-label={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined}
+                          aria-describedby={!allowed ? hintId : undefined}
+                          title={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined}>
+                          {saved ? <>
+                            <span className={`${buttonBase} ring-1 ${cancel ? "bg-rose-100 text-rose-700 ring-rose-200" : "bg-amber-100 text-amber-700 ring-amber-200"}`}>
+                              <Icon size={15} />{cancel ? "ยกเลิกหนังสือแล้ว" : "หนังสือหมดอายุแล้ว"}
+                            </span>
+                            <button type="button" disabled={busy || !allowed}
+                              onClick={() => void runFlowAction(flow, true)}
+                              className={`${buttonBase} border ${allowed ? "border-blue-200 bg-white text-blue-700 hover:bg-blue-50" : "pointer-events-none border-slate-200 bg-slate-100 text-slate-400"}`}>
+                              {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                              {saving ? "กำลังย้อนกลับ..." : "ย้อนกลับสถานะ"}
+                            </button>
+                          </> : <button type="button" disabled={busy || !allowed}
+                            onClick={() => { const today = toDateKey(new Date()); void runFlowAction(flow, false, { str_date: today, end_date: today }); }}
+                            className={`${buttonBase} ${!allowed ? "pointer-events-none bg-slate-100 text-slate-400 ring-1 ring-slate-200" : `text-white shadow-sm ${cancel ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-500 hover:bg-amber-600"}`}`}>
+                            {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Icon size={15} />}
+                            {cancel ? "ยกเลิกหนังสือ" : "หนังสือหมดอายุ"}
+                          </button>}
+                          {!allowed && <span id={hintId} role="tooltip"
+                            className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-max max-w-[240px] rounded-lg bg-slate-800 px-3 py-2 text-[11px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus:opacity-100 group-focus-within:opacity-100">
+                            ติดต่อทีมสัญญาเพื่อแก้ไข
+                          </span>}
+                        </div>;
                       })}{!finals.length && <span className="text-[10px] text-slate-400">ไม่พบ Process ระดับ 9 หรือ 10 ใน Master Flow</span>}</div>
                     </div>
                     <div className="overflow-x-auto px-4 py-5"><div className="flex min-w-max items-stretch">{vehicle.rows.map((flow, index) => {

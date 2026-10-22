@@ -273,7 +273,7 @@ export default function LoginPage() {
          * ให้ไปหน้าเลือกฝ่าย:
          *
          * TCIA
-         * KEY_ACCOUNT
+         * KA
          * IMP
          * TCAS
          * FBP
@@ -737,7 +737,7 @@ export default function LoginPage() {
                                     "ฝ่ายพัฒนาศักยภาพการขนส่งและวิเคราะห์ข้อมูลเชิงลึก (TCIA)",
                                 },
                                 {
-                                  value: "KEY_ACCOUNT",
+                                  value: "KA",
                                   label:
                                     "ฝ่ายสื่อสารระบบกระจายสินค้าระบบงานขนส่ง (KEY ACCOUNT)",
                                 },

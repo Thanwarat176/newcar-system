@@ -61,10 +61,10 @@ const COLUMNS: { label: string; sort?: SortKey }[] = [
   { label: "สถานะ" }, { label: "รายละเอียด" },
 ];
 
-// Only these three raw API statuses belong to the approved card.
+// Group approved, success and progress under the approved card.
 function normalizeStatus(value: unknown): string {
   const status = text(value).toLowerCase();
-  return ["process", "progress", "succes"].includes(status) ? "approved" : status === "approved" ? "unmapped_approved" : status;
+  return ["approved", "success", "progress"].includes(status) ? "approved" : status;
 }
 function statusLabel(raw: string): string {
   const status = normalizeStatus(raw);
@@ -238,8 +238,6 @@ export default function WaitingFleetPage() {
       const { item } = row;
       // all does not exclude any API status.
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
-      // Raw 'approved' is not one of the three approved API statuses.
-      if (statusFilter === "approved" && !["process", "progress", "succes"].includes(text(item.status).toLowerCase())) return false;
       if (requestTypeFilter !== "all" && text(item.fleet_type) !== requestTypeFilter) return false;
       if (truckTypeFilter !== "all" && text(item.fleet_truck_type) !== truckTypeFilter) return false;
       if (dcTypeFilter !== "all" && code(item.dc_type) !== code(dcTypeFilter)) return false;
@@ -268,14 +266,30 @@ export default function WaitingFleetPage() {
     }); return result;
   }, [pageRows]);
   const statusCounts = useMemo<Counts>(() => {
-    const counts: Counts = { all: { qty: 0, items: 0 }, fbp_pending: { qty: 0, items: 0 }, reject_by_fbp: { qty: 0, items: 0 }, approved: { qty: 0, items: 0 } };
-    for (const row of pageRows) {
-      counts.all.items++; counts.all.qty += row.requestedQty;
-      const raw = text(row.item.status).toLowerCase();
-      const key = raw === "fbp_pending" ? "fbp_pending" : raw === "reject_by_fbp" ? "reject_by_fbp" : ["process", "progress", "succes"].includes(raw) ? "approved" : null;
-      if (key) { counts[key].items++; counts[key].qty += row.requestedQty; }
-    } return counts;
-  }, [pageRows]);
+    const counts: Counts = {
+      all: { qty: 0, items: 0 },
+      fbp_pending: { qty: 0, items: 0 },
+      reject_by_fbp: { qty: 0, items: 0 },
+      approved: { qty: 0, items: 0 },
+    };
+
+    for (const row of rows) {
+      const status = row.status;
+      if (
+        status === "fbp_pending" ||
+        status === "reject_by_fbp" ||
+        status === "approved"
+      ) {
+        counts[status].items++;
+        counts[status].qty += row.requestedQty;
+      }
+    }
+
+    counts.all.items = counts.fbp_pending.items + counts.reject_by_fbp.items + counts.approved.items;
+    counts.all.qty = counts.fbp_pending.qty + counts.reject_by_fbp.qty + counts.approved.qty;
+
+    return counts;
+  }, [rows]);
 
   const clearDates = () => { setHasRequestDateRange(false); setRequestDateRange([newSelection()]); };
   const clearFilters = () => { setStatusFilter("all"); setSearchText(""); setRequestTypeFilter("all"); setTruckTypeFilter("all"); setDcTypeFilter("all"); setDcFilter("all"); setShowPicker(false); clearDates(); };
@@ -297,11 +311,11 @@ export default function WaitingFleetPage() {
       <div className="flex gap-2"><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
     </header>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-600">{error}</div>}
-    <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปเฉพาะรายการในตารางหน้าปัจจุบัน</span><span>หน้า {activePage} / {totalPages}</span></div>
+    <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปรายการทุกหน้าภายใต้ DC ที่มีสิทธิ์ดู</span><span>หน้า {activePage} / {totalPages}</span></div>
     <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{CARDS.map(card => {
       const Icon = card.icon, active = statusFilter === card.key, count = statusCounts[card.key];
       return <button key={card.key} type="button" aria-pressed={active} onClick={() => setStatusFilter(card.key)} className={`relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition hover:shadow-md ${active ? card.active : card.inactive}`}>
-        <Icon size={82} aria-hidden="true" className="pointer-events-none absolute right-2 top-3 opacity-10" /><div className="relative"><p className="text-[11px] font-semibold">{LABELS[card.key]}</p><p className="mt-1 text-[11px] opacity-60">เฉพาะตารางหน้านี้</p><div className="mt-4 flex items-end justify-between gap-2"><p className="text-2xl font-semibold">{number(count.qty)}<span className="ml-1 text-xs opacity-60">คัน</span></p><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${active ? "bg-white/15" : "bg-white/80"}`}>{number(count.items)} รายการ</span></div></div></button>;
+        <Icon size={82} aria-hidden="true" className="pointer-events-none absolute right-2 top-3 opacity-10" /><div className="relative"><p className="text-[11px] font-semibold">{LABELS[card.key]}</p><p className="mt-1 text-[11px] opacity-60">รวมทุกหน้า</p><div className="mt-4 flex items-end justify-between gap-2"><p className="text-2xl font-semibold">{number(count.qty)}<span className="ml-1 text-xs opacity-60">คัน</span></p><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${active ? "bg-white/15" : "bg-white/80"}`}>{number(count.items)} รายการ</span></div></div></button>;
     })}</div>
     <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-4 flex items-center gap-2"><SlidersHorizontal size={17} className="text-blue-600" /><h2 className="text-xs font-semibold">ค้นหาและตัวกรอง</h2></div>
       <div className="grid gap-3 lg:grid-cols-12">
@@ -335,105 +349,6 @@ export default function WaitingFleetPage() {
       </tbody></table></div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
     </section>
-    {portalTarget && showPicker && createPortal(<div ref={pickerRef} style={pickerPosition} className="fixed z-[99999] max-h-[calc(100vh-32px)] w-[330px] max-w-[calc(100vw-32px)] overflow-auto rounded-2xl border border-blue-100 bg-white shadow-2xl"><div className="flex items-center justify-between bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700"><span>เลือกช่วงวันที่ขอ</span><button type="button" onClick={clearDates}>ล้าง</button></div><DateRange locale={th} ranges={requestDateRange} onChange={changeDate} editableDateInputs={false} moveRangeOnFirstSelection={false} showDateDisplay={false} showPreview={false} maxDate={new Date()} rangeColors={["#2563eb"]} /><div className="flex items-center justify-between gap-2 border-t p-3"><span className="truncate text-[11px] text-blue-600">{dateLabel}</span><button type="button" onClick={() => setShowPicker(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] text-white">เสร็จสิ้น</button></div></div>, portalTarget)}
-    {portalTarget && createPortal(<div style={{ position: "relative", zIndex: 100000 }}><ExportWaitingFleetModal open={openExportModal} onClose={() => setOpenExportModal(false)} requests={scopedRequests} dcLabel={dcLabel} />{selectedRequest && <FleetModalDetail open={detailOpen} onClose={() => setSelectedRequest(null)} data={selectedRequest} allRequests={requests} onSuccess={async () => { if (!(await fetchRequests())) throw new Error("โหลดรายการล่าสุดไม่สำเร็จ"); }} />}</div>, portalTarget)}
-    {portalTarget &&
-  showSystemUpdateModal &&
-  createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-      style={{ zIndex: 2147483647 }}
-    >
-      <section
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="system-update-title"
-        aria-describedby="system-update-description"
-        className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
-      >
-        <div className="h-1 bg-amber-400" />
-
-        <div className="p-5 sm:p-6">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="25"
-              height="25"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              className="text-amber-600"
-            >
-              <path d="m10.3 3.9-8.1 14a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3l-8.1-14a2 2 0 0 0-3.4 0Z" />
-              <path d="M12 9v4" />
-              <path d="M12 17h.01" />
-            </svg>
-          </div>
-
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">
-            แจ้งเตือนจากระบบ
-          </p>
-
-          <h2
-            id="system-update-title"
-            className="mt-2 text-base font-semibold text-slate-900"
-          >
-            อยู่ระหว่างปรับปรุงข้อมูล
-          </h2>
-
-          <p
-            id="system-update-description"
-            className="mt-3 text-xs leading-6 text-slate-600"
-          >
-            ขณะนี้กำลังปรับปรุงข้อมูลภายในระบบ
-            ซึ่งส่งผลต่อข้อมูลที่แสดงในหน้านี้
-            ทำให้ข้อมูลอาจยังไม่เป็นปัจจุบัน
-            และยังไม่สามารถอัปเดตได้ชั่วคราว
-          </p>
-
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-[11px] font-medium text-amber-700">
-              กำหนดอัปเดตข้อมูล
-            </p>
-
-            <p className="mt-1 text-sm font-semibold text-amber-950">
-              26/10/2569 เวลา 10:00 น.
-            </p>
-
-            <p className="mt-1 text-[11px] text-amber-700">
-              ตามเวลาประเทศไทย
-            </p>
-          </div>
-
-          <p className="mt-4 text-[11px] leading-5 text-slate-400">
-            ขออภัยในความไม่สะดวก
-            กรุณาตรวจสอบข้อมูลอีกครั้งหลังจากเวลาดังกล่าว
-          </p>
-
-          <button
-            type="button"
-            autoFocus
-            onKeyDown={event => {
-              // เก็บโฟกัสไว้ใน Modal ซึ่งมีปุ่มเดียว
-              if (event.key === "Tab") event.preventDefault();
-              if (event.key === "Escape") {
-                setShowSystemUpdateModal(false);
-              }
-            }}
-            onClick={() => setShowSystemUpdateModal(false)}
-            className="mt-5 flex h-10 w-full items-center justify-center rounded-xl bg-blue-600 text-xs font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-          >
-            รับทราบ
-          </button>
-        </div>
-      </section>
-    </div>,
-    portalTarget,
-  )}
     <style jsx>{`main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { main :global(*) { animation: none !important; transition: none !important; } }`}</style>
   </main></div>;
 }

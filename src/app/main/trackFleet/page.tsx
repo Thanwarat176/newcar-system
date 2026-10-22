@@ -32,6 +32,7 @@ interface UserInfo {
   warehouse?: string; WAREHOUSE?: string; team?: string; TEAM?: string;
 }
 interface VehicleWarehouseInfo {
+  supplier_alloc?: string | null;
   id?: string | number;
   vehicle_no?: string | number | null;
   unit_code?: string | null;
@@ -49,6 +50,7 @@ interface RequestDetailItem {
   warehouse_info?: VehicleWarehouseInfo | null;
 }
 interface RequestItem {
+  supplier_alloc?: string | null;
   id: string | number | null; running_doc: string; dc_type: string;
   dc_code: string; date: string; request_date?: string;
   request_id?: number | string | null;
@@ -174,10 +176,11 @@ const oldLicenses = (vehicle: RequestItem): string[] => {
 const displayVehicleFields = (vehicle: RequestItem) => {
   const info = vehicleInfo(vehicle);
   return [
-    ["เลขตัวถัง", textValue(info?.car_chassis || vehicle.car_chassis)],
-    ["รุ่นรถ", textValue(info?.car_model || vehicle.car_model)],
     ["ยี่ห้อ", textValue(info?.car_brand || vehicle.car_brand)],
+    ["จัดสรรผู้ผลิต", textValue(info?.supplier_alloc || vehicle.supplier_alloc)],
+    ["รุ่นรถ", textValue(info?.car_model || vehicle.car_model)],
     ["เลขเครื่อง", textValue(info?.car_engine || vehicle.car_engine)],
+    ["เลขตัวถัง", textValue(info?.car_chassis || vehicle.car_chassis)],
     ["ทะเบียน", textValue(info?.car_license || vehicle.car_license)],
   ];
 };
@@ -821,7 +824,7 @@ export default function TrackFleetPage() {
                       <td>{(() => { const reference = assessmentReference(vehicles); return reference ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] font-semibold leading-5 text-blue-700">{getProcessStatus(reference)}</p><div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
                         <p>วันที่เริ่ม: {reference.latest_process_str_date ? formatThaiDate(reference.latest_process_str_date) : "-"}</p>
                         <p>วันที่สิ้นสุด: {reference.latest_process_end_date ? formatThaiDate(reference.latest_process_end_date) : "-"}</p>
-                      </div><p className="mt-2 text-[10px] text-slate-500">อ้างอิง {vehicleCode(reference, 0)}</p></div> : <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>; })()}</td>
+                      </div></div> : <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>; })()}</td>
                       <td><button type="button" onClick={() => handleOpenDocument(document)} className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white hover:bg-blue-800">ประเมิน</button></td>
                     </tr>;
                   })}

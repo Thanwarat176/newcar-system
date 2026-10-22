@@ -361,7 +361,7 @@ export default function Sidebar({
     hasSelectedWarehouse;
 
   const activeDepartments = useMemo(() => {
-    // เลือกฝ่าย เช่น KEY_ACCOUNT ให้ใช้ฝ่ายที่เลือก
+    // เลือกฝ่าย เช่น KA ให้ใช้ฝ่ายที่เลือก
     if (hasSelectedDepartments) {
       return normalizedSelectedDepartments;
     }

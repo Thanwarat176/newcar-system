@@ -30,7 +30,7 @@ const CENTER_DEPARTMENTS: WarehouseItem[] = [
     DC_TYPE: "CENTER",
   },
   {
-    DC_CODE: "KEY_ACCOUNT",
+    DC_CODE: "KA",
     DC_NAME: "ฝ่ายสื่อสารระบบกระจายสินค้าระบบงานขนส่ง",
     DC_TYPE: "CENTER",
   },

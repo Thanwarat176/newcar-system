@@ -47,6 +47,7 @@ interface FlowDates {
 }
 
 interface ExportRequestItem extends FlowDates {
+    supplier_alloc?: string | null;
     id?: string | number | null;
 
     running_doc?: string;
@@ -59,6 +60,7 @@ interface ExportRequestItem extends FlowDates {
         car_chassis?: string | null;
         car_model?: string | null;
         car_brand?: string | null;
+        supplier_alloc?: string | null;
         car_engine?: string | null;
         car_license?: string | null;
         warehouse_plan_date?: string | null;
@@ -1438,12 +1440,13 @@ export default function ExportRequestModal({
         const field = (item: ExportRequestItem, ...names: string[]) => {
             const data = item as unknown as Record<string, unknown>;
             const vehicle = data.vehicle_info as Record<string, unknown> | undefined;
+            const warehouse = data.warehouse_info as Record<string, unknown> | undefined;
             const vehicleList = data.vehicle_warehouse_info as Record<string, unknown>[] | undefined;
             const matchingVehicle = vehicleList?.find(
                 (entry) => String(entry?.vehicle_no ?? "") === String(item.vehicle_no ?? "")
             );
             for (const name of names) {
-                const value = vehicle?.[name] ?? matchingVehicle?.[name] ?? data[name];
+                const value = vehicle?.[name] ?? warehouse?.[name] ?? matchingVehicle?.[name] ?? data[name];
                 if (value !== null && value !== undefined && value !== "") {
                     return typeof value === "string" || typeof value === "number"
                         ? value : "";
@@ -1472,18 +1475,57 @@ export default function ExportRequestModal({
             const value = field(item, "warehouse_plan_date");
             return value ? formatThaiDate(String(value)) : "";
         };
+        const exportDate = (value: unknown): string =>
+            value ? formatThaiDate(String(value)) : "";
         const toExportRow = (item: ExportRequestItem, index: number) => ({
             "ลำดับ": index + 1,
-            "วันที่สร้างคำขอ": formatShortDate(
-                item.request_date || item.date || item.created_at
-            ),
-            "ประเภทคำขอ": item.fleet_type || "-",
+            "วันที่สร้างคำขอ": exportDate(item.request_date || item.date || item.created_at),
+            "ประเภทคำขอ": item.fleet_type || "",
             "สถานะปัจจุบัน": formatCurrentProcess(item),
-            "เลขที่เอกสาร": formatRunningDoc(item) || "-",
-            "ประเภทคลัง": item.dc_type || "-",
-            "ชื่อคลัง": item.dc_code || "-",
-            "ประเภทรถ": item.fleet_truck_type || "-",
-            "คาดการณ์วันเข้าคลัง": warehouseDate(item),
+            "เลขที่เอกสาร": formatRunningDoc(item),
+            "ประเภทคลัง": item.dc_type || "",
+            "ชื่อคลัง": item.dc_code || "",
+            "ประเภทรถ": item.fleet_truck_type || "",
+            "จำนวนรถที่ขอ (คัน) *": Number(item.export_qty ?? item.qty ?? 0) || 0,
+            "รอรับ Workload": item.workload ?? "",
+            "จำนวน truckturn": item.truckturn ?? "",
+            "ทะเบียนทดแทน1(ระบุทะเบียน)": item.export_license || "",
+            "หมายเหตุที่แจ้งขอ": item.remark || "",
+            "วันที่ใช้งาน": exportDate(item.usage_date),
+            "ผู้แจ้งขอ": item.request_by || "",
+            "สถานะอนุมัติจาก GM": gmApprovalByRequest[String(item.id ?? "")]?.statusText || item.gm_status || "",
+            "วันที่ GM อนุมัติ": exportDate(gmApprovalByRequest[String(item.id ?? "")]?.changedAt || item.gm_approved_date),
+            "ประเภทรถที่อนุมัติ": item.approved_truck_type || "",
+            "จำนวนรถที่อนุมัติ": item.approved_qty ?? "",
+            "ชื่อบริษัทขนส่ง (ย่อ)2": item.approved_company_short_name || "",
+            "VENDOR CODE": item.approved_company_id ?? "",
+            "ชื่อบริษัทขนส่ง": item.approved_company_name || "",
+            "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "",
+            "บริษัทขนส่งที่ถูกทดแทน": item.company_name_replace || "",
+            "หมายเหตุการประเมินกองรถ": item.fbp_remark || "",
+            "สถานะการประเมินกองรถ": item.fbp_status || "",
+            "วันที่ประเมินกองรถ": exportDate(item.fbp_approved_date),
+            "คาดการณ์วันเข้าคลัง": exportDate(field(item, "warehouse_plan_date")),
+            "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
+            "จัดสรรผู้ผลิต": field(item, "supplier_alloc"),
+            "จัดสรรรุ่นรถ": field(item, "car_model"),
+            "เลขเครื่อง": field(item, "car_engine"),
+            "เลข Chassis": field(item, "car_chassis"),
+            "ทะเบียน": field(item, "car_license"),
+            "เลขบันทึก FBP": field(item, "number_feb"),
+            "วันที่เข้ามากรอกเลขบันทึก FBP": exportDate(field(item, "date_number_feb")),
+            "เลขบันทึกแจ้ง TIS": field(item, "number_tis"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": exportDate(field(item, "date_number_tis")),
+            "เลขบันทึกแจ้ง TIL": field(item, "number_til"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": exportDate(field(item, "date_number_til")),
+            "เลขบันทึกแจ้ง ASK": field(item, "number_ask"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": exportDate(field(item, "date_number_ask")),
+            "เลขบันทึกแจ้ง Kleasing": field(item, "number_kleasing"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": exportDate(field(item, "date_number_kleasing")),
+            "เลขบันทึกแจ้ง TTB2": field(item, "number_ttb"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": exportDate(field(item, "date_number_ttb")),
+            "เลขบันทึกแจ้ง THAIOLIX": field(item, "number_thaiolix"),
+            "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": exportDate(field(item, "date_number_thaiolix")),
             "วันที่เริ่มรอจัดสรรตามโควต้า": dateField(item, "quota_wait_start_date"),
             "วันที่สิ้นสุดรอจัดสรรตามโควต้า": dateField(item, "quota_wait_end_date"),
             "วันที่เริ่มรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_start_date"),
@@ -1497,7 +1539,6 @@ export default function ExportRequestModal({
             "วันที่เริ่มรอจดทะเบียนรถ": dateField(item, "registration_wait_start_date"),
             "วันที่สิ้นสุดรอจดทะเบียนรถ": dateField(item, "registration_wait_end_date"),
             "วันที่เริ่มส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_start_date"),
-            "วันที่สิ้นสุดส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_end_date"),
             "วันที่สิ้นสุดหนังสือหมดอายุ": dateField(item, "document_expiry_end_date"),
             "วันที่ยกเลิกหนังสือ": dateField(item, "document_cancel_date"),
             "Remark": field(item, "remark"),

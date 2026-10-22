@@ -21,6 +21,7 @@ interface WarehouseRecord {
   request_id?: FleetId;
   vehicle_no: number | string | null;
   warehouse_plan_date?: string | null;
+  supplier_alloc?: string | null;
 }
 interface FlowRecord {
   request_id?: FleetId;
@@ -59,6 +60,7 @@ interface FleetRequest {
   latest_process_level?: number | string | null;
   new_truck_type?: string | null;
   new_vendor_name?: string | null;
+  supplier_alloc?: string | null;
   vehicle_info?: WarehouseRecord | WarehouseRecord[] | null;
   vehicle_warehouse_info?: WarehouseRecord | WarehouseRecord[] | null;
   flow_data?: FlowRecord | FlowRecord[] | null;
@@ -186,6 +188,12 @@ function isRequest(value: unknown): value is FleetRequest {
     "dc_code" in value && "qty" in value && "status" in value;
 }
 
+function isTemporaryFleet(value: unknown): boolean {
+  const name = String(value ?? "").replace(/\s+/g, " ").trim();
+  return name === "รถเสริมชั่วคราว" ||
+    name === "รถเสริมชั่วคราว (รถที่ไม่ใช่ฟลีทหลัก)";
+}
+
 function normalizeFleetRow(value: unknown): FleetRequest {
   if (typeof value !== "object" || value === null) {
     throw new Error("รายการรถไม่ถูกต้อง");
@@ -202,9 +210,10 @@ function normalizeFleetRow(value: unknown): FleetRequest {
   if ((typeof requestId !== "string" && typeof requestId !== "number") || !("dc_code" in row)) {
     throw new Error("รายการรถเข้าใหม่ต้องมี request_id และ dc_code");
   }
-  const info = row.warehouse_info ?? row.vehicle_info;
-  const infoRow = typeof info === "object" && info !== null
-    ? info as Record<string, unknown> : {};
+  const info = row.vehicle_warehouse_info ?? row.warehouse_info ?? row.vehicle_info;
+  const infoRows = asRecords(info as WarehouseRecord | WarehouseRecord[] | null | undefined);
+  const infoRow = (infoRows[0] ?? {}) as unknown as Record<string, unknown>;
+  const supplierAlloc = String(row.supplier_alloc ?? infoRow.supplier_alloc ?? "").trim() || null;
   const vehicleNo = row.warehouse_vehicle_no ?? infoRow.vehicle_no;
   const validVehicleNo = typeof vehicleNo === "string" || typeof vehicleNo === "number"
     ? vehicleNo : null;
@@ -236,10 +245,12 @@ function normalizeFleetRow(value: unknown): FleetRequest {
     latest_process_level: level || null,
     new_truck_type: row.new_truck_type == null ? null : String(row.new_truck_type),
     new_vendor_name: row.new_vendor_name == null ? null : String(row.new_vendor_name),
+    supplier_alloc: supplierAlloc,
     vehicle_warehouse_info: {
       request_id: requestId,
       vehicle_no: validVehicleNo,
       warehouse_plan_date: typeof plan === "string" ? plan : null,
+      supplier_alloc: supplierAlloc,
     },
     // Actual dates still come from stage-8 flow records; do not substitute updated_at.
     flow_data: row.flow_data as FlowRecord | FlowRecord[] | null | undefined,
@@ -788,9 +799,9 @@ function FleetStatusByDc({
   const sourceRequests = useMemo(() => {
     if (!warehouseScope.ready) return [];
   
-    // แสดงทุก fleet_type ยกเว้นรถเสริม
+    // แสดงทุก fleet_type ยกเว้นรถเสริมชั่วคราว
     const allRows = (suppliedRequests ?? requests).filter(
-      row => String(row.fleet_type ?? "").trim() !== "รถเสริม",
+      row => !isTemporaryFleet(row.fleet_type),
     );
   
     if (warehouseScope.showAll) return allRows;
@@ -845,7 +856,7 @@ function FleetStatusByDc({
             ),
           ]
             .map(type => type.trim())
-            .filter(type => type !== "" && type !== "รถเสริม"),
+            .filter(type => type !== "" && !isTemporaryFleet(type)),
         ),
       ).sort((a, b) => a.localeCompare(b, "th")),
     [sourceRequests, apiFleetTypes],
@@ -967,12 +978,11 @@ function FleetStatusByDc({
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const monthScrollRef = useRef<HTMLDivElement>(null);
   const monthPickerDialogRef = useRef<HTMLDialogElement>(null);
-  const [showClosedSteps, setShowClosedSteps] = useState(false);
   const stageColumns = useMemo(() => {
     const columns = new Map<string, { key: string; level: string; name: string }>();
     // หัวตารางจาก master_flow: รวมชื่อซ้ำข้าม fleet_type
     for (const row of [...processes, ...apiProcesses]) {
-      if (String(row.fleet_type ?? "").trim() === "รถเสริม") continue;
+      if (isTemporaryFleet(row.fleet_type)) continue;
       const level = String(row.process_level ?? "").trim();
       const name = String(row.process ?? "").trim();
       if (!level || !name) continue;
@@ -992,6 +1002,9 @@ function FleetStatusByDc({
     );
   }, [processes, apiProcesses, typeRequests]);
 
+  const [showClosedSteps, setShowClosedSteps] = useState(false);
+  const [exportingFleetExcel, setExportingFleetExcel] = useState(false);
+  const [fleetExcelError, setFleetExcelError] = useState("");
   const visibleStageColumns = stageColumns.filter(column => {
     const level = Number(column.level);
     return (level >= 1 && level <= 8) ||
@@ -1127,7 +1140,13 @@ function FleetStatusByDc({
       const key = JSON.stringify([level, name]);
       const cell = truck.stages.get(key) ?? { count: 0, vendors: new Map<string, number>(), companies: new Map<string, number>() };
       cell.count += qty;
-      const vendor = String(row.new_vendor_name ?? "").trim() || "ไม่ระบุบริษัทขนส่ง";
+      const warehouseInfo = asRecords(row.vehicle_warehouse_info ?? row.vehicle_info);
+      const matchedInfo = warehouseInfo.find(info =>
+        row.vehicle_no != null &&
+        String(info.vehicle_no ?? "").trim() === String(row.vehicle_no).trim()
+      ) ?? (warehouseInfo.length === 1 ? warehouseInfo[0] : undefined);
+      const vendor = String(row.supplier_alloc ?? matchedInfo?.supplier_alloc ?? "").trim()
+        || "ไม่ระบุบริษัทประกอบรถ";
       cell.vendors.set(vendor, (cell.vendors.get(vendor) ?? 0) + qty);
       const company = String(row.approved_company_name ?? "").trim() || "ไม่ระบุ FBP";
       cell.companies.set(company, (cell.companies.get(company) ?? 0) + qty);
@@ -1136,6 +1155,125 @@ function FleetStatusByDc({
     }
     return Array.from(groups.entries()).sort((a, b) => a[1].dcType.localeCompare(b[1].dcType, "th") || a[1].dcCode.localeCompare(b[1].dcCode, "th"));
   }, [filteredRequests]);
+
+  // Export the same filtered rows, visible stages and selected months as the web tables.
+  const exportFleetExcel = async () => {
+    if (exportingFleetExcel || isLoading || activeError || !stageGroups.length) return;
+    setExportingFleetExcel(true);
+    setFleetExcelError("");
+    try {
+      const ExcelJS = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Fleet Dashboard";
+      workbook.created = new Date();
+      const sheet = workbook.addWorksheet("ขั้นตอนและแผนเข้าคลัง", {
+        views: [{ state: "frozen", xSplit: 2, ySplit: 3 }],
+      });
+      const leftWidth = 3 + visibleStageColumns.length;
+      const monthStart = leftWidth + 2; // One blank column between the two panels.
+      const lastColumn = monthStart + sixMonthSummary.length - 1;
+      const fill = (color: string) => ({ type: "pattern" as const,
+        pattern: "solid" as const, fgColor: { argb: color } });
+      const mergedText = (row: number, first: number, last: number, text: string) => {
+        if (last > first) sheet.mergeCells(row, first, row, last);
+        sheet.getCell(row, first).value = text;
+      };
+      mergedText(1, 1, leftWidth, "ประเภทรถแยกตามขั้นตอน");
+      mergedText(1, monthStart, lastColumn, "แผนเข้าคลังรายเดือน");
+      mergedText(2, 1, leftWidth,
+        `ปี ${selectedYear + 543} · ${dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · STEP ${showClosedSteps ? "1–10" : "1–8"}`);
+      mergedText(2, monthStart, lastColumn, `ปี ${selectedYear + 543} · ตามวันที่แผนเข้าคลัง`);
+      ["กลุ่ม DC", "คลัง / ประเภทรถ", ...visibleStageColumns.map(column =>
+        `[${column.level}] ${column.name}`), "รวม (คัน)"].forEach((label, index) => {
+          sheet.getCell(3, index + 1).value = label;
+        });
+      sixMonthSummary.forEach((month, index) => {
+        sheet.getCell(3, monthStart + index).value = month.label;
+      });
+      sheet.getColumn(1).width = 18;
+      sheet.getColumn(2).width = 28;
+      for (let column = 3; column < leftWidth; column++) sheet.getColumn(column).width = 23;
+      sheet.getColumn(leftWidth).width = 15;
+      sheet.getColumn(leftWidth + 1).width = 3;
+      for (let column = monthStart; column <= lastColumn; column++) sheet.getColumn(column).width = 17;
+      let rowNumber = 4;
+      let dcStart = 4;
+      let currentDcType = "";
+      const groupRows = new Set<number>();
+      for (const [, group] of stageGroups) {
+        if (currentDcType !== group.dcType) {
+          if (currentDcType && rowNumber - 1 > dcStart) sheet.mergeCells(dcStart, 1, rowNumber - 1, 1);
+          currentDcType = group.dcType;
+          dcStart = rowNumber;
+          sheet.getCell(rowNumber, 1).value = group.dcType;
+        }
+        groupRows.add(rowNumber);
+        sheet.getCell(rowNumber, 2).value = group.dcCode;
+        mergedText(rowNumber, 3, leftWidth, "");
+        mergedText(rowNumber, monthStart, lastColumn, group.dcCode);
+        rowNumber++;
+        const trucks = Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType));
+        for (const truck of trucks) {
+          sheet.getCell(rowNumber, 2).value = truck.truckType;
+          visibleStageColumns.forEach((column, index) => {
+            // Values remain numbers; Excel displays zero as a dash.
+            sheet.getCell(rowNumber, index + 3).value = truck.stages.get(column.key)?.count ?? 0;
+          });
+          sheet.getCell(rowNumber, leftWidth).value = truck.total;
+          const key = JSON.stringify([group.dcType, group.dcCode, truck.truckType]);
+          sixMonthSummary.forEach((month, index) => {
+            sheet.getCell(rowNumber, monthStart + index).value = monthlyTruckCounts.get(key)?.get(month.key) ?? 0;
+          });
+          rowNumber++;
+        }
+      }
+      if (currentDcType && rowNumber - 1 > dcStart) sheet.mergeCells(dcStart, 1, rowNumber - 1, 1);
+      for (let row = 1; row < rowNumber; row++) {
+        sheet.getRow(row).height = row === 3 ? 80 : row === 1 ? 30 : 25;
+        for (let col = 1; col <= lastColumn; col++) {
+          if (col === leftWidth + 1) continue;
+          const cell = sheet.getCell(row, col);
+          cell.font = { name: "Tahoma", size: row === 1 ? 14 : 10,
+            bold: row === 1 || row === 3 || groupRows.has(row) || col === leftWidth,
+            color: { argb: row === 1 || row === 3 ? "FFFFFFFF" : "FF243B53" } };
+          cell.alignment = { vertical: "middle", horizontal: col <= 2 || row <= 2 ? "left" : "center", wrapText: true };
+          cell.fill = fill(row === 1 || row === 3 ? "FF245A95" :
+            groupRows.has(row) ? "FFE4EEFA" : col === leftWidth ? "FFEFF6FF" : "FFFFFFFF");
+          if (row >= 3) cell.border = {
+            top: { style: "thin", color: { argb: "FFDCE5F0" } },
+            bottom: { style: "thin", color: { argb: "FFDCE5F0" } },
+            left: { style: "thin", color: { argb: "FFDCE5F0" } },
+            right: { style: "thin", color: { argb: "FFDCE5F0" } },
+          };
+          if (typeof cell.value === "number") cell.numFmt = '#,##0;-#,##0;"—"';
+        }
+      }
+      sheet.pageSetup = {
+        orientation: "landscape",
+        paperSize: 9,
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+        printTitlesRow: "1:3",
+      };
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([new Uint8Array(buffer)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Fleet_ขั้นตอนและแผนเข้าคลัง_${selectedYear}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setFleetExcelError(error instanceof Error ? error.message : "ส่งออก Excel ไม่สำเร็จ กรุณาลองอีกครั้ง");
+    } finally {
+      setExportingFleetExcel(false);
+    }
+  };
 
   const yearOptions = filterOptions.years;
   const activeYear = selectedYear;
@@ -1260,7 +1398,7 @@ function FleetStatusByDc({
 .fleet-delivery-summary{margin:17px 0 12px}.fleet-delivery-heading{font-size:12px;color:#3d587c;margin-bottom:9px!important}.fleet-delivery-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}.fleet-delivery-card{padding:12px 17px;min-width:0}.fleet-delivery-card+.fleet-delivery-card{border-left:1px solid #e7edf5}.fleet-delivery-label{font-size:11px;font-weight:650;color:#5b7392}.fleet-delivery-label small{font-size:9px;font-weight:500;margin-left:5px;color:#95a2b5}.fleet-delivery-number{display:flex;align-items:center;gap:9px;margin-top:7px;color:#416999}.fleet-delivery-number svg{width:27px;height:27px;padding:4px;background:#eff4fb;border-radius:8px}.fleet-delivery-number strong{font-size:26px;line-height:1.2;font-weight:800}.fleet-delivery-unit{font-size:9px;display:inline;margin-left:6px;color:var(--muted)}.fleet-delivery-note{font-size:9px;color:#91a0b3;margin-top:7px!important}.fleet-delivery-progress-row{display:flex;align-items:center;gap:8px;margin-top:8px}.fleet-delivery-progress-track{height:5px;border-radius:99px;overflow:hidden;flex:1;background:#eef2f7}.fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-delivery-percent{font-size:10px;color:#7990aa}
 .fleet-panels{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(270px,1fr);gap:0;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:hidden}.fleet-panel{min-width:0;background:#fff;overflow:hidden}.fleet-panels>.fleet-panel+.fleet-panel{border-left:1px solid #e5ecf4}.fleet-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;min-height:65px;border-bottom:1px solid #e9eef6;background:linear-gradient(100deg,#fafcff,#fff)}.fleet-panel h3{font-size:12px;font-weight:750;color:#324f73}.fleet-panel-description{font-size:10px;color:#8a9aaf;margin-top:3px!important;line-height:1.5}.fleet-panel-header>span{font-size:10px;color:#7890af;white-space:nowrap}.fleet-panel-content{padding:13px 15px}.fleet-year-select{width:100px;flex-shrink:0}.fleet-chart-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.fleet-chart{display:block;width:100%;min-width:520px;height:260px}.fleet-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:10px;color:#7c8da6;margin-top:9px}.fleet-legend>span{display:inline-flex;align-items:center;gap:6px}.fleet-legend i{display:inline-block;width:7px;height:7px;border-radius:2px}
 .fleet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:180px;padding:20px;color:#8192a8;font-size:11px;text-align:center;background:linear-gradient(180deg,#fff,#fafcff)}.fleet-error{display:block;margin:12px 0;padding:12px 14px;background:#fff2f3;color:#a83e55;border:1px solid #f1d8de;border-left:3px solid #d64f6c;border-radius:10px;font-size:11px;overflow-wrap:anywhere}.fleet-error p{margin-top:4px}.fleet-warehouse-list{max-height:260px;overflow:auto;scrollbar-width:thin;padding-right:5px}.fleet-warehouse{padding:9px 0;border-bottom:1px solid #eef2f8}.fleet-warehouse:last-child{border-bottom:0}.fleet-row{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5px}.fleet-warehouse-name{font-size:11px;font-weight:750;color:#456185}.fleet-row-meta{font-size:10px;color:#8799b0}.fleet-bar{display:flex;width:100%;height:7px;background:#edf2f8;border-radius:99px;overflow:hidden}.fleet-bar>span{height:100%;display:block}.fleet-warehouse-detail{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:5px;color:#8190a5}
-.fleet-stage-layout{display:grid;grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);gap:0;margin-top:16px;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:auto;scrollbar-width:thin;align-items:start}.fleet-stage-layout>.fleet-panel+.fleet-panel{border-left:1px solid #e2eaf4}.fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:78px;min-height:78px;max-height:78px;padding:11px 14px}.fleet-stage-layout .fleet-panel-description{max-height:30px;overflow:hidden}.fleet-stage-scroll{height:400px;max-height:400px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable;background:#fff}.fleet-stage-table{width:100%;min-width:640px;table-layout:auto;border-collapse:separate;border-spacing:0;font-size:10px}.fleet-stage-table :is(th,td){padding:5px 8px;border-bottom:1px solid #e9eff6;text-align:center;font-variant-numeric:tabular-nums}.fleet-stage-table thead th{position:sticky;top:0;z-index:5;height:58px;min-width:118px;max-width:170px;background:#3c5473;color:#fff;font-size:10px;font-weight:650;line-height:1.5;border-right:1px solid #ffffff18}.fleet-stage-table .fleet-step-name{display:block;font-size:10px;line-height:1.5;max-width:170px;color:inherit}.fleet-header-unit{display:block;font-size:8px;opacity:.65;margin-top:3px}.fleet-step-label{display:inline-block;font-size:8px;background:#ffffff20;color:inherit;border-radius:4px;padding:1px 5px}.fleet-stage-table .fleet-truck-row{height:38px}.fleet-stage-table .fleet-truck-row :is(th,td){height:38px;white-space:nowrap;background:#fff}.fleet-stage-table .fleet-truck-row th{text-align:left;font-weight:500;color:#506a8c}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#edf5ff}.fleet-stage-table .fleet-dc-group{height:32px}.fleet-stage-table .fleet-dc-group :is(th,td){height:32px;background:#edf2f9;color:#456183;white-space:nowrap;font-weight:750;text-align:left}.fleet-truck-label{display:inline-block;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:#e5edf9;padding:5px 7px;font-size:10px;font-weight:750;color:#4d719d}.fleet-dc-merged{vertical-align:middle;background:#f5f8fc!important}.fleet-warehouse-marker{display:inline-block;width:4px;height:12px;border-radius:3px;background:#7395c3;margin-right:7px;vertical-align:middle}.fleet-group-quantity{float:right;font-size:9px;color:#899bb2}.fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;padding:2px 6px;border:1px solid #dce7f6;border-radius:6px;background:#edf3fb;color:#406b9e;font-size:10px;font-weight:750}.fleet-count-button:hover{background:#dbeafa;border-color:#9fbee3}.fleet-stage-completed .fleet-count-button{background:#e7f6ed;color:#16805b;border-color:#cfe8da}.fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0f1;color:#b35464;border-color:#eed3d9}.fleet-stage-table .fleet-stage-total{background:#f1f5fc!important;font-weight:800;color:#3a6497}.fleet-cell-empty{color:#c1ccdc}.fleet-month-table{min-width:360px;table-layout:fixed}.fleet-month-table thead th{min-width:60px;white-space:nowrap}.fleet-month-table .fleet-truck-row td{font-weight:650;color:#557399}.fleet-locked-table{--dc-lock-width:72px}.fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width);max-width:var(--dc-lock-width);z-index:3;background:#f4f7fc}.fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:160px;max-width:180px;z-index:3;background:#fff;box-shadow:3px 0 7px #203d6008}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{z-index:7;background:#3c5473}.fleet-lock-warehouse{max-width:230px;overflow:hidden;text-overflow:ellipsis}.fleet-step-toggle{border:0;background:transparent;color:#7d92ae;padding:4px 5px;border-radius:6px;flex-shrink:0;font-size:10px;white-space:nowrap}.fleet-step-toggle:hover{background:#edf3fb;color:#456c9c}
+.fleet-stage-layout{display:grid;grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);gap:0;margin-top:16px;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:auto;scrollbar-width:thin;align-items:start}.fleet-stage-layout>.fleet-panel+.fleet-panel{border-left:1px solid #e2eaf4}.fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:78px;min-height:78px;max-height:78px;padding:11px 14px}.fleet-stage-layout .fleet-panel-description{max-height:30px;overflow:hidden}.fleet-stage-scroll{height:auto;max-height:none;overflow-x:auto;scrollbar-width:thin;background:#fff}.fleet-stage-table{width:100%;min-width:640px;table-layout:auto;border-collapse:separate;border-spacing:0;font-size:10px}.fleet-stage-table :is(th,td){padding:5px 8px;border-bottom:1px solid #e9eff6;text-align:center;font-variant-numeric:tabular-nums}.fleet-stage-table thead th{position:sticky;top:0;z-index:5;height:58px;min-width:118px;max-width:170px;background:#3c5473;color:#fff;font-size:10px;font-weight:650;line-height:1.5;border-right:1px solid #ffffff18}.fleet-stage-table .fleet-step-name{display:block;font-size:10px;line-height:1.5;max-width:170px;color:inherit}.fleet-header-unit{display:block;font-size:8px;opacity:.65;margin-top:3px}.fleet-step-label{display:inline-block;font-size:8px;background:#ffffff20;color:inherit;border-radius:4px;padding:1px 5px}.fleet-stage-table .fleet-truck-row{height:38px}.fleet-stage-table .fleet-truck-row :is(th,td){height:38px;white-space:nowrap;background:#fff}.fleet-stage-table .fleet-truck-row th{text-align:left;font-weight:500;color:#506a8c}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#edf5ff}.fleet-stage-table .fleet-dc-group{height:32px}.fleet-stage-table .fleet-dc-group :is(th,td){height:32px;background:#edf2f9;color:#456183;white-space:nowrap;font-weight:750;text-align:left}.fleet-truck-label{display:inline-block;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:#e5edf9;padding:5px 7px;font-size:10px;font-weight:750;color:#4d719d}.fleet-dc-merged{vertical-align:middle;background:#f5f8fc!important}.fleet-warehouse-marker{display:inline-block;width:4px;height:12px;border-radius:3px;background:#7395c3;margin-right:7px;vertical-align:middle}.fleet-group-quantity{float:right;font-size:9px;color:#899bb2}.fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;padding:2px 6px;border:1px solid #dce7f6;border-radius:6px;background:#edf3fb;color:#406b9e;font-size:10px;font-weight:750}.fleet-count-button:hover{background:#dbeafa;border-color:#9fbee3}.fleet-stage-completed .fleet-count-button{background:#e7f6ed;color:#16805b;border-color:#cfe8da}.fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0f1;color:#b35464;border-color:#eed3d9}.fleet-stage-table .fleet-stage-total{background:#f1f5fc!important;font-weight:800;color:#3a6497}.fleet-cell-empty{color:#c1ccdc}.fleet-month-table{min-width:360px;table-layout:fixed}.fleet-month-table thead th{min-width:60px;white-space:nowrap}.fleet-month-table .fleet-truck-row td{font-weight:650;color:#557399}.fleet-locked-table{--dc-lock-width:72px}.fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width);max-width:var(--dc-lock-width);z-index:3;background:#f4f7fc}.fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:160px;max-width:180px;z-index:3;background:#fff;box-shadow:3px 0 7px #203d6008}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{z-index:7;background:#3c5473}.fleet-lock-warehouse{max-width:230px;overflow:hidden;text-overflow:ellipsis}.fleet-step-toggle{border:0;background:transparent;color:#7d92ae;padding:4px 5px;border-radius:6px;flex-shrink:0;font-size:10px;white-space:nowrap}.fleet-step-toggle:hover{background:#edf3fb;color:#456c9c}
 .fleet-vendor-tooltip{position:fixed;z-index:10000;pointer-events:none;width:288px;max-width:calc(100vw - 24px);max-height:220px;overflow:auto;padding:12px 14px;border:1px solid #dce6f3;border-radius:11px;background:#fff;color:#496482;box-shadow:0 12px 36px #162e5424}.fleet-vendor-tooltip-heading{font-size:10px;color:#7c90ac;font-weight:750;border-bottom:1px solid #e9eef5;padding-bottom:7px;margin-bottom:7px}.fleet-vendor-tooltip-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:4px 0;font-size:11px}.fleet-vendor-tooltip-row span{overflow-wrap:anywhere}.fleet-vendor-tooltip-row strong{white-space:nowrap;color:#3d679a}.fleet-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:9px;color:#8c9bb0;margin-top:13px}
 .fleet-month-counter{font-size:10px;white-space:nowrap;color:#507caf;background:#edf4ff;border:1px solid #dbe7f8;padding:6px 9px;border-radius:8px}.fleet-month-open:hover{background:#dfebfd}.fleet-month-dialog{position:fixed;inset:0;margin:auto;width:min(410px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:0;border:1px solid #dce6f3;border-radius:18px;background:#fff;color:#304c70;box-shadow:0 22px 70px #17305240}.fleet-month-dialog::backdrop{background:#1a305660;backdrop-filter:blur(3px)}.fleet-month-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 19px;background:#f7faff}.fleet-month-dialog-heading h3{font-size:14px}.fleet-month-dialog-heading p{font-size:11px;color:#8195af;margin-top:5px!important}.fleet-month-close{width:29px;height:29px;border:0;background:#eaf0f9;color:#637d9f;border-radius:8px;font-size:22px!important}.fleet-month-picker{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:16px 19px}.fleet-month-chip{padding:9px 5px;border:1px solid #dfe7f3;border-radius:9px;color:#6f86a5;background:#f8faff;font-size:11px;font-weight:650}.fleet-month-chip.is-selected{background:#2e61b6;border-color:#2e61b6;color:#fff}.fleet-month-chip:hover:not(:disabled):not(.is-selected){background:#edf3ff}.fleet-month-picker-note{padding:0 19px 15px;font-size:10px;line-height:1.6;color:#8b9bb1}.fleet-month-dialog-footer{display:flex;justify-content:flex-end;padding:12px 19px;background:#f8faff;border-top:1px solid #e8eef7}
 .sla-overdue-embed{margin:17px 0;padding:0;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:0 3px 12px #29476c03}.sla-shell{width:100%}.sla-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:13px 15px;border-bottom:1px solid #edf1f7;background:linear-gradient(100deg,#fff8f5,#fff 60%)}.sla-eyebrow{font-size:9px!important;font-weight:800;letter-spacing:1.3px;color:#bc7153}.sla-heading h3{font-size:13px;color:#3e5472;margin-top:2px!important}.sla-description{font-size:10px;color:#8a9bb2;margin-top:4px!important}.sla-refresh{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;background:#fff;border:1px solid #dbe5f2;border-radius:8px;color:#53749d;font-size:10px!important}.sla-refresh:hover{background:#f2f6fd}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 15px;border-bottom:1px solid #e8eef6}.sla-kpi{display:flex;align-items:center;gap:10px;padding:12px 14px}.sla-kpi+.sla-kpi{border-left:1px solid #e8eef6}.sla-kpi-icon{display:flex;align-items:center;justify-content:center;width:31px;height:31px;border-radius:9px;flex-shrink:0}.sla-kpi-icon.rose{background:#fff0f3;color:#bf4765}.sla-kpi-icon.amber{background:#fff5df;color:#b27d21}.sla-kpi-icon.blue{background:#edf4ff;color:#477db7}.sla-kpi-label{font-size:10px;color:#8a9ab0}.sla-kpi-value{font-size:19px;font-weight:800;line-height:1.3;margin-top:2px!important;color:#3e5778}.sla-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:11px 15px}.sla-search{position:relative;flex:1;min-width:220px}.sla-search svg{position:absolute;left:10px;top:9px;color:#9baabd}.sla-control{height:33px;padding:5px 10px;border:1px solid #dce5f2;background:#f9fbfe;border-radius:8px;font-size:11px!important;color:#536e91;max-width:100%}.sla-search input{width:100%;padding-left:32px}.sla-clear{border:0;background:transparent;color:#4073b6;font-size:10px!important}.sla-clear:hover{text-decoration:underline}.sla-table-scroll{max-height:330px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable}.sla-table{width:100%;min-width:1040px;text-align:left;border-spacing:0;border-collapse:separate;font-size:11px}.sla-table thead{position:sticky;top:0;z-index:2;background:#3c5473;color:#fff}.sla-table th{white-space:nowrap;padding:10px 12px;font-size:10px;font-weight:650;border-right:1px solid #ffffff18}.sla-table td{padding:10px 12px;border-bottom:1px solid #e9eff6;vertical-align:top;line-height:1.5}.sla-table tbody tr:nth-child(even){background:#fafcff}.sla-table tbody tr:hover{background:#eff5ff}.sla-table td p{margin-top:3px;font-size:10px;color:#8b9bb1}.sla-strong{font-weight:650;color:#4c6383}.sla-id{font-size:9px!important;color:#a2b0c3!important}.sla-days{background:#fff3f5;color:#b34360;white-space:nowrap;text-align:right}.sla-days>span{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:800}.sla-days p{color:#b96e82!important;font-size:9px!important}.sla-limit{white-space:nowrap;text-align:right;color:#6b829f}.sla-action{min-width:180px;max-width:320px;white-space:pre-line;font-size:10px;color:#b5536e;font-weight:650}.sla-state-message{position:sticky;left:12px;display:block;width:min(650px,calc(100vw - 85px));text-align:center}.sla-state{height:135px;text-align:center;color:#8c9ab0;padding:22px!important}.sla-table .sla-state{background:#fafcff;text-align:center}.sla-error{display:flex;gap:9px;align-items:flex-start;margin:0 15px 12px;padding:12px;border:1px solid #f0d8df;border-radius:9px;background:#fff4f6;color:#ae4964;font-size:11px}.sla-error svg{flex-shrink:0}.sla-error p{margin-top:4px!important;overflow-wrap:anywhere}.sla-error-api{font-size:10px;opacity:.7}.sla-table-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:9px 15px;font-size:9px;color:#8d9eb4;border-top:1px solid #e9eff6}.sla-spin{animation:fleet-spin 1s linear infinite}@keyframes fleet-spin{to{transform:rotate(360deg)}}
@@ -1281,6 +1419,22 @@ function FleetStatusByDc({
 @media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card:nth-child(n+4){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(4){border-left:0}.fleet-api-summary-card{min-height:140px}.sla-workspace{grid-template-columns:160px minmax(0,1fr)}.sla-kpis{padding:5px 9px}.sla-kpi{gap:6px}}
 @media(max-width:850px){.fleet-panels{grid-template-columns:1fr}.sla-workspace{grid-template-columns:1fr}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 10px;background:#f8faff;border-right:0;border-bottom:1px solid #e6e9f0}.sla-kpi{padding:11px 7px;align-items:center}.sla-kpi+.sla-kpi{border-top:0;border-left:1px solid #e6e9f0}.sla-kpi-value{font-size:22px}.sla-state-message{width:min(650px,calc(100vw - 85px))}}
 @media(max-width:560px){.fleet-heading{padding:13px;gap:11px}.fleet-brand{gap:10px}.fleet-brand-icon{width:35px;height:35px;border-radius:10px}.fleet-brand-icon svg{width:21px;height:21px}.fleet-heading h2{font-size:18px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fleet-api-summary-card{padding:13px 11px;min-height:150px}.fleet-api-summary-card:nth-child(n+3){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(odd){border-left:0}.fleet-api-summary-card:nth-child(4){border-left:1px solid #e6ecf4}.fleet-api-summary-number strong{font-size:29px}.sla-kpi{padding:11px 5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:18px}.sla-kpi-label{font-size:9px}.sla-table-footer{font-size:9px}.fleet-heading .fleet-button{min-height:32px;font-size:10px}.fleet-api-summary-top{min-height:47px}}
+
+/* Shared report frame and prominent export action. */
+.fleet-report-block{margin-top:20px;border:1px solid #cad9ea;border-radius:16px;background:#fff;overflow:hidden;box-shadow:0 4px 16px #1d335809}
+.fleet-report-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 18px;background:#edf4fc;border-bottom:1px solid #d4e1f0}
+.fleet-report-heading{display:flex;align-items:center;gap:12px;min-width:0}
+.fleet-report-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:43px;height:43px;border:1px solid #cfdef0;border-radius:11px;background:#fff;color:#285fac}
+.fleet-report-heading h3{font-size:15px;font-weight:750;color:#213b63}
+.fleet-report-heading p{margin-top:4px!important;font-size:11px;color:#607998}
+.fleet-export-excel{display:inline-flex;align-items:center;justify-content:center;gap:11px;flex-shrink:0;min-height:49px;padding:10px 19px;border:1px solid #047857;border-radius:10px;background:#078452;color:#fff;box-shadow:0 3px 8px #04785726;font-family:inherit;font-size:14px;font-weight:750;line-height:1.3;cursor:pointer;transition:background .15s,box-shadow .15s}
+.fleet-export-excel small{display:block;margin-top:3px;font-size:10px;font-weight:400;color:#d1fae5}
+.fleet-export-excel:hover:not(:disabled){background:#066a43;box-shadow:0 4px 12px #04785735}
+.fleet-export-excel:focus-visible{outline:3px solid #34d399;outline-offset:3px}
+.fleet-export-excel:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+.fleet-report-block .fleet-stage-layout{margin-top:0;border:0;border-radius:0;box-shadow:none}
+.fleet-report-error{padding:10px 18px;background:#fff1f2;border-bottom:1px solid #fecdd3;color:#be123c;font-size:12px}
+@media(max-width:650px){.fleet-report-toolbar{align-items:stretch;flex-direction:column;padding:14px;gap:13px}.fleet-report-heading h3{font-size:14px}.fleet-export-excel{width:100%}.fleet-report-heading p{font-size:10px}}
 
 /* Separate status cards with oversized background icons. */
 .fleet-api-summary-grid{gap:11px;grid-template-columns:repeat(6,minmax(0,1fr));border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
@@ -1802,16 +1956,34 @@ function FleetStatusByDc({
           </div>
         </article>
       </div>
+      <section className="fleet-report-block" aria-labelledby="fleet-report-title">
+        <header className="fleet-report-toolbar">
+          <div className="fleet-report-heading">
+            <span className="fleet-report-icon" aria-hidden="true">
+              <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10M15 10v10" /></svg>
+            </span>
+            <div><h3 id="fleet-report-title">สรุปขั้นตอนและแผนเข้าคลัง</h3>
+              <p>ส่งออกทั้งสองตารางในไฟล์เดียว · ขั้นตอนด้านซ้าย และแผนรายเดือนด้านขวา</p></div>
+          </div>
+          <button type="button" className="fleet-export-excel"
+            disabled={exportingFleetExcel || isLoading || Boolean(activeError) || !stageGroups.length}
+            aria-busy={exportingFleetExcel}
+            onClick={() => void exportFleetExcel()}>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" /></svg>
+            <span>{exportingFleetExcel ? "กำลังสร้าง Excel..." : "ส่งออก Excel"}<small>รวม 2 ตาราง · .xlsx</small></span>
+          </button>
+        </header>
+        {fleetExcelError && <div role="alert" className="fleet-report-error">ส่งออก Excel ไม่สำเร็จ: {fleetExcelError}</div>}
       <div className="fleet-stage-layout">
         <article className="fleet-panel fleet-stage-panel">
           <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมรวมทุกขั้นตอน</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
-          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={event => { setVendorTooltip(null); if (monthScrollRef.current && monthScrollRef.current.scrollTop !== event.currentTarget.scrollTop) monthScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={() => setVendorTooltip(null)}>
             <table className="fleet-stage-table fleet-locked-table">
               <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{visibleStageColumns.map(column => <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}<th scope="col" className="fleet-total-heading">รวม<span className="fleet-header-unit">จำนวนคัน</span></th></tr></thead>
               <tbody>{stageGroups.map(([key, group], groupIndex) => <Fragment key={key}>
                 <tr className="fleet-dc-group">
                   {(groupIndex === 0 || stageGroups[groupIndex - 1][1].dcType !== group.dcType) && <th className="fleet-dc-merged fleet-lock-dc" scope="rowgroup" rowSpan={stageGroups.filter(([, item]) => item.dcType === group.dcType).reduce((sum, [, item]) => sum + 1 + item.trucks.size, 0)}><span className="fleet-dc-pill">{group.dcType}</span></th>}
-                  <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 1}><span className="fleet-group-quantity">{formatNumber(Array.from(group.trucks.values()).reduce((sum, truck) => sum + truck.total, 0))} คัน</span></td>
+                  <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 1} />
                 </tr>
                 {Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">
                   <th scope="row" className="fleet-lock-truck"><span className="fleet-truck-label">{truck.truckType}</span></th>
@@ -1848,7 +2020,7 @@ function FleetStatusByDc({
             <p className="fleet-panel-description">
               ตาม warehouse_plan_date · จำนวนรายเดือน · ปี {selectedYear + 543}
             </p><button type="button" className="fleet-month-counter fleet-month-open" aria-haspopup="dialog" onClick={() => monthPickerDialogRef.current?.showModal()}>เลือกเดือน · {selectedSummaryMonths.length}/6 ▾</button></div>
-          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={event => { setVendorTooltip(null); if (stageScrollRef.current && stageScrollRef.current.scrollTop !== event.currentTarget.scrollTop) stageScrollRef.current.scrollTop = event.currentTarget.scrollTop; }}>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={() => setVendorTooltip(null)}>
             <table className="fleet-stage-table fleet-month-table"><thead><tr>{sixMonthSummary.map(month => <th key={month.key} scope="col"><span className="fleet-step-name">{month.label}</span></th>)}</tr></thead>
               <tbody>{stageGroups.map(([key, group]) => <Fragment key={key}>
                 <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
@@ -1886,6 +2058,7 @@ function FleetStatusByDc({
         </article>
 
       </div>
+      </section>
 
       <dialog ref={monthPickerDialogRef} className="fleet-month-dialog" aria-labelledby="fleet-month-dialog-title">
         <div className="fleet-month-dialog-heading">
