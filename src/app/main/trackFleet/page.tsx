@@ -136,6 +136,27 @@ const remainingUsage = (value?: string) => {
 };
 const vehicleCode = (vehicle: RequestItem, index: number) =>
   vehicle.unit_code || vehicle.running_doc_vehicle_no || textValue(vehicle.vehicle_no) || `คันที่ ${index + 1}`;
+// จัดกลุ่ม -N01, -N02 เป็นเอกสารเดียวกัน และแยกเลขท้าย -005, -006
+const getDocumentGroupInfo = (vehicle: RequestItem, index: number): { key: string; displayDocument: string } => {
+  const runningDoc = textValue(vehicle.running_doc);
+  const code = [vehicle.unit_code, vehicle.running_doc_vehicle_no]
+    .map(textValue)
+    .find((value) => /-(?:N\d+|\d+)$/i.test(value));
+
+  if (code) {
+    if (/-N\d+$/i.test(code)) {
+      const base = code.replace(/-N\d+$/i, "");
+      return { key: `new:${base.toUpperCase()}`, displayDocument: base };
+    }
+    return { key: `numbered:${code.toUpperCase()}`, displayDocument: code };
+  }
+  if (/-N\d+$/i.test(runningDoc)) {
+    const base = runningDoc.replace(/-N\d+$/i, "");
+    return { key: `new:${base.toUpperCase()}`, displayDocument: base };
+  }
+  if (runningDoc) return { key: `document:${runningDoc.toUpperCase()}`, displayDocument: runningDoc };
+  return { key: `missing-document-${vehicle.id ?? index}-${index}`, displayDocument: "" };
+};
 const vehicleKey = (vehicle: RequestItem, index: number) =>
   `${vehicle.request_id ?? ""}-${vehicle.incoming_truck_id ?? vehicle.id ?? vehicleCode(vehicle, index)}-${index}`;
 const getProcessStatus = (item: RequestItem) => {
@@ -399,11 +420,10 @@ export default function TrackFleetPage() {
   const groupedDocuments = useMemo(() => {
     const groups = new Map<string, DocumentGroup>();
     visibleRequests.forEach((item, index) => {
-      const runningDoc = textValue(item.running_doc);
-      const key = runningDoc || `missing-document-${item.id ?? index}-${index}`;
+      const { key, displayDocument } = getDocumentGroupInfo(item, index);
       const group = groups.get(key);
       if (group) group.vehicles.push(item);
-      else groups.set(key, { key, running_doc: runningDoc, vehicles: [item] });
+      else groups.set(key, { key, running_doc: displayDocument, vehicles: [item] });
     });
     const collator = new Intl.Collator("th", { numeric: true, sensitivity: "base" });
     const documents = Array.from(groups.values());
