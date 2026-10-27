@@ -1360,10 +1360,10 @@ function FleetStatusByDc({
   };
   const metricValue = (value: number) =>
     isLoading || activeError ? "—" : formatNumber(value);
-  const timelineMax = Math.max(
-    1,
-    ...timeline.flatMap(point => [point.planned, point.actual ?? 0]),
-  );
+  const dataMax = Math.max(0, ...timeline.flatMap(point => [point.planned, point.actual ?? 0]));
+  // แบ่งแกน Y เป็น 4 ช่วงเท่า ๆ กัน โดยแต่ละช่วงเป็นจำนวนเต็มที่ลงท้ายด้วย 0 หรือ 5
+  const yStep = Math.max(5, Math.ceil(dataMax / 4 / 5) * 5);
+  const timelineMax = yStep * 4;
   const chartX = (index: number) =>
     48 + (index * 704) / Math.max(1, timeline.length - 1);
   const chartY = (value: number) => 220 - (value / timelineMax) * 184;
@@ -1711,29 +1711,27 @@ function FleetStatusByDc({
                   className="fleet-chart"
                   viewBox="0 0 800 350"
                   role="img"
-                  aria-label={`กราฟแผนและยอดส่งมอบสะสม January ถึง December ปี ${activeYear}`}
+                  aria-label={`กราฟแผนและยอดส่งมอบสะสม มกราคม ถึง ธันวาคม ปี ${activeYear}`}
                   onMouseLeave={() => setHoveredMonth(null)}
                 >
-                  {[0, 0.25, 0.5, 0.75, 1].map(ratio => (
-                    <g key={ratio}>
+                  {[0, 1, 2, 3, 4].map(tick => (
+                    <g key={tick}>
                       <line
                         x1="48"
                         x2="752"
-                        y1={220 - ratio * 184}
-                        y2={220 - ratio * 184}
+                        y1={220 - (tick / 4) * 184}
+                        y2={220 - (tick / 4) * 184}
                         stroke="#e8eef6"
                         strokeDasharray="3 4"
                       />
                       <text
                         x="38"
-                        y={224 - ratio * 184}
+                        y={224 - (tick / 4) * 184}
                         textAnchor="end"
                         fill="#7c8ca2"
                         fontSize="11"
                       >
-                        {formatNumber(
-                          Number((timelineMax * ratio).toFixed(2)),
-                        )}
+                        {formatNumber(tick * yStep)}
                       </text>
                     </g>
                   ))}
@@ -1793,7 +1791,7 @@ function FleetStatusByDc({
                           fill="#62738a"
                           fontSize="12"
                         >
-                          {point.label.slice(0, 3)}
+                          {MONTH_SHORT_NAMES[index] ?? point.label}
                         </text>
                         {/* พื้นที่รับเมาส์ครอบคลุมทั้งแนวของเดือน */}
                         <rect
