@@ -992,8 +992,8 @@ function FleetStatusByDc({
     // ใช้ key เดียวกับเซลล์จำนวนรถเดิม
     for (const row of typeRequests) {
       const level = String(row.latest_process_level ?? "").trim();
-      const name = String(row.latest_process_name ?? "").trim();
-      if (!level || !name) continue;
+      const name = String(row.latest_process_name ?? "").trim() || "ไม่ระบุชื่อขั้นตอน";
+      if (!level) continue;
       const key = JSON.stringify([level, name]);
       columns.set(key, { key, level, name });
     }
@@ -1010,6 +1010,13 @@ function FleetStatusByDc({
     return (level >= 1 && level <= 8) ||
       (showClosedSteps && (level === 9 || level === 10));
   });
+
+  const orderedStageColumns = [
+    ...visibleStageColumns.filter(column => Number(column.level) <= 8),
+    "total8" as const,
+    ...visibleStageColumns.filter(column => Number(column.level) >= 9),
+    "total10" as const,
+  ];
 
   const sixMonthSummary = useMemo(() => selectedSummaryMonths.map(month => ({
     key: `${selectedYear}-${String(month + 1).padStart(2, "0")}`,
@@ -1156,6 +1163,13 @@ function FleetStatusByDc({
     return Array.from(groups.entries()).sort((a, b) => a[1].dcType.localeCompare(b[1].dcType, "th") || a[1].dcCode.localeCompare(b[1].dcCode, "th"));
   }, [filteredRequests]);
 
+  const totalForSteps = (stages: Map<string, { count: number }>, lastStep: number) =>
+    Array.from(stages.entries()).reduce((sum, [key, cell]) => {
+      const [level] = JSON.parse(key) as [string, string];
+      const step = Number(level);
+      return sum + (Number.isInteger(step) && step >= 1 && step <= lastStep ? cell.count : 0);
+    }, 0);
+
   // Export the same filtered rows, visible stages and selected months as the web tables.
   const exportFleetExcel = async () => {
     if (exportingFleetExcel || isLoading || activeError || !stageGroups.length) return;
@@ -1169,7 +1183,7 @@ function FleetStatusByDc({
       const sheet = workbook.addWorksheet("ขั้นตอนและแผนเข้าคลัง", {
         views: [{ state: "frozen", xSplit: 2, ySplit: 3 }],
       });
-      const leftWidth = 3 + visibleStageColumns.length;
+      const leftWidth = 4 + visibleStageColumns.length;
       const monthStart = leftWidth + 2; // One blank column between the two panels.
       const lastColumn = monthStart + sixMonthSummary.length - 1;
       const fill = (color: string) => ({ type: "pattern" as const,
@@ -1183,8 +1197,8 @@ function FleetStatusByDc({
       mergedText(2, 1, leftWidth,
         `ปี ${selectedYear + 543} · ${dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · STEP ${showClosedSteps ? "1–10" : "1–8"}`);
       mergedText(2, monthStart, lastColumn, `ปี ${selectedYear + 543} · ตามวันที่แผนเข้าคลัง`);
-      ["กลุ่ม DC", "คลัง / ประเภทรถ", ...visibleStageColumns.map(column =>
-        `[${column.level}] ${column.name}`), "รวม (คัน)"].forEach((label, index) => {
+      ["กลุ่ม DC", "คลัง / ประเภทรถ", ...orderedStageColumns.map(column =>
+        typeof column === "string" ? (column === "total8" ? "รวม STEP 1–8 (คัน)" : "รวม STEP 1–10 (คัน)") : `[${column.level}] ${column.name}`)].forEach((label, index) => {
           sheet.getCell(3, index + 1).value = label;
         });
       sixMonthSummary.forEach((month, index) => {
@@ -1215,11 +1229,11 @@ function FleetStatusByDc({
         const trucks = Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType));
         for (const truck of trucks) {
           sheet.getCell(rowNumber, 2).value = truck.truckType;
-          visibleStageColumns.forEach((column, index) => {
-            // Values remain numbers; Excel displays zero as a dash.
-            sheet.getCell(rowNumber, index + 3).value = truck.stages.get(column.key)?.count ?? 0;
+          orderedStageColumns.forEach((column, index) => {
+            sheet.getCell(rowNumber, index + 3).value = typeof column === "string"
+              ? totalForSteps(truck.stages, column === "total8" ? 8 : 10)
+              : truck.stages.get(column.key)?.count ?? 0;
           });
-          sheet.getCell(rowNumber, leftWidth).value = truck.total;
           const key = JSON.stringify([group.dcType, group.dcCode, truck.truckType]);
           sixMonthSummary.forEach((month, index) => {
             sheet.getCell(rowNumber, monthStart + index).value = monthlyTruckCounts.get(key)?.get(month.key) ?? 0;
@@ -1234,11 +1248,11 @@ function FleetStatusByDc({
           if (col === leftWidth + 1) continue;
           const cell = sheet.getCell(row, col);
           cell.font = { name: "Tahoma", size: row === 1 ? 14 : 10,
-            bold: row === 1 || row === 3 || groupRows.has(row) || col === leftWidth,
+            bold: row === 1 || row === 3 || groupRows.has(row) || (col === leftWidth || col === 3 + visibleStageColumns.filter(column => Number(column.level) <= 8).length),
             color: { argb: row === 1 || row === 3 ? "FFFFFFFF" : "FF243B53" } };
           cell.alignment = { vertical: "middle", horizontal: col <= 2 || row <= 2 ? "left" : "center", wrapText: true };
           cell.fill = fill(row === 1 || row === 3 ? "FF245A95" :
-            groupRows.has(row) ? "FFE4EEFA" : col === leftWidth ? "FFEFF6FF" : "FFFFFFFF");
+            groupRows.has(row) ? "FFE4EEFA" : (col === leftWidth || col === 3 + visibleStageColumns.filter(column => Number(column.level) <= 8).length) ? "FFEFF6FF" : "FFFFFFFF");
           if (row >= 3) cell.border = {
             top: { style: "thin", color: { argb: "FFDCE5F0" } },
             bottom: { style: "thin", color: { argb: "FFDCE5F0" } },
@@ -1342,14 +1356,94 @@ function FleetStatusByDc({
     return rows;
   }, [filteredRequests]);
   const statusTotal = summary.reduce((sum, row) => sum + row.qty, 0);
-  const totals = dcSummary.reduce(
-    (acc, row) => ({
-      total: acc.total + row.total,
-      delivered: acc.delivered + row.green,
-      remaining: acc.remaining + row.red,
-    }),
-    { total: 0, delivered: 0, remaining: 0 },
-  );
+  const totals = useMemo(() => {
+    const result = filteredRequests.reduce((acc, item) => {
+      const qty = Number(item.qty);
+      if (!Number.isFinite(qty) || qty <= 0) return acc;
+      const status = dashboardStatusGroup(item.status);
+      if (status === "success") acc.delivered += qty;
+      if (status === "tcas" && Number.isInteger(Number(item.latest_process_level)) && Number(item.latest_process_level) >= 1 && Number(item.latest_process_level) <= 7) acc.remaining += qty;
+      return acc;
+    }, { delivered: 0, remaining: 0 });
+    return { ...result, total: result.delivered + result.remaining };
+  }, [filteredRequests]);
+
+  // ตรวจสอบรายการ TCAS ที่ไม่ถูกนับใน Pending ขั้นตอน 1–7
+  useEffect(() => {
+    const step8: FleetRequest[] = [];
+    const unspecifiedOrOther: FleetRequest[] = [];
+    for (const row of filteredRequests) {
+      if (dashboardStatusGroup(row.status) !== "tcas") continue;
+      const rawLevel = String(row.latest_process_level ?? "").trim();
+      const level = rawLevel === "" ? NaN : Number(rawLevel);
+      if (level === 8) step8.push(row);
+      else if (!Number.isInteger(level) || level < 1 || level > 8) unspecifiedOrOther.push(row);
+    }
+    const toLogRow = (row: FleetRequest) => ({
+      request_id: row.id,
+      incoming_truck_id: row.incoming_truck_id,
+      running_doc: row.running_doc,
+      unit_code: row.unit_code,
+      vehicle_no: row.vehicle_no,
+      dc_code: row.dc_code,
+      fleet_type: row.fleet_type,
+      status: row.status,
+      qty: row.qty,
+      latest_process_level: row.latest_process_level,
+      latest_process_name: row.latest_process_name,
+    });
+    console.groupCollapsed("[Dashboard] ตรวจสอบ TCAS ขั้นตอน 8 และขั้นตอนอื่น");
+    console.log("ขั้นตอน 8: จำนวนรายการ", step8.length);
+    console.table(step8.map(toLogRow));
+    console.log("ไม่ระบุขั้นตอน / นอกช่วง 1–8: จำนวนรายการ", unspecifiedOrOther.length);
+    console.table(unspecifiedOrOther.map(toLogRow));
+    console.log("ข้อมูลเต็ม ขั้นตอน 8:", step8);
+    console.log("ข้อมูลเต็ม ไม่ระบุขั้นตอน / นอกช่วง 1–8:", unspecifiedOrOther);
+    console.groupEnd();
+  }, [filteredRequests]);
+
+  const pendingStageTooltip = useMemo(() => {
+    const stages = Array.from({ length: 7 }, (_, index) => ({
+      level: index + 1, names: new Set<string>(), qty: 0,
+    }));
+    for (const process of [...processes, ...apiProcesses]) {
+      if (isTemporaryFleet(process.fleet_type)) continue;
+      const level = Number(process.process_level);
+      const name = String(process.process ?? "").trim();
+      if (Number.isInteger(level) && level >= 1 && level <= 7 && name)
+        stages[level - 1].names.add(name);
+    }
+    for (const row of filteredRequests) {
+      if (dashboardStatusGroup(row.status) !== "tcas") continue;
+      const qty = Number(row.qty);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const level = Number(row.latest_process_level);
+      const name = String(row.latest_process_name ?? "").trim();
+      if (Number.isInteger(level) && level >= 1 && level <= 7) {
+        stages[level - 1].qty += qty;
+        if (name) stages[level - 1].names.add(name);
+      }
+    }
+    const lines = stages.map(stage => {
+      const name = Array.from(stage.names).join(" / ");
+      return `ขั้นตอน ${stage.level}${name ? `: ${name}` : ""} — ${formatNumber(stage.qty)} คัน`;
+    });
+    return ["รายละเอียดรถที่อยู่ระหว่างดำเนินการ", ...lines,
+      `รวม ${formatNumber(stages.reduce((sum, stage) => sum + stage.qty, 0))} คัน`].join("\n");
+  }, [filteredRequests, processes, apiProcesses]);
+  // แยกจำนวนตามขั้นตอนโดยใช้เงื่อนไขเดียวกับ Pending และ Actual
+  const deliveryStages = useMemo(() => {
+    const defaultNames = ["จัดสรร FBP ออกรถ", "ออกหนังสือจัดสรร", "พิจารณาอนุมัติสินเชื่อ", "ส่งมอบ Chassis", "ประกอบตู้ และอุปกรณ์", "จดทะเบียนรถขนส่ง", "จัดหาพนักงานขับรถ"];
+    const stages = defaultNames.map((name, index) => ({ level: index + 1, name, qty: 0 }));
+    for (const row of filteredRequests) {
+      if (dashboardStatusGroup(row.status) !== "tcas") continue;
+      const level = Number(row.latest_process_level);
+      const qty = Number(row.qty);
+      if (!Number.isInteger(level) || level < 1 || level > 7 || !Number.isFinite(qty) || qty <= 0) continue;
+      stages[level - 1].qty += qty;
+    }
+    return [...stages, { level: 8, name: "ส่งมอบรถเข้าคลัง", qty: totals.delivered }];
+  }, [filteredRequests, totals.delivered]);
   const completion = percentage(totals.delivered, totals.total);
   const pendingPercentage = percentage(totals.remaining, totals.total);
   const hasFilters = requestTypeFilter !== "all" || selectedYear !== currentYear || monthFilter !== "all" || dcTypeFilter !== "all" || areaFilter !== "all" || fbpFilter !== "all" || statusFilter !== "all" || truckTypeFilter !== "all";
@@ -1395,6 +1489,7 @@ function FleetStatusByDc({
 .fleet-filter-heading,.fleet-summary-heading-line{display:flex;align-items:center;gap:8px}.fleet-filter-heading{margin:0 2px 8px}.fleet-filter-heading h3,.fleet-api-summary-heading{font-size:12px;font-weight:750;color:#355174}.fleet-section-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:#e1eafb;color:#456f9f;font-size:9px;font-weight:800;flex-shrink:0}.fleet-filter-context{margin-left:auto;font-size:10px;color:var(--muted)}
 .fleet-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end;gap:10px;padding:13px 15px;background:#fff;border:1px solid var(--line);border-radius:13px}.fleet-label{display:block;font-size:10px;font-weight:650;color:#718299;margin-bottom:5px}.fleet-field{display:block;width:100%;height:34px;padding:5px 9px;border:1px solid #dce5f0;border-radius:8px;background:#f7f9fc;color:#304c70;font-size:11px;transition:border-color .15s,box-shadow .15s}.fleet-field:hover:not(:disabled){border-color:#a2bbda}.fleet-field:focus{border-color:#6f9ad3;box-shadow:0 0 0 3px #3979d710;outline:none}.fleet-field:disabled{color:#9aa7b9}.fleet-filter-note{margin:6px 2px 0!important;font-size:10px;color:#8291a6}
 .fleet-api-summary{margin:17px 0 0}.fleet-api-summary-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.fleet-api-summary-subtitle{font-size:10px;color:#8192a9;margin-top:2px!important}.fleet-api-summary-badge{font-size:10px;color:#7190b6;border:1px solid #dde6f4;border-radius:999px;padding:5px 9px;white-space:nowrap}.fleet-api-summary-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.fleet-api-summary-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:151px;padding:14px 13px;border:1px solid #dce6f2;border-radius:14px;box-shadow:0 3px 9px #26466a06;text-align:left;isolation:isolate;overflow:hidden;transition:transform .15s,box-shadow .15s}.fleet-api-summary-card:after{content:"";position:absolute;right:-22px;top:-30px;width:95px;height:95px;border:18px solid currentColor;border-radius:50%;opacity:.035;z-index:-1}.fleet-api-summary-card:before{content:"";position:absolute;bottom:0;left:14px;right:14px;height:3px;background:currentColor;opacity:.35;border-radius:4px 4px 0 0}.fleet-api-summary-card.is-total{border-color:#315eaf}.fleet-api-summary-card.is-total:before{background:white;opacity:.2}.fleet-api-summary-card:hover{transform:translateY(-2px);box-shadow:0 7px 18px #26466a13}.fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:1px}.fleet-api-summary-card.is-total.is-selected{outline-color:#4776dc}.fleet-api-summary-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;min-height:47px}.fleet-api-summary-label{font-size:10.5px;line-height:1.55;font-weight:700;color:#49607e;white-space:pre-line;overflow-wrap:anywhere}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#e4eeff}.fleet-api-summary-icon{display:flex;align-items:center;justify-content:center;width:29px;height:29px;border-radius:9px;background:#ffffffaa;flex-shrink:0}.fleet-api-summary-icon svg{width:18px;height:18px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff22}.fleet-api-summary-number{display:flex;align-items:baseline;gap:6px;margin:7px 0}.fleet-api-summary-number strong{font-size:29px;line-height:1.2;font-weight:800;letter-spacing:-1px}.fleet-api-summary-number span{font-size:9px;opacity:.7}.fleet-api-summary-detail{display:block;min-height:30px;font-size:9.5px;line-height:1.5;opacity:.8}.fleet-api-summary-note{font-size:10px;color:#8091a8;margin:8px 2px 0!important}
+.fleet-delivery-summary{display:grid;grid-template-columns:minmax(260px,1fr) minmax(360px,1.35fr);gap:16px;align-items:stretch}.fleet-delivery-summary>div:first-child{display:flex;flex-direction:column;min-width:0}.fleet-delivery-summary .fleet-delivery-cards{display:grid;grid-template-columns:1fr;grid-template-rows:repeat(3,minmax(0,1fr));flex:1}.fleet-delivery-summary .fleet-delivery-card+.fleet-delivery-card{border-left:0;border-top:1px solid #e7edf5}.delivery-stage-panel{border:1px solid #dce4ef;border-radius:13px;background:#fff;padding:16px}.delivery-stage-panel h3{margin:0 0 12px;color:#334f76;font-size:15px}.delivery-stage-panel h3 small{font-size:11px;color:#7990aa}.delivery-stage-row{display:grid;grid-template-columns:26px minmax(0,1fr) minmax(100px,42%);gap:8px;align-items:center;min-height:36px;border-bottom:1px solid #edf1f6}.delivery-stage-number{width:23px;height:23px;display:grid;place-items:center;border-radius:50%;background:#e9f0fb;color:#5275a3;font-size:11px;font-weight:700}.delivery-stage-name{font-size:12px;color:#334155}.delivery-stage-value{display:flex;align-items:center;gap:8px;min-width:0}.delivery-stage-value strong{font-size:12px;min-width:32px;text-align:right;color:#334155}.delivery-stage-bar-track{height:10px;flex:1;background:#f1f5f9;border-radius:9px;overflow:hidden}.delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.delivery-stage-total{display:flex;justify-content:space-between;padding:11px 4px 0;font-size:13px;color:#334155}.delivery-stage-panel p{margin:8px 0 0!important;color:#8796aa;font-size:10px}@media(max-width:900px){.fleet-delivery-summary{grid-template-columns:1fr}}@media(max-width:560px){.delivery-stage-panel{padding:12px}.delivery-stage-row{grid-template-columns:24px minmax(0,1fr) minmax(75px,35%);gap:5px}.delivery-stage-name{font-size:11px}}
 .fleet-delivery-summary{margin:17px 0 12px}.fleet-delivery-heading{font-size:12px;color:#3d587c;margin-bottom:9px!important}.fleet-delivery-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}.fleet-delivery-card{padding:12px 17px;min-width:0}.fleet-delivery-card+.fleet-delivery-card{border-left:1px solid #e7edf5}.fleet-delivery-label{font-size:11px;font-weight:650;color:#5b7392}.fleet-delivery-label small{font-size:9px;font-weight:500;margin-left:5px;color:#95a2b5}.fleet-delivery-number{display:flex;align-items:center;gap:9px;margin-top:7px;color:#416999}.fleet-delivery-number svg{width:27px;height:27px;padding:4px;background:#eff4fb;border-radius:8px}.fleet-delivery-number strong{font-size:26px;line-height:1.2;font-weight:800}.fleet-delivery-unit{font-size:9px;display:inline;margin-left:6px;color:var(--muted)}.fleet-delivery-note{font-size:9px;color:#91a0b3;margin-top:7px!important}.fleet-delivery-progress-row{display:flex;align-items:center;gap:8px;margin-top:8px}.fleet-delivery-progress-track{height:5px;border-radius:99px;overflow:hidden;flex:1;background:#eef2f7}.fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-delivery-percent{font-size:10px;color:#7990aa}
 .fleet-panels{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(270px,1fr);gap:0;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:hidden}.fleet-panel{min-width:0;background:#fff;overflow:hidden}.fleet-panels>.fleet-panel+.fleet-panel{border-left:1px solid #e5ecf4}.fleet-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;min-height:65px;border-bottom:1px solid #e9eef6;background:linear-gradient(100deg,#fafcff,#fff)}.fleet-panel h3{font-size:12px;font-weight:750;color:#324f73}.fleet-panel-description{font-size:10px;color:#8a9aaf;margin-top:3px!important;line-height:1.5}.fleet-panel-header>span{font-size:10px;color:#7890af;white-space:nowrap}.fleet-panel-content{padding:13px 15px}.fleet-year-select{width:100px;flex-shrink:0}.fleet-chart-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.fleet-chart{display:block;width:100%;min-width:520px;height:260px}.fleet-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:10px;color:#7c8da6;margin-top:9px}.fleet-legend>span{display:inline-flex;align-items:center;gap:6px}.fleet-legend i{display:inline-block;width:7px;height:7px;border-radius:2px}
 .fleet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:180px;padding:20px;color:#8192a8;font-size:11px;text-align:center;background:linear-gradient(180deg,#fff,#fafcff)}.fleet-error{display:block;margin:12px 0;padding:12px 14px;background:#fff2f3;color:#a83e55;border:1px solid #f1d8de;border-left:3px solid #d64f6c;border-radius:10px;font-size:11px;overflow-wrap:anywhere}.fleet-error p{margin-top:4px}.fleet-warehouse-list{max-height:260px;overflow:auto;scrollbar-width:thin;padding-right:5px}.fleet-warehouse{padding:9px 0;border-bottom:1px solid #eef2f8}.fleet-warehouse:last-child{border-bottom:0}.fleet-row{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5px}.fleet-warehouse-name{font-size:11px;font-weight:750;color:#456185}.fleet-row-meta{font-size:10px;color:#8799b0}.fleet-bar{display:flex;width:100%;height:7px;background:#edf2f8;border-radius:99px;overflow:hidden}.fleet-bar>span{height:100%;display:block}.fleet-warehouse-detail{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:5px;color:#8190a5}
@@ -1513,7 +1608,115 @@ function FleetStatusByDc({
 .sla-detail-button:focus-visible{outline:2px solid #3979d7;outline-offset:2px}
 .sla-kpi:nth-child(2) .sla-kpi-value{color:#4776aa}
 @media(max-width:850px){.sla-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
-      `}</style>
+/* รูปแบบสรุปการส่งมอบตามภาพตัวอย่าง */
+.fleet-delivery-summary{grid-template-columns:minmax(190px,240px) minmax(380px,1fr);gap:32px;margin:20px 0 24px;align-items:stretch}
+.fleet-delivery-heading{font-size:15px;color:#18294a;margin:0 0 10px!important}
+.fleet-delivery-summary .fleet-delivery-cards{gap:14px;border:0;background:transparent;overflow:visible}
+.fleet-delivery-summary .fleet-delivery-card{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:14px 16px;background:#fff;border:1px solid #b9d9eb;border-radius:18px;box-shadow:0 6px 12px rgba(30,53,78,.18);min-height:150px}
+.fleet-delivery-summary .fleet-delivery-card+.fleet-delivery-card{border:1px solid #b9d9eb}
+.fleet-delivery-summary .fleet-delivery-card:after{display:none}
+.fleet-delivery-summary .fleet-delivery-label{color:#111;font-size:15px;font-weight:750;line-height:1.2}
+.fleet-delivery-summary .fleet-delivery-label small{display:block;margin:2px 0 0;font-size:13px;color:#222}
+.fleet-delivery-summary .fleet-delivery-number{justify-content:center;gap:18px;margin-top:10px;color:#111}
+.fleet-delivery-summary .fleet-delivery-number svg{display:block;width:45px;height:45px;padding:0;background:transparent}
+.fleet-delivery-summary .fleet-delivery-number strong{font-size:37px;line-height:1}
+.fleet-delivery-summary .fleet-delivery-unit{display:block;margin:2px 0 0;font-size:12px;color:#222}
+.fleet-delivery-summary .fleet-delivery-note{font-size:10px;color:#777;margin:5px 0 0!important}
+.fleet-delivery-summary .fleet-delivery-progress-row{width:100%;margin-top:8px;gap:8px}
+.fleet-delivery-summary .fleet-delivery-progress-track{height:14px;background:#dedede}
+.fleet-delivery-summary .fleet-delivery-percent{font-size:15px;color:#222}
+.delivery-stage-panel{padding:24px 28px;border:1px solid #b9d9eb;border-radius:18px;box-shadow:0 6px 12px rgba(30,53,78,.18);display:flex;flex-direction:column}
+.delivery-stage-panel h3{color:#160c85;font-size:21px;font-weight:800;margin:0 0 16px}
+.delivery-stage-panel h3 small{font-size:inherit;color:inherit}
+.delivery-stage-list{flex:1;display:flex;flex-direction:column}
+.delivery-stage-row{grid-template-columns:28px minmax(0,1fr) minmax(115px,45%);gap:5px;min-height:43px;flex:1;border-bottom:1px solid #dedede}
+.delivery-stage-number{width:25px;height:25px;background:#e3eafa;color:#fff;font-size:13px}
+.delivery-stage-name{font-size:14px;color:#171717}
+.delivery-stage-value{height:100%;border-left:1px solid #dedede;padding-left:10px;gap:5px}
+.delivery-stage-value strong{min-width:0;text-align:left;color:#171717;font-size:14px;font-weight:500}
+.delivery-stage-bar-track{height:25px;flex:0 1 70%;width:70%;background:transparent;overflow:visible;border-radius:0}
+.delivery-stage-bar-track span{border-radius:0 12px 12px 0;min-width:0}
+.delivery-stage-total{background:#ececec;padding:12px 16px;margin-top:0;color:#111;font-size:15px;font-weight:700}
+.delivery-stage-panel p{margin:10px 0 0!important;font-size:10px;color:#8796aa}
+@media(max-width:700px){.fleet-delivery-summary{grid-template-columns:1fr;gap:18px}.fleet-delivery-summary .fleet-delivery-cards{grid-template-columns:1fr;grid-template-rows:repeat(3,auto);gap:10px}.fleet-delivery-summary .fleet-delivery-card{min-height:130px}.delivery-stage-row{min-height:42px}}
+@media(max-width:560px){.fleet-delivery-summary .fleet-delivery-cards{grid-template-columns:1fr;grid-template-rows:repeat(3,auto)}.fleet-delivery-summary .fleet-delivery-card{min-height:130px}.delivery-stage-panel{padding:17px 14px}.delivery-stage-panel h3{font-size:17px}.delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(90px,38%)}.delivery-stage-name{font-size:12px}}
+
+/* สรุปสถานะในกรอบเดียว */
+.fleet-dashboard .fleet-delivery-summary{display:grid;grid-template-columns:190px minmax(0,1fr);gap:16px;align-items:stretch;margin:16px 0;padding:16px;background:#fff;border:1px solid #dce4ef;border-radius:14px}
+.fleet-dashboard .fleet-delivery-summary>div:first-child{display:flex;flex-direction:column;min-width:0}
+.fleet-dashboard .fleet-delivery-heading{margin:0 0 8px!important;color:#334f76;font-size:12px;font-weight:700}
+.fleet-dashboard .fleet-delivery-cards{display:grid;grid-template-columns:1fr;grid-template-rows:repeat(3,1fr);flex:1;gap:6px;background:transparent;border:0;border-radius:0;overflow:visible}
+.fleet-dashboard .fleet-delivery-card{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:center;min-height:0;padding:9px 11px;text-align:left;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;box-shadow:none}
+.fleet-dashboard .fleet-delivery-card+.fleet-delivery-card{border:1px solid #e2e8f0}.fleet-dashboard .fleet-delivery-card:after{display:none}
+.fleet-dashboard .fleet-delivery-label{color:#526780;font-size:11px;font-weight:700;line-height:1.3}.fleet-dashboard .fleet-delivery-label small{display:inline;margin-left:4px;color:#8a9aab;font-size:10px;font-weight:500}
+.fleet-dashboard .fleet-delivery-number{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-top:4px;color:#334f76}.fleet-dashboard .fleet-delivery-number svg{display:block;width:25px;height:25px;padding:0;background:transparent}.fleet-dashboard .fleet-delivery-number strong{font-size:23px;line-height:1.1;font-weight:800}.fleet-dashboard .fleet-delivery-unit{display:inline;margin-left:5px;color:#74859a;font-size:10px}
+.fleet-dashboard .fleet-delivery-note{margin:4px 0 0!important;color:#94a3b8;font-size:9px;line-height:1.3}.fleet-dashboard .fleet-delivery-progress-row{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px}.fleet-dashboard .fleet-delivery-progress-track{flex:1;height:5px;overflow:hidden;background:#e5eaf0;border-radius:99px}.fleet-dashboard .fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .fleet-delivery-percent{min-width:28px;color:#71839a;font-size:10px;text-align:right}
+.fleet-dashboard .delivery-stage-panel{display:flex;flex-direction:column;min-width:0;padding:0 0 0 16px;background:transparent;border:0;border-left:1px solid #e7edf5;border-radius:0;box-shadow:none}.fleet-dashboard .delivery-stage-panel h3{margin:0 0 8px!important;color:#334f76;font-size:13px;font-weight:700}.fleet-dashboard .delivery-stage-panel h3 small{color:#8a9aab;font-size:10px;font-weight:500}
+.fleet-dashboard .delivery-stage-list{display:flex;flex:1;flex-direction:column}.fleet-dashboard .delivery-stage-row{display:grid;grid-template-columns:22px minmax(0,1fr) minmax(90px,34%);align-items:center;gap:7px;flex:1;min-height:27px;border-bottom:1px solid #edf1f5}.fleet-dashboard .delivery-stage-number{display:grid;place-items:center;width:20px;height:20px;color:#55759e;background:#e9f0fa;border-radius:50%;font-size:10px;font-weight:700}.fleet-dashboard .delivery-stage-name{min-width:0;color:#44556b;font-size:11px;line-height:1.3}
+.fleet-dashboard .delivery-stage-value{display:flex;align-items:center;gap:7px;min-width:0;height:auto;padding:0;border:0}.fleet-dashboard .delivery-stage-bar-track{flex:1;width:auto;height:8px;overflow:hidden;background:#f1f5f9;border-radius:99px}.fleet-dashboard .delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .delivery-stage-value strong{min-width:30px;color:#34455b;font-size:11px;font-weight:700;text-align:right}.fleet-dashboard .delivery-stage-total{display:flex;justify-content:space-between;margin-top:6px;padding:7px 9px;color:#334155;background:#f1f5f9;border-radius:6px;font-size:11px;font-weight:700}.fleet-dashboard .delivery-stage-panel p{margin:5px 0 0!important;color:#94a3b8;font-size:9px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:12px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto;gap:6px}.fleet-dashboard .fleet-delivery-card{padding:8px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:19px}.fleet-dashboard .fleet-delivery-label small{display:block;margin:0}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0;border-top:1px solid #e7edf5;border-left:0}.fleet-dashboard .delivery-stage-row{grid-template-columns:20px minmax(0,1fr) minmax(70px,32%);gap:5px}}
+
+/* ขยายสรุปการส่งมอบขึ้นหนึ่งระดับ */
+.fleet-dashboard .fleet-delivery-summary{grid-template-columns:220px minmax(0,1fr);gap:18px;padding:18px}
+.fleet-dashboard .fleet-delivery-heading{font-size:14px}
+.fleet-dashboard .fleet-delivery-cards{gap:8px}
+.fleet-dashboard .fleet-delivery-card{padding:11px 13px}
+.fleet-dashboard .fleet-delivery-label{font-size:13px}
+.fleet-dashboard .fleet-delivery-label small{font-size:11px}
+.fleet-dashboard .fleet-delivery-number{gap:10px;margin-top:6px}
+.fleet-dashboard .fleet-delivery-number svg{width:30px;height:30px}
+.fleet-dashboard .fleet-delivery-number strong{font-size:28px}
+.fleet-dashboard .fleet-delivery-unit{font-size:12px}
+.fleet-dashboard .fleet-delivery-note{font-size:10px}
+.fleet-dashboard .fleet-delivery-progress-track{height:7px}
+.fleet-dashboard .fleet-delivery-percent{font-size:11px}
+.fleet-dashboard .delivery-stage-panel{padding-left:18px}
+.fleet-dashboard .delivery-stage-panel h3{font-size:15px}
+.fleet-dashboard .delivery-stage-panel h3 small{font-size:12px}
+.fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(100px,34%);gap:8px;min-height:32px}
+.fleet-dashboard .delivery-stage-number{width:23px;height:23px;font-size:11px}
+.fleet-dashboard .delivery-stage-name{font-size:13px}
+.fleet-dashboard .delivery-stage-bar-track{height:10px}
+.fleet-dashboard .delivery-stage-value strong{font-size:13px;min-width:34px}
+.fleet-dashboard .delivery-stage-total{padding:8px 10px;font-size:13px}
+.fleet-dashboard .delivery-stage-panel p{font-size:10px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:14px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto}.fleet-dashboard .fleet-delivery-card{padding:9px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:22px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:23px minmax(0,1fr) minmax(70px,32%);gap:5px}.fleet-dashboard .delivery-stage-name{font-size:12px}}
+
+/* ขยายส่วนสถานะออกรถและกราฟแผน */
+.fleet-dashboard .fleet-delivery-summary{grid-template-columns:260px minmax(0,1fr);gap:22px;padding:22px}
+.fleet-dashboard .fleet-delivery-heading{font-size:17px}
+.fleet-dashboard .fleet-delivery-card{padding:14px 16px}
+.fleet-dashboard .fleet-delivery-label{font-size:15px}
+.fleet-dashboard .fleet-delivery-label small{font-size:13px}
+.fleet-dashboard .fleet-delivery-number svg{width:36px;height:36px}
+.fleet-dashboard .fleet-delivery-number strong{font-size:34px}
+.fleet-dashboard .fleet-delivery-unit{font-size:13px}
+.fleet-dashboard .fleet-delivery-note{font-size:12px}
+.fleet-dashboard .fleet-delivery-percent{font-size:13px}
+.fleet-dashboard .delivery-stage-panel h3{font-size:18px}
+.fleet-dashboard .delivery-stage-panel h3 small{font-size:14px}
+.fleet-dashboard .delivery-stage-row{grid-template-columns:29px minmax(0,1fr) minmax(110px,34%);min-height:38px}
+.fleet-dashboard .delivery-stage-number{width:26px;height:26px;font-size:13px}
+.fleet-dashboard .delivery-stage-name,.fleet-dashboard .delivery-stage-value strong,.fleet-dashboard .delivery-stage-total{font-size:15px}
+.fleet-dashboard .delivery-stage-panel p{font-size:12px}
+.fleet-dashboard .fleet-timeline .fleet-panel-header{padding:16px 18px}
+.fleet-dashboard .fleet-timeline .fleet-panel-header h3{font-size:17px}
+.fleet-dashboard .fleet-timeline .fleet-panel-description{font-size:13px}
+.fleet-dashboard .fleet-timeline .fleet-panel-content{padding:16px 18px}
+.fleet-dashboard .fleet-timeline .fleet-chart{height:320px}
+.fleet-dashboard .fleet-timeline .fleet-legend{font-size:13px;gap:16px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:14px;padding:15px}.fleet-dashboard .fleet-delivery-card{padding:10px}.fleet-dashboard .fleet-delivery-number strong{font-size:25px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(70px,32%)}.fleet-dashboard .delivery-stage-name{font-size:13px}.fleet-dashboard .fleet-timeline .fleet-chart{height:280px}}
+
+/* เพิ่มพื้นที่ฝั่งสรุปและขยับตารางไปทางขวา */
+@media (min-width: 651px) {
+  .fleet-dashboard .fleet-delivery-summary {
+    grid-template-columns: minmax(300px, 34%) minmax(0, 1fr);
+    gap: 26px;
+  }
+  .fleet-dashboard .delivery-stage-panel { padding-left: 24px; }
+}
+      `}
+</style>
       <header className="fleet-heading">
         <div className="fleet-brand"><span className="fleet-brand-icon" aria-hidden="true"><SlaInlineIcon type="truck" size={24} /></span><div>
           <div className="fleet-eyebrow">FLEET OVERVIEW</div>
@@ -1602,7 +1805,7 @@ function FleetStatusByDc({
                 </div>
               </div>
               <p className="fleet-delivery-note">
-                จำนวนรถรวมตามตัวกรอง
+                ส่งมอบแล้ว + TCAS ขั้นตอน 1–7
               </p>
             </article>
             <article className="fleet-delivery-card">
@@ -1637,7 +1840,10 @@ function FleetStatusByDc({
                 </span>
               </div>
             </article>
-            <article className="fleet-delivery-card">
+            <article className="fleet-delivery-card" tabIndex={0}
+              title={isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถโหลดข้อมูลได้" : pendingStageTooltip}
+              aria-label={isLoading || activeError ? "อยู่ระหว่างดำเนินการ" : pendingStageTooltip}
+              style={{ cursor: "help" }}>
               <div className="fleet-delivery-label">
                 อยู่ระหว่างดำเนินการ
                 <small>(Pending)</small>
@@ -1673,6 +1879,25 @@ function FleetStatusByDc({
             </article>
           </div>
         </div>
+        <section className="delivery-stage-panel" aria-label="จำนวนรถในแต่ละขั้นตอน">
+          <h3>จำนวนรถในแต่ละสถานะ <small>(คัน)</small></h3>
+          <div className="delivery-stage-list">
+            {deliveryStages.map(stage => (
+              <div className="delivery-stage-row" key={stage.level}>
+                <span className="delivery-stage-number">{stage.level}</span>
+                <span className="delivery-stage-name">{stage.name}</span>
+                <div className="delivery-stage-value">
+                  <div className="delivery-stage-bar-track" aria-hidden="true">
+                    <span style={{ width: `${percentage(stage.qty, totals.total)}%`, background: stage.level === 8 ? "#43a51c" : "#f56623" }} />
+                  </div>
+                  <strong>{metricValue(stage.qty)}</strong>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="delivery-stage-total"><span>รวม</span><strong>{metricValue(totals.total)} คัน</strong></div>
+          <p>ขั้นตอน 1–7 เฉพาะ TCAS · ขั้นตอน 8 แสดงยอดส่งมอบแล้ว</p>
+        </section>
       </div>
       <div className="fleet-panels">
         <article className="fleet-panel fleet-timeline">
@@ -1974,18 +2199,19 @@ function FleetStatusByDc({
         {fleetExcelError && <div role="alert" className="fleet-report-error">ส่งออก Excel ไม่สำเร็จ: {fleetExcelError}</div>}
       <div className="fleet-stage-layout">
         <article className="fleet-panel fleet-stage-panel">
-          <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมรวมทุกขั้นตอน</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
+          <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมแยก STEP 1–8 และ 1–10</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
           {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={() => setVendorTooltip(null)}>
             <table className="fleet-stage-table fleet-locked-table">
-              <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{visibleStageColumns.map(column => <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}<th scope="col" className="fleet-total-heading">รวม<span className="fleet-header-unit">จำนวนคัน</span></th></tr></thead>
+              <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{orderedStageColumns.map(column => typeof column === "string" ? <th key={column} scope="col" className="fleet-total-heading">{column === "total8" ? "รวม STEP 1–8" : "รวม STEP 1–10"}<span className="fleet-header-unit">จำนวนคัน</span></th> : <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}</tr></thead>
               <tbody>{stageGroups.map(([key, group], groupIndex) => <Fragment key={key}>
                 <tr className="fleet-dc-group">
                   {(groupIndex === 0 || stageGroups[groupIndex - 1][1].dcType !== group.dcType) && <th className="fleet-dc-merged fleet-lock-dc" scope="rowgroup" rowSpan={stageGroups.filter(([, item]) => item.dcType === group.dcType).reduce((sum, [, item]) => sum + 1 + item.trucks.size, 0)}><span className="fleet-dc-pill">{group.dcType}</span></th>}
-                  <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 1} />
+                  <th scope="row" className="fleet-lock-truck fleet-lock-warehouse"><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</th><td colSpan={visibleStageColumns.length + 2} />
                 </tr>
                 {Array.from(group.trucks.values()).sort((a, b) => a.truckType.localeCompare(b.truckType)).map(truck => <tr key={truck.truckType} className="fleet-truck-row">
                   <th scope="row" className="fleet-lock-truck"><span className="fleet-truck-label">{truck.truckType}</span></th>
-                  {visibleStageColumns.map(column => {
+                  {orderedStageColumns.map(column => {
+                    if (typeof column === "string") return <td key={column} className="fleet-stage-total">{formatNumber(totalForSteps(truck.stages, column === "total8" ? 8 : 10))}</td>;
                     const cell = truck.stages.get(column.key);
                     return <td key={column.key} data-stage={column.level} className={column.level === "8" ? "fleet-stage-completed" : undefined}>
                       {cell ? <button
@@ -2006,7 +2232,6 @@ function FleetStatusByDc({
                       >{formatNumber(cell.count)}</button> : <span className="fleet-cell-empty">—</span>}
                     </td>;
                   })}
-                  <td className="fleet-stage-total">{formatNumber(truck.total)}</td>
                 </tr>)}
               </Fragment>)}</tbody>
             </table>

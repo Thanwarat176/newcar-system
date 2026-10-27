@@ -5,12 +5,13 @@ import { createPortal } from "react-dom";
 import { DateRange } from "react-date-range";
 import type { RangeKeyDict } from "react-date-range";
 import { th } from "date-fns/locale";
-import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
+import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Star, Truck, Warehouse, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import FleetModalDetail from "./components/FleetModalDetail";
 import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
+import SupplierRatingModal from "./components/SupplierRatingModal";
 
 interface SelectedDC {
   DC_CODE?: string; DC_NAME?: string; DC_TYPE?: string;
@@ -160,6 +161,7 @@ export default function WaitingFleetPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openExportModal, setOpenExportModal] = useState(false);
+  const [openSupplierRatingModal, setOpenSupplierRatingModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchText, setSearchText] = useState("");
@@ -308,7 +310,7 @@ export default function WaitingFleetPage() {
     <header className="mb-4 flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center">
       <div><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p><h1 className="mt-2 flex items-center gap-2 text-lg font-semibold"><Truck size={20} className="text-blue-600" />รอประเมินกองรถ</h1>
         <div className="mt-2 flex flex-wrap gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold"><Warehouse size={12} />{dcLabel}</span><span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">{LABELS[statusFilter]}</span></div></div>
-      <div className="flex gap-2"><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
+      <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setOpenSupplierRatingModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-xs font-semibold text-amber-700 hover:bg-amber-100"><Star size={15} />ให้คะแนนผู้ประกอบการ</button><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
     </header>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-600">{error}</div>}
     <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปรายการทุกหน้าภายใต้ DC ที่มีสิทธิ์ดู</span><span>หน้า {activePage} / {totalPages}</span></div>
@@ -350,6 +352,9 @@ export default function WaitingFleetPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
     </section>
     
+    {openSupplierRatingModal && portalTarget && createPortal(
+      <SupplierRatingModal onClose={() => setOpenSupplierRatingModal(false)} />, portalTarget
+    )}
     {selectedRequest && portalTarget && createPortal(
       <FleetModalDetail open={true} data={selectedRequest} allRequests={scopedRequests}
         onClose={() => setSelectedRequest(null)} onSuccess={() => { void fetchRequests(); }} />, portalTarget

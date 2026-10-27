@@ -313,9 +313,6 @@ export default function Sidebar({
   const normalizedWarehouse =
     normalizeValue(originalWarehouse);
 
-  const normalizedUserType =
-    normalizeValue(userInfo?.user_type);
-
   const loginUser = getText(
     userInfo?.em_id,
     userInfo?.employee_id,
@@ -327,14 +324,6 @@ export default function Sidebar({
     normalizedWarehouse === "CENTER" ||
     normalizeValue(originalTeam) === "CENTER";
 
-  const normalizedSelectedDepartments = useMemo(
-    () =>
-      uniqueCodes(
-        selectedDepartments.map((item) => item.value)
-      ).map(normalizeValue),
-    [selectedDepartments]
-  );
-
   const selectedWarehouseCodes = useMemo(
     () =>
       uniqueCodes([
@@ -345,42 +334,6 @@ export default function Sidebar({
       ]),
     [selectedDCs, selectedDC]
   );
-
-  const hasSelectedDepartments =
-    isCenterUser &&
-    normalizedSelectedDepartments.length > 0;
-
-  const hasSelectedWarehouse =
-    selectedWarehouseCodes.length > 0;
-
-  // เลือกเฉพาะคลัง ให้แสดงมุมมองคลัง
-  // หากเลือกฝ่ายร่วมด้วย ให้ใช้เงื่อนไขฝ่ายที่เลือก
-  const isWarehouseView =
-    isCenterUser &&
-    !hasSelectedDepartments &&
-    hasSelectedWarehouse;
-
-  const activeDepartments = useMemo(() => {
-    // เลือกฝ่าย เช่น KA ให้ใช้ฝ่ายที่เลือก
-    if (hasSelectedDepartments) {
-      return normalizedSelectedDepartments;
-    }
-
-    // เลือกเฉพาะคลัง ไม่ใช้ IMP เดิมปน
-    if (isWarehouseView) {
-      return [];
-    }
-
-    // ไม่เลือกอะไร กลับไปใช้ฝ่ายเดิมจาก user
-    return normalizedDepartment
-      ? [normalizedDepartment]
-      : [];
-  }, [
-    hasSelectedDepartments,
-    normalizedSelectedDepartments,
-    isWarehouseView,
-    normalizedDepartment,
-  ]);
 
   const displayTeam = useMemo(() => {
     if (isCenterUser) {
@@ -430,91 +383,47 @@ export default function Sidebar({
           .join("")
           .toUpperCase();
 
-  const isIMP = activeDepartments.includes("IMP");
-  const isFBP = activeDepartments.includes("FBP");
-
-  // Role ยังคงมาจากบัญชีจริง
-  const isAdmin = normalizedUserType === "ADMIN";
-  const isSuperadmin =
-    normalizedUserType === "SUPERADMIN";
+  // สิทธิ์ทุกเมนูใช้ warehouse และ department จริงของบัญชี
+  const hasFullAccess =
+    normalizedWarehouse === "CENTER" && normalizedDepartment === "IMP";
+  const isGM = normalizedDepartment === "GM";
+  const isFBP = normalizedDepartment === "FBP";
+  const isTCAS = normalizedDepartment === "TCAS";
+  const isKA = normalizedDepartment === "KA";
+  const normalizedRole = normalizeValue(
+    getText(userInfo?.ROLE, userInfo?.role, userInfo?.user_type)
+  );
+  const isSuperadmin = normalizedRole === "SUPERADMIN";
 
   const menuItems = useMemo<MenuItem[]>(() => {
     const items: MenuItem[] = [
-      {
-        label: "Dashboard",
-        path: PATHS.main.dashboard,
-        icon: LayoutDashboard,
-      },
-      {
-        label: "ขอเพิ่มกองรถ",
-        path: PATHS.main.addFleet,
-        icon: Truck,
-      },
+      { label: "Dashboard", path: PATHS.main.dashboard, icon: LayoutDashboard },
+      { label: "ขอเพิ่มกองรถ", path: PATHS.main.addFleet, icon: Truck },
     ];
 
-    if (isWarehouseView) {
-      return items;
+    if (hasFullAccess || isGM) {
+      items.push({ label: "คำขอจากคลัง", path: PATHS.main.gm, icon: Inbox });
     }
-
-    if (isIMP || normalizedWarehouse === "GM") {
-      items.push({
-        label: "คำขอจากคลัง",
-        path: PATHS.main.gm,
-        icon: Inbox,
-      });
+    if (hasFullAccess || isFBP) {
+      items.push({ label: "รอประเมินกองรถ", path: PATHS.main.waitingFleet, icon: Clock3 });
     }
-
-    if (isIMP || isFBP) {
-      items.push({
-        label: "รอประเมินกองรถ",
-        path: PATHS.main.waitingFleet,
-        icon: Clock3,
-      });
+    if (hasFullAccess || isFBP || isTCAS || isKA) {
+      const children: SubMenuItem[] = [
+        { label: "รถออกใหม่/ทดแทน", path: PATHS.main.trackFleet },
+      ];
+      if (hasFullAccess || isFBP) {
+        children.push({ label: "รถเสริม", disabled: true, tooltip: "กำลังพัฒนา" });
+      }
+      items.push({ label: "ติดตามกองรถ", path: PATHS.main.trackFleet, icon: Route, children });
     }
-
-    if (isAdmin || isSuperadmin) {
-      items.push({
-        label: "ติดตามกองรถ",
-        path: PATHS.main.trackFleet,
-        icon: Route,
-        children: [
-          {
-            label: "รถออกใหม่/ทดแทน",
-            path: PATHS.main.trackFleet,
-          },
-          {
-            label: "รถเสริม",
-            disabled: true,
-            tooltip: "กำลังพัฒนา",
-          },
-        ],
-      });
+    if (hasFullAccess || isFBP || isTCAS) {
+      items.push({ label: "จัดการกระบวนการทำงาน", path: PATHS.main.manageProcess, icon: Settings });
     }
-
-    if (isIMP || isSuperadmin) {
-      items.push(
-        {
-          label: "จัดการกระบวนการทำงาน",
-          path: PATHS.main.manageProcess,
-          icon: Settings,
-        },
-        {
-          label: "จัดการการใช้งาน",
-          path: PATHS.main.manageUser,
-          icon: Shield,
-        }
-      );
+    if (hasFullAccess || isSuperadmin) {
+      items.push({ label: "จัดการการใช้งาน", path: PATHS.main.manageUser, icon: Shield });
     }
-
     return items;
-  }, [
-    isWarehouseView,
-    isIMP,
-    isFBP,
-    isAdmin,
-    isSuperadmin,
-    normalizedWarehouse,
-  ]);
+  }, [hasFullAccess, isGM, isFBP, isTCAS, isKA, isSuperadmin]);
 
   // ใช้ฝ่ายต้นฉบับ เพื่อให้เปลี่ยนกลับได้
   // แม้เลือกฝ่ายอื่นหรือเลือกคลังอยู่

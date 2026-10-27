@@ -160,6 +160,9 @@ export default function NewVehicleRequestModal({
     };
 
     const replacementTypesRequiringLicense = [
+        "รถใหม่ทดแทนรถลาออก และรถตัดออกจากระบบ",
+        "รถใหม่ทดแทนรถอายุ 7 ปี",
+        "รถใหม่ทดแทนรถเสียซ่อม",
         "รถทดแทน",
         "รถทดแทน 7 ปี",
         "รถหมดอายุ",
@@ -262,54 +265,6 @@ export default function NewVehicleRequestModal({
 
         return centerFields.some((value) => normalizeText(value) === "CENTER");
     }, [userInfo]);
-
-    const isCenterZeroFields = useMemo(() => {
-        const fleetType = formData.fleet_type.trim();
-
-        return (
-            isCenterUser &&
-            (fleetType === "รถทดแทน 7 ปี" || fleetType === "รถทดแทนรถลาออก" || fleetType === "รถทดแทน")
-        );
-    }, [isCenterUser, formData.fleet_type]);
-
-    useEffect(() => {
-        if (!open) return;
-
-        console.log("========== CENTER ZERO FIELDS DEBUG ==========");
-        console.log("warehouse:", userInfo?.warehouse || userInfo?.WAREHOUSE);
-        console.log("department:", userInfo?.department || userInfo?.DEPARTMENT);
-        console.log("fleet_type:", formData.fleet_type);
-        console.log("isCenterUser:", isCenterUser);
-        console.log("isCenterZeroFields:", isCenterZeroFields);
-        console.log("==============================================");
-    }, [open, userInfo, formData.fleet_type, isCenterUser, isCenterZeroFields]);
-
-    useEffect(() => {
-        if (!open) return;
-
-        setFormData((prev) => {
-            if (isCenterZeroFields) {
-                return {
-                    ...prev,
-                    workload: "0",
-                    truckturn: "0",
-                };
-            }
-
-            const cameFromCenterZeroFields =
-                isCenterUser && prev.workload === "0" && prev.truckturn === "0";
-
-            if (cameFromCenterZeroFields) {
-                return {
-                    ...prev,
-                    workload: "",
-                    truckturn: "",
-                };
-            }
-
-            return prev;
-        });
-    }, [open, isCenterUser, isCenterZeroFields]);
 
     const requestBy = useMemo(() => {
         if (!userInfo) return "";
@@ -695,16 +650,6 @@ export default function NewVehicleRequestModal({
                 };
                 
                 setUserInfo(mergedUserInfo);
-                
-                console.log("========== USER DEPARTMENT DEBUG ==========");
-                console.log("USER INFO:", mergedUserInfo);
-                console.log("userInfo.warehouse:", mergedUserInfo.warehouse);
-                console.log("userInfo.DEPARTMENT:", mergedUserInfo.DEPARTMENT);
-                console.log("userInfo.team:", mergedUserInfo.team);
-                console.log("userInfo.TEAM:", mergedUserInfo.TEAM);
-                console.log("userInfo.warehouse:", mergedUserInfo.warehouse);
-                console.log("userInfo.WAREHOUSE:", mergedUserInfo.WAREHOUSE);
-                console.log("===========================================");
 
             let parsedSelectedDC: WarehouseItem | null = null;
 
@@ -937,16 +882,6 @@ export default function NewVehicleRequestModal({
 
     useEffect(() => {
         if (!open) return;
-
-        console.log("========== DC CODE MATCH DEBUG ==========");
-        console.log("USER WAREHOUSE:", userWarehouse);
-        console.log("CENTER MODE:", isCenterMode);
-        console.log("DC CODE USED FOR FILTER:", dcCode);
-        console.log("NORMALIZED USER DC CODE:", normalizeText(dcCode));
-        console.log("MATCHED TRUCKS BY DC_CODE:", matchedTrucksByDcCode);
-        console.log("TRUCK TYPE OPTIONS:", truckTypeOptions);
-        console.log("LICENSE OPTIONS:", licenseOptions);
-        console.log("=========================================");
     }, [
         open,
         userWarehouse,
@@ -1487,7 +1422,7 @@ export default function NewVehicleRequestModal({
             !formData.fleet_truck_type ||
             !formData.qty ||
             !formData.usage_date ||
-            (!isCenterZeroFields &&
+            (!isCenterUser &&
                 (!formData.workload.trim() || !formData.truckturn.trim()))
         ) {
             setError("กรุณากรอกข้อมูลที่จำเป็นให้ครบ");
@@ -1499,12 +1434,12 @@ export default function NewVehicleRequestModal({
             return;
         }
 
-        if (!isCenterZeroFields && toNumber(formData.workload) <= 0) {
+        if (formData.workload.trim() && toNumber(formData.workload) <= 0) {
             setError("Workload ต้องมากกว่า 0");
             return;
         }
 
-        if (!isCenterZeroFields && Number(formData.truckturn) <= 0) {
+        if (formData.truckturn.trim() && Number(formData.truckturn) <= 0) {
             setError("Truck Turn ต้องมากกว่า 0");
             return;
         }
@@ -1560,10 +1495,8 @@ export default function NewVehicleRequestModal({
                 qty: Number(formData.qty),
 
                 usage_date: formData.usage_date,
-                workload: isCenterZeroFields ? 0 : toNumber(formData.workload),
-                truckturn: isCenterZeroFields
-                    ? 0
-                    : Number(formData.truckturn || 0),
+                workload: formData.workload.trim() ? toNumber(formData.workload) : 0,
+                truckturn: Number(formData.truckturn || 0),
 
                 status: "gm_pending",
                 request_by: requestBy,
@@ -2067,41 +2000,33 @@ export default function NewVehicleRequestModal({
                             <div>
                                 <label className="mb-1 block text-[11px] font-semibold text-slate-500">
                                     ปริมาณงาน (Workload - ชิ้น)
-                                    <span className="text-red-500">*</span>
+                                    {!isCenterUser && <span className="text-red-500">*</span>}
                                 </label>
                                 <input
                                     type="text"
                                     inputMode="numeric"
                                     name="workload"
-                                    value={isCenterZeroFields ? "0" : formData.workload}
+                                    value={formData.workload}
                                     onChange={handleChange}
-                                    disabled={isCenterZeroFields}
-                                    required={!isCenterZeroFields}
-                                    className={`w-full rounded-xl border px-3 py-2 text-[12px] outline-none ${isCenterZeroFields
-                                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
-                                        : "border-slate-300 focus:border-blue-500"
-                                        }`}
+                                    required={!isCenterUser}
+                                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500"
                                     placeholder="0"
                                 />
                             </div>
 
                             <div>
                                 <label className="mb-1 block text-[11px] font-semibold text-slate-500">
-                                    จำนวนรอบรถ (Truck Turn)<span className="text-red-500">*</span>
+                                    จำนวนรอบรถ (Truck Turn){!isCenterUser && <span className="text-red-500">*</span>}
                                 </label>
                                 <input
                                     type="number"
                                     name="truckturn"
-                                    value={isCenterZeroFields ? "0" : formData.truckturn}
+                                    value={formData.truckturn}
                                     min={0}
                                     step="0.01"
                                     onChange={handleChange}
-                                    disabled={isCenterZeroFields}
-                                    required={!isCenterZeroFields}
-                                    className={`w-full rounded-xl border px-3 py-2 text-[12px] outline-none ${isCenterZeroFields
-                                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
-                                        : "border-slate-300 focus:border-blue-500"
-                                        }`}
+                                    required={!isCenterUser}
+                                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500"
                                     placeholder="0.00"
                                 />
                             </div>

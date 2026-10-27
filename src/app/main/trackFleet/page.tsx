@@ -682,18 +682,18 @@ export default function TrackFleetPage() {
                     >
                       {formatNumber(count)}
                       <span className="ml-1 text-xs font-semibold opacity-60">
-                        คัน
+                      รายการ
                       </span>
                     </p>
 
-                    <span
+                    {/* <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive
                         ? "bg-white/15 text-white"
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
                       {formatNumber(itemCount)} รายการ
-                    </span>
+                    </span> */}
                   </div>
                 </button>
               );

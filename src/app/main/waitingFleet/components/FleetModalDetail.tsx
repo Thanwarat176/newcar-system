@@ -251,6 +251,9 @@ const normalizeFleetTypeKey = (value: unknown) =>
         .toUpperCase();
 
 const STANDARD_REPLACEMENT_FLEET_TYPES = new Set([
+    normalizeFleetTypeKey("รถใหม่ทดแทนรถลาออก และรถตัดออกจากระบบ"),
+    normalizeFleetTypeKey("รถใหม่ทดแทนรถอายุ 7 ปี"),
+    normalizeFleetTypeKey("รถใหม่ทดแทนรถเสียซ่อม"),
     normalizeFleetTypeKey("รถทดแทน"),
     normalizeFleetTypeKey("รถทดแทน 7 ปี"),
     normalizeFleetTypeKey("รถทดแทนรถลาออก"),
@@ -954,16 +957,6 @@ export default function FleetModalDetail({
                                     ? result.result
                                     : [];
 
-                console.log("========== WORKLOAD API ==========");
-                console.log("RAW:", result);
-                console.log("DAILY:", result?.Daily);
-                console.log("COUNT:", list.length);
-                console.log("FIRST ITEM:", list[0]);
-                console.log("CURRENT DC_CODE:", data.dc_code);
-                console.log("TODAY:", todayKey);
-                console.log("CURRENT MONTH:", currentMonthKey);
-                console.log("==================================");
-
                 setWorkloads(list);
             } catch (err) {
                 console.error("FETCH WORKLOAD ERROR:", err);
@@ -994,8 +987,6 @@ export default function FleetModalDetail({
                     `https://lite.cpall.co.th/Logistic/daily-fleet-management-v2/api/get_fleet_check_all.php` +
                     `?dc=${encodeURIComponent(normalizedDcCode)}`;
 
-                console.log("FLEET CHECK URL:", url);
-
                 const response = await fetch(url, {
                     method: "GET",
                     cache: "no-store",
@@ -1014,8 +1005,6 @@ export default function FleetModalDetail({
                         `Fleet Check API ไม่ได้ส่ง JSON กลับมา: ${responseText}`
                     );
                 }
-
-                console.log("FLEET CHECK RESPONSE:", result);
 
                 if (!response.ok) {
                     throw new Error(
@@ -1151,16 +1140,6 @@ export default function FleetModalDetail({
             )
         );
 
-        console.log("========== CHECK DC_CODE MATCH ==========");
-        console.log("DC_CODE จากรายการที่กด:", data.dc_code);
-        console.log("DC_CODE หลัง normalize:", currentDcCode);
-        console.log("จำนวนข้อมูล workload ทั้งหมด:", workloads.length);
-        console.log("DC_CODE ทั้งหมดใน API workload:", allApiDcCodes);
-        console.log("DC_CODE ที่ตรงกัน:", matchedDcCodes);
-        console.log("จำนวนแถวที่ DC_CODE ตรงกัน:", matchedRows.length);
-        console.log("ข้อมูลแถวที่ตรงกัน:", matchedRows);
-        console.log("=========================================");
-
         return matchedRows;
     }, [workloads, data.dc_code]);
 
@@ -1176,11 +1155,6 @@ export default function FleetModalDetail({
 
             return apiDate === todayKey;
         });
-
-        console.log("========== TODAY WORKLOAD ==========");
-        console.log("TODAY:", todayKey);
-        console.log("MATCHED TODAY:", matched);
-        console.log("===================================");
 
         return matched || null;
     }, [workloadRowsByCurrentDc, todayKey]);
@@ -1387,14 +1361,6 @@ export default function FleetModalDetail({
                                 ? result.Data
                                 : [];
 
-                console.log("========== FLEET CHECK API ==========");
-                console.log("RAW:", result);
-                console.log("COUNT:", list.length);
-                console.log("FIRST ITEM:", list[0]);
-                console.log("CURRENT DC_CODE:", data.dc_code);
-                console.log("CURRENT TRUCK TYPE:", data.fleet_truck_type);
-                console.log("=====================================");
-
                 setFleetChecks(list);
             } catch (err) {
                 console.error("FETCH FLEET CHECK ERROR:", err);
@@ -1432,16 +1398,6 @@ export default function FleetModalDetail({
 
                 return new Date(dateB).getTime() - new Date(dateA).getTime();
             });
-
-        console.log("========== DFM ISSUE FILTER ==========");
-        console.log("data.dc_code:", currentIssueDcCode);
-        console.log("data.fleet_truck_type:", currentIssueTruckType);
-        console.log("activeIssueTruckType:", activeIssueTruckType);
-        console.log("issuePeriods all:", issuePeriods.length);
-        console.log("match dc only:", issueRowsByCurrentDc.length);
-        console.log("match dc + truck_type:", rows.length);
-        console.log("rows:", rows);
-        console.log("=====================================");
 
         return rows;
     }, [
@@ -1585,9 +1541,6 @@ export default function FleetModalDetail({
                     }),
                 );
 
-                console.log("TRUCK DC_CODE:", dcCode);
-                console.log("TRUCK ROWS:", matchedRows);
-                console.log("UNIQUE TRUCK TYPES:", uniqueRows);
             } catch (error: unknown) {
                 if (
                     error instanceof DOMException &&
@@ -2239,26 +2192,43 @@ export default function FleetModalDetail({
 
     const saveSupplierRating = async (row: ApprovedSupplierRow) => {
         const rating = supplierRatings[row.rowId];
-
+    
         const supplier = suppliers.find(
             (item) =>
                 normalizeText(getSupplierCompanyName(item)) ===
                 normalizeText(row.companyName)
         );
-
-        const supplierId = supplier ? getSupplierCompanyId(supplier) : "";
-
+    
+        const supplierId = supplier
+            ? getSupplierCompanyId(supplier)
+            : "";
+    
         if (!supplierId || !rating) {
-            setMessage({ type: "error", text: "กรุณาเลือกผู้ให้บริการจากรายการและเลือกระดับคะแนน" });
+            setMessage({
+                type: "error",
+                text: "กรุณาเลือกผู้ให้บริการจากรายการและเลือกระดับคะแนน",
+            });
             return;
         }
-
+    
+        // ใช้ข้อมูลผู้ใช้งานจากฟังก์ชันเดิมในไฟล์นี้
+        const updateBy = getCurrentUserText();
+    
+        if (!updateBy) {
+            setMessage({
+                type: "error",
+                text: "ไม่พบข้อมูลผู้บันทึกคะแนน กรุณาเข้าสู่ระบบใหม่",
+            });
+            return;
+        }
+    
         setRatingSavingRowId(row.rowId);
+    
         setRatingMessages((current) => ({
             ...current,
             [row.rowId]: "",
         }));
-
+    
         try {
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/rate_supplier.php",
@@ -2271,13 +2241,18 @@ export default function FleetModalDetail({
                     body: JSON.stringify({
                         id: supplierId,
                         rating,
+                        update_by: updateBy,
                     }),
                 }
             );
-
+    
             const responseText = await response.text();
-            let result: { success?: boolean; message?: string } | null = null;
-
+    
+            let result: {
+                success?: boolean;
+                message?: string;
+            } | null = null;
+    
             try {
                 result = JSON.parse(responseText);
             } catch {
@@ -2286,22 +2261,34 @@ export default function FleetModalDetail({
                     .replace(/&nbsp;/g, " ")
                     .replace(/\s+/g, " ")
                     .trim();
-
+    
                 throw new Error(
-                    `API ตอบกลับไม่ใช่ JSON (HTTP ${response.status}): ${serverMessage.slice(0, 500) || "ไม่มีข้อความตอบกลับ"
+                    `API ตอบกลับไม่ใช่ JSON (HTTP ${response.status}): ${
+                        serverMessage.slice(0, 500) ||
+                        "ไม่มีข้อความตอบกลับ"
                     }`
                 );
             }
-
+    
             if (!response.ok || result?.success !== true) {
                 throw new Error(
-                    result?.message || `บันทึกคะแนนไม่สำเร็จ (${response.status})`
+                    result?.message ||
+                    `บันทึกคะแนนไม่สำเร็จ (${response.status})`
                 );
             }
-
-            setMessage({ type: "success", text: "บันทึกคะแนนผู้ให้บริการเรียบร้อยแล้ว" });
+    
+            setMessage({
+                type: "success",
+                text: "บันทึกคะแนนผู้ให้บริการเรียบร้อยแล้ว",
+            });
         } catch (error) {
-            setMessage({ type: "error", text: error instanceof Error ? error.message : "บันทึกคะแนนไม่สำเร็จ" });
+            setMessage({
+                type: "error",
+                text:
+                    error instanceof Error
+                        ? error.message
+                        : "บันทึกคะแนนไม่สำเร็จ",
+            });
         } finally {
             setRatingSavingRowId(null);
         }
@@ -2762,8 +2749,6 @@ export default function FleetModalDetail({
                 payload.partial_approval = payload.status !== "progress";
             }
 
-            console.log("FBP APPROVE PAYLOAD:", payload);
-
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/waiting_fleet_save.php",
                 {
@@ -2813,6 +2798,15 @@ export default function FleetModalDetail({
                 setDecisionCompleted(true);
                 closeAfterPopupRef.current = true;
                 refreshAfterPopupRef.current = true;
+            }
+
+            if (rowToSave && isStandardReplacementType && Number(payload.unassigned_license_qty) > 0) {
+                setApprovedSuppliers((current) => {
+                    // ใช้แถวที่ยังไม่บันทึกอยู่แล้วก่อน เพื่อไม่เพิ่มแถวซ้ำ
+                    const savedIds = new Set([...persistedRowIds, ...rowsToSave.map((row) => row.rowId)]);
+                    if (current.some((row) => !savedIds.has(row.rowId))) return current;
+                    return [...current, createSupplierRow(1)];
+                });
             }
 
             if (rowToSave) {
@@ -3008,12 +3002,10 @@ export default function FleetModalDetail({
 
             const payload = {
                 id: Number(data.id),
-                status: "rejected",
+                status: "reject_by_fbp",
                 approved_by: approvedBy,
                 reject_reason: rejectReason.trim(),
             };
-
-            console.log("GM REJECT PAYLOAD:", payload);
 
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/request_gm_update.php",
@@ -3431,11 +3423,6 @@ export default function FleetModalDetail({
                 updated_by: updatedBy,
             };
 
-            console.log(
-                "UPDATE REQUEST STATUS PAYLOAD:",
-                statusPayload
-            );
-
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/update_request_status.php",
                 {
@@ -3690,11 +3677,6 @@ export default function FleetModalDetail({
             updateSingleVehicleState(rowKey, {
                 error: "",
             });
-
-            console.log(
-                "SINGLE VEHICLE PAYLOAD:",
-                payload
-            );
 
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/request_save.php",
@@ -3955,11 +3937,6 @@ export default function FleetModalDetail({
             updateSingleVehicleState(rowKey, {
                 error: "",
             });
-
-            console.log(
-                "REJECT SINGLE VEHICLE PAYLOAD:",
-                payload
-            );
 
             const response = await fetch(
                 "http://192.168.158.210/api_new_truck/api/request_save.php",
