@@ -349,6 +349,19 @@ export default function WaitingFleetPage() {
       </tbody></table></div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
     </section>
+    
+    {selectedRequest && portalTarget && createPortal(
+      <FleetModalDetail open={true} data={selectedRequest} allRequests={scopedRequests}
+        onClose={() => setSelectedRequest(null)} onSuccess={() => { void fetchRequests(); }} />, portalTarget
+    )}
+    {openExportModal && portalTarget && createPortal(scopedRequests.length > 0 ? (
+      <ExportWaitingFleetModal open={true} onClose={() => setOpenExportModal(false)}
+        requests={scopedRequests} dcLabel={dcLabel} />
+    ) : (
+      <div role="dialog" aria-modal="true" className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-4">
+        <div className="rounded-2xl bg-white p-6 shadow-xl"><p>ไม่พบข้อมูลสำหรับดึงรายงาน</p><button type="button" onClick={() => setOpenExportModal(false)} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-white">ปิด</button></div>
+      </div>
+    ), portalTarget)}
     <style jsx>{`main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { main :global(*) { animation: none !important; transition: none !important; } }`}</style>
   </main></div>;
 }
