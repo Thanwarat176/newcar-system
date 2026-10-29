@@ -1171,6 +1171,13 @@ function FleetStatusByDc({
     }, 0);
 
   // Export the same filtered rows, visible stages and selected months as the web tables.
+  const syncReportScroll = (source: "stage" | "month") => {
+    const from = source === "stage" ? stageScrollRef.current : monthScrollRef.current;
+    const to = source === "stage" ? monthScrollRef.current : stageScrollRef.current;
+    if (from && to && Math.abs(to.scrollTop - from.scrollTop) > 1) to.scrollTop = from.scrollTop;
+    setVendorTooltip(null);
+  };
+
   const exportFleetExcel = async () => {
     if (exportingFleetExcel || isLoading || activeError || !stageGroups.length) return;
     setExportingFleetExcel(true);
@@ -1322,6 +1329,56 @@ function FleetStatusByDc({
   );
   const isLoading = suppliedRequests === undefined && loading;
   const activeError = suppliedRequests === undefined ? error : "";
+  // Keep corresponding headers and rows aligned, including wrapped step names.
+  useEffect(() => {
+    const left = stageScrollRef.current;
+    const right = monthScrollRef.current;
+    if (!left || !right) return;
+    let frame = 0;
+    const align = () => {
+      const pairs: [HTMLElement, HTMLElement][] = [];
+      const leftPanel = left.parentElement?.querySelector<HTMLElement>(".fleet-panel-header");
+      const rightPanel = right.parentElement?.querySelector<HTMLElement>(".fleet-panel-header");
+      if (leftPanel && rightPanel) pairs.push([leftPanel, rightPanel]);
+      const leftRows = left.querySelectorAll<HTMLTableRowElement>("thead tr, tbody tr");
+      const rightRows = right.querySelectorAll<HTMLTableRowElement>("thead tr, tbody tr");
+      leftRows.forEach((row, index) => {
+        if (rightRows[index]) pairs.push([row, rightRows[index]]);
+      });
+      for (const [a, b] of pairs) { a.style.height = "auto"; b.style.height = "auto"; }
+      const heights = pairs.map(([a, b]) => Math.max(a.offsetHeight, b.offsetHeight));
+      pairs.forEach(([a, b], index) => {
+        a.style.height = `${heights[index]}px`;
+        b.style.height = `${heights[index]}px`;
+      });
+    };
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(align); };
+    const previousWidths = new WeakMap<Element, number>();
+    const observer = new ResizeObserver(entries => {
+      let changed = false;
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        if (previousWidths.get(entry.target) !== width) {
+          previousWidths.set(entry.target, width);
+          changed = true;
+        }
+      }
+      if (changed) schedule();
+    });
+    observer.observe(left);
+    observer.observe(right);
+    window.addEventListener("resize", schedule);
+    let disposed = false;
+    void document.fonts.ready.then(() => { if (!disposed) schedule(); });
+    schedule();
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", schedule);
+    };
+  }, [stageGroups, orderedStageColumns, selectedSummaryMonths, isLoading, activeError]);
+
   const timelineLoading = isLoading || (needsDashboard && dashboardLoading);
   const timelineError = activeError || (needsDashboard ? dashboardError : "");
   const selectedFleetType =
@@ -1715,6 +1772,12 @@ function FleetStatusByDc({
   }
   .fleet-dashboard .delivery-stage-panel { padding-left: 24px; }
 }
+
+/* Scale the original dashboard to 125% at normal browser zoom. */
+.fleet-dashboard{zoom:1.25}
+.fleet-dashboard .fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);overflow-x:auto;align-items:start}
+.fleet-dashboard .fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:auto;min-height:78px;max-height:none;flex-wrap:wrap}
+.fleet-dashboard .fleet-stage-layout .fleet-panel-description{max-height:none;overflow:visible}
       `}
 </style>
       <header className="fleet-heading">
@@ -2200,7 +2263,7 @@ function FleetStatusByDc({
       <div className="fleet-stage-layout">
         <article className="fleet-panel fleet-stage-panel">
           <div className="fleet-panel-header"><div><h3>ประเภทรถแยกตามขั้นตอน</h3><p className="fleet-panel-description">{dcTypeFilter === "all" ? "ทุกประเภทคลัง" : dcTypeFilter} · จัดกลุ่มตามคลังและประเภทรถ · นับขั้นตอนปัจจุบันของแต่ละคัน · ยอดรวมแยก STEP 1–8 และ 1–10</p></div><button type="button" className="fleet-step-toggle" aria-expanded={showClosedSteps} onClick={() => { setShowClosedSteps(open => !open); setVendorTooltip(null); }}>{showClosedSteps ? "▾ ซ่อน STEP 9–10" : "▸ แสดง STEP 9–10"}</button></div>
-          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={() => setVendorTooltip(null)}>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={stageScrollRef} onScroll={() => syncReportScroll("stage")}>
             <table className="fleet-stage-table fleet-locked-table">
               <thead><tr><th scope="col" className="fleet-lock-dc">กลุ่ม DC</th><th scope="col" className="fleet-lock-truck">คลัง / ประเภทรถ</th>{orderedStageColumns.map(column => typeof column === "string" ? <th key={column} scope="col" className="fleet-total-heading">{column === "total8" ? "รวม STEP 1–8" : "รวม STEP 1–10"}<span className="fleet-header-unit">จำนวนคัน</span></th> : <th key={column.key} scope="col" data-stage={column.level}><span className="fleet-step-name">{column.level ? `[${column.level}] ` : ""}{column.name}</span></th>)}</tr></thead>
               <tbody>{stageGroups.map(([key, group], groupIndex) => <Fragment key={key}>
@@ -2243,7 +2306,7 @@ function FleetStatusByDc({
             <p className="fleet-panel-description">
               ตาม warehouse_plan_date · จำนวนรายเดือน · ปี {selectedYear + 543}
             </p><button type="button" className="fleet-month-counter fleet-month-open" aria-haspopup="dialog" onClick={() => monthPickerDialogRef.current?.showModal()}>เลือกเดือน · {selectedSummaryMonths.length}/6 ▾</button></div>
-          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={() => setVendorTooltip(null)}>
+          {isLoading || activeError || stageGroups.length === 0 ? <div className="fleet-empty">{isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถแสดงข้อมูลได้" : "ไม่พบข้อมูลตามตัวกรอง"}</div> : <div className="fleet-stage-scroll" ref={monthScrollRef} onScroll={() => syncReportScroll("month")}>
             <table className="fleet-stage-table fleet-month-table"><thead><tr>{sixMonthSummary.map(month => <th key={month.key} scope="col"><span className="fleet-step-name">{month.label}</span></th>)}</tr></thead>
               <tbody>{stageGroups.map(([key, group]) => <Fragment key={key}>
                 <tr className="fleet-dc-group"><td colSpan={selectedSummaryMonths.length}><span className="fleet-warehouse-marker" aria-hidden="true" />{group.dcCode}</td></tr>
@@ -2797,13 +2860,13 @@ function FleetSearchFilter({ label, value, options, onChange, disabled = false }
           width: position.width, maxHeight: position.height, overflowY: "auto", overflowX: "hidden",
           zIndex: 10050, padding: 4, boxSizing: "border-box", background: "#fff", color: "#304c70",
           border: "1px solid #dce5f0", borderRadius: 10, boxShadow: "0 8px 24px #17315326",
-          fontFamily: "inherit", fontSize: 12 }}>
+          fontFamily: "inherit", fontSize: 15, lineHeight: 1.6 }}>
         {matches.length ? matches.map((option, index) => <div key={option.value}
           id={`${listId}-${index}`} role="option" aria-selected={option.value === value}
           onPointerDown={event => event.preventDefault()}
           onClick={() => choose(option)}
           onMouseEnter={() => setActive(index)}
-          style={{ padding: "9px 10px", borderRadius: 6, cursor: "pointer", overflowWrap: "anywhere",
+          style={{ padding: "11px 13px", minHeight: 44, borderRadius: 6, cursor: "pointer", overflowWrap: "anywhere",
             background: index === activeIndex ? "#edf4ff" : "transparent",
             fontWeight: option.value === value ? 700 : 400 }}>
           {option.label}

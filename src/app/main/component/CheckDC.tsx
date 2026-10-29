@@ -28,6 +28,8 @@ export interface RequestItem {
   fleet_truck_type: string;
   license_replace: string[] | string;
   qty: number;
+  approve_qty_gm?: number | string | null;
+  approved_qty?: number | string | null;
   usage_date: string;
 
   workload: number | string | null;
@@ -1358,6 +1360,25 @@ export default function CheckDC({
     selectedIssueTruckType,
   ]);
 
+  const workloadChartData = useMemo(() => {
+    return monthlyWorkloadRows.map((item) => {
+      const record = item as Record<string, unknown>;
+
+      const rawDate =
+        getValueIgnoreCase(record, "DATE") ||
+        getValueIgnoreCase(record, "date");
+
+      const dateKey = normalizeDateKey(String(rawDate || ""));
+
+      return {
+        dateKey,
+        dateLabel: formatThaiDate(dateKey),
+        forecast: getForecastFc(item),
+        workload: getWorkloadFc(item),
+      };
+    });
+  }, [monthlyWorkloadRows]);
+
   if (loadingRequests) {
     return (
       <section className="w-full rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -1393,24 +1414,7 @@ export default function CheckDC({
       { key: "workload", label: "Workload", count: null },
     ];
 
-  const workloadChartData = useMemo(() => {
-    return monthlyWorkloadRows.map((item) => {
-      const record = item as Record<string, unknown>;
 
-      const rawDate =
-        getValueIgnoreCase(record, "DATE") ||
-        getValueIgnoreCase(record, "date");
-
-      const dateKey = normalizeDateKey(String(rawDate || ""));
-
-      return {
-        dateKey,
-        dateLabel: formatThaiDate(dateKey),
-        forecast: getForecastFc(item),
-        workload: getWorkloadFc(item),
-      };
-    });
-  }, [monthlyWorkloadRows]);
 
   const workloadChartWidth = Math.max(
     460,
@@ -1763,13 +1767,29 @@ export default function CheckDC({
                     code: "TR",
                   },
                   {
-                    label: "จำนวนที่ขอ",
+                    label: "จำนวนที่คลังขอ",
                     value: `${formatNumber(
                       resolvedData.qty
                     )} คัน`,
                     sub: "Requested quantity",
                     code: "QTY",
                   },
+                  ...(hasDisplayValue(resolvedData.approve_qty_gm)
+                    ? [{
+                        label: "จำนวนที่ GM อนุมัติ",
+                        value: `${formatNumber(resolvedData.approve_qty_gm)} คัน`,
+                        sub: "GM approved quantity",
+                        code: "GM",
+                      }]
+                    : []),
+                  ...(hasDisplayValue(resolvedData.approved_qty)
+                    ? [{
+                        label: "จำนวนที่ FBP ประเมินกองรถและอนุมัติ",
+                        value: `${formatNumber(resolvedData.approved_qty)} คัน`,
+                        sub: "FBP assessed and approved quantity",
+                        code: "FBP",
+                      }]
+                    : []),
                 ].map((item) => (
                   <div
                     key={item.label}

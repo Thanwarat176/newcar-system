@@ -254,6 +254,7 @@ export default function TrackFleetPage() {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
+  const [selectedDocumentNo, setSelectedDocumentNo] = useState("");
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [openDetailModal, setOpenDetailModal] = useState(false);
   const [selectedDocumentLicenses, setSelectedDocumentLicenses] = useState<string[]>([]);
@@ -476,11 +477,17 @@ export default function TrackFleetPage() {
     }
     const request = assessmentReference(document.vehicles);
     if (!request) { setError("ไม่พบข้อมูลรถของเอกสารนี้ กรุณารีเฟรชข้อมูล"); return; }
+    setSelectedDocumentNo(document.running_doc);
     setSelectedDocumentLicenses(documentLicenses(document.vehicles));
     setSelectedRequest(request);
     setOpenDetailModal(true);
   };
-  const handleCloseDetail = () => { setOpenDetailModal(false); setSelectedRequest(null); };
+  const handleCloseDetail = () => {
+    setOpenDetailModal(false);
+    setSelectedRequest(null);
+    setSelectedDocumentNo("");
+    setSelectedDocumentLicenses([]);
+  };
   const addVehicleSearchItems = (value: string) => {
     const items = value.split(/[,;\n]+/).map((v) => v.trim()).filter(Boolean);
     if (!items.length) return;
@@ -899,7 +906,7 @@ export default function TrackFleetPage() {
 
       {portalTarget && createPortal(<div style={{ position: "relative", zIndex: 100000 }}>
         <ExportTrackFleet open={openExportModal} onClose={() => setOpenExportModal(false)} requests={visibleRequests.map((item) => ({ ...item, id: item.id == null || item.id === "" ? null : Number.isSafeInteger(Number(item.id)) ? Number(item.id) : null }))} dcLabel={selectedDcLabel} exportApiUrl={exportApiUrl} />
-        <FlowAssessmentModal open={openDetailModal} requestId={selectedRequest?.request_id ?? null} vehicleNo={selectedRequest?.unit_code || selectedRequest?.warehouse_vehicle_no || selectedRequest?.vehicle_no || null} documentMode referenceVehicleNo={selectedRequest?.warehouse_vehicle_no ?? selectedRequest?.vehicle_info?.vehicle_no ?? null} replacedOldLicenses={selectedDocumentLicenses} onClose={handleCloseDetail} />
+        <FlowAssessmentModal documentNo={selectedDocumentNo} open={openDetailModal} requestId={selectedRequest?.request_id ?? null} vehicleNo={selectedRequest?.unit_code || selectedRequest?.warehouse_vehicle_no || selectedRequest?.vehicle_no || null} documentMode referenceVehicleNo={selectedRequest?.warehouse_vehicle_no ?? selectedRequest?.vehicle_info?.vehicle_no ?? null} replacedOldLicenses={selectedDocumentLicenses} onClose={handleCloseDetail} />
       </div>, portalTarget)}
 
     </div>

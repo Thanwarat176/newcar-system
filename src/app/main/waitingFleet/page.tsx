@@ -5,13 +5,12 @@ import { createPortal } from "react-dom";
 import { DateRange } from "react-date-range";
 import type { RangeKeyDict } from "react-date-range";
 import { th } from "date-fns/locale";
-import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Star, Truck, Warehouse, X } from "lucide-react";
+import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import FleetModalDetail from "./components/FleetModalDetail";
 import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
-import SupplierRatingModal from "./components/SupplierRatingModal";
 
 interface SelectedDC {
   DC_CODE?: string; DC_NAME?: string; DC_TYPE?: string;
@@ -24,6 +23,7 @@ interface RequestItem {
   date: string; request_date?: string; fleet_type: string; fleet_truck_type: string;
   license_replace: string[] | string; qty: number;
   approve_qty_gm?: number | string | null; approved_qty?: number | string | null;
+  not_approved_qty?: number | string | null;
   usage_date: string; workload: number; truckturn: number; status: string;
   request_by: string; remark: string; details?: RequestDetailItem[];
   summary?: { total_requested: number; total_approved: number; total_rejected: number };
@@ -65,6 +65,7 @@ const COLUMNS: { label: string; sort?: SortKey }[] = [
 // Group approved, success and progress under the approved card.
 function normalizeStatus(value: unknown): string {
   const status = text(value).toLowerCase();
+  if (status === "partial_approved") return "fbp_pending";
   return ["approved", "success", "progress"].includes(status) ? "approved" : status;
 }
 function statusLabel(raw: string): string {
@@ -114,10 +115,13 @@ function licensesOf(value: string[] | string): string[] {
 }
 function makeRow(item: RequestItem): Row {
   const licenses = licensesOf(item.license_replace);
-  // Count requested vehicles consistently for every status card.
-  const requestedQty = item.summary?.total_requested != null
-    ? quantity(item.summary.total_requested)
-    : quantity(item.approve_qty_gm) > 0 ? quantity(item.approve_qty_gm) : quantity(item.qty);
+  // ใช้ยอด GM ก่อนเสมอ รวมถึงค่า 0; รองรับข้อมูลเก่าที่ไม่มียอด GM
+  const hasGmQty = item.approve_qty_gm !== null &&
+    item.approve_qty_gm !== undefined &&
+    String(item.approve_qty_gm).trim() !== "";
+  const requestedQty = hasGmQty
+    ? quantity(item.approve_qty_gm)
+    : quantity(item.summary?.total_requested ?? item.qty);
   return { item, status: normalizeStatus(item.status), requestedQty, licenses,
     requestDate: normalizeDate(item.request_date || item.date),
     searchText: [item.running_doc, item.dc_type, item.dc_code, item.fleet_type, item.fleet_truck_type, item.request_by, item.remark, licenses.join(" ")].map(text).join(" ").toLowerCase() };
@@ -139,14 +143,15 @@ function FilterSelect({ label, value, options, onChange, icon: Icon, className =
 }
 function QuantityCell({ row }: { row: Row }) {
   const { item } = row;
-  const approved = quantity(item.summary?.total_approved);
-  const rejected = quantity(item.summary?.total_rejected);
-  if (!approved && !rejected) return <span className="rounded-lg bg-slate-100 px-3 py-1 font-semibold">{number(row.requestedQty)}</span>;
+  const approved = quantity(item.approved_qty ?? item.summary?.total_approved);
+  const rejected = quantity(item.not_approved_qty ?? item.summary?.total_rejected);
+  const pending = Math.max(row.requestedQty - approved - rejected, 0);
   return <div className="space-y-2">
-    <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 text-center">
-      <div className="p-2"><p className="text-[11px] text-slate-400">จำนวนขอ</p><strong>{number(row.requestedQty)}</strong></div>
-      <div className="bg-emerald-50 p-2 text-emerald-700"><p className="text-[11px]">อนุมัติ</p><strong>{number(approved)}</strong></div>
-      <div className="bg-rose-50 p-2 text-rose-700"><p className="text-[11px]">ไม่อนุมัติ</p><strong>{number(rejected)}</strong></div>
+    <div className={`grid ${pending > 0 ? "grid-cols-4" : "grid-cols-3"} overflow-hidden rounded-xl border border-slate-200 text-center`}>
+      <div className="bg-slate-50 p-2"><p className="whitespace-nowrap text-[11px] text-slate-500">คำขอ</p><strong>{number(row.requestedQty)}</strong></div>
+      {pending > 0 && <div className="bg-amber-50 p-2 text-amber-700"><p className="whitespace-nowrap text-[11px]">รออนุมัติ</p><strong>{number(pending)}</strong></div>}
+      <div className="bg-emerald-50 p-2 text-emerald-700"><p className="whitespace-nowrap text-[11px]">อนุมัติ</p><strong>{number(approved)}</strong></div>
+      <div className="bg-rose-50 p-2 text-rose-700"><p className="whitespace-nowrap text-[11px]">ไม่อนุมัติ</p><strong>{number(rejected)}</strong></div>
     </div>
     {!!item.approved_trucks?.length && <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-2"><p className="mb-1 font-semibold text-emerald-700">รายการที่อนุมัติ:</p><ul className="space-y-1">{item.approved_trucks.map((truck, index) => <li key={index} className="text-[11px] text-slate-600"><strong>{truck.old_license}</strong> → {truck.new_truck_type} ({truck.new_vendor_name || "ไม่ระบุ Vendor"})</li>)}</ul></div>}
     {!!item.rejected_trucks?.length && <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-2"><p className="mb-1 font-semibold text-rose-700">รายการที่ไม่อนุมัติ:</p><ul className="space-y-1">{item.rejected_trucks.map((truck, index) => <li key={index} className="text-[11px] text-slate-600"><strong>{truck.old_license}</strong> ({truck.reason})</li>)}</ul></div>}
@@ -161,7 +166,6 @@ export default function WaitingFleetPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openExportModal, setOpenExportModal] = useState(false);
-  const [openSupplierRatingModal, setOpenSupplierRatingModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchText, setSearchText] = useState("");
@@ -255,7 +259,7 @@ export default function WaitingFleetPage() {
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const activePage = Math.min(Math.max(currentPage, 1), totalPages);
   const pageStart = (activePage - 1) * pageSize;
-  useEffect(() => { setCurrentPage(1); }, [statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange, selectedDcCode, userWarehouse, pageSize, sortConfig]);
+  useEffect(() => { setCurrentPage(1); }, [statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange, selectedDcCode, userWarehouse, pageSize]);
   useEffect(() => { setCurrentPage(page => Math.min(Math.max(page, 1), totalPages)); }, [totalPages]);
   const pageRows = useMemo(() => sortedRows.slice(pageStart, pageStart + pageSize), [sortedRows, pageStart, pageSize]);
   const groups = useMemo(() => {
@@ -310,7 +314,7 @@ export default function WaitingFleetPage() {
     <header className="mb-4 flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center">
       <div><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p><h1 className="mt-2 flex items-center gap-2 text-lg font-semibold"><Truck size={20} className="text-blue-600" />รอประเมินกองรถ</h1>
         <div className="mt-2 flex flex-wrap gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold"><Warehouse size={12} />{dcLabel}</span><span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">{LABELS[statusFilter]}</span></div></div>
-      <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setOpenSupplierRatingModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-xs font-semibold text-amber-700 hover:bg-amber-100"><Star size={15} />ให้คะแนนผู้ประกอบการ</button><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
+      <div className="flex gap-2"><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
     </header>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-600">{error}</div>}
     <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปรายการทุกหน้าภายใต้ DC ที่มีสิทธิ์ดู</span><span>หน้า {activePage} / {totalPages}</span></div>
@@ -335,13 +339,22 @@ export default function WaitingFleetPage() {
         return <th key={column.label} aria-sort={key ? sortConfig.key === key ? sortConfig.direction === "asc" ? "ascending" : "descending" : "none" : undefined} className={`${CELL} bg-blue-800 text-[11px] font-semibold text-white ${index === 0 ? "sticky left-0 z-30 text-center" : ""}`}>{key ? <button type="button" onClick={() => sort(key)} className="inline-flex items-center gap-1">{column.label}{sortConfig.key !== key ? <ArrowUpDown size={13} /> : sortConfig.direction === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button> : column.label}</th>;
       })}</tr></thead><tbody>
         {loading ? <tr><td colSpan={12} className="py-12 text-center text-slate-400"><RefreshCw size={22} className="mx-auto mb-2 animate-spin text-blue-500" />กำลังโหลดข้อมูล...</td></tr> : !pageRows.length ? <tr><td colSpan={12} className="py-12 text-center text-slate-400"><Search size={24} className="mx-auto mb-2" />ไม่พบข้อมูลตามเงื่อนไขนี้</td></tr> : groups.map(group => <Fragment key={`${group.date}-${group.offset}`}>
-          <tr><td colSpan={12} className="bg-blue-50 px-4 py-2 text-[11px] font-semibold text-blue-600"><span className="inline-flex items-center gap-2"><CalendarDays size={13} />วันที่ขอ: {formatDate(group.date)}<span className="text-slate-400">· {group.rows.length} รายการ</span></span></td></tr>
+          <tr><td colSpan={12} className="bg-blue-50 px-4 py-2 text-[11px] font-semibold text-blue-600"><span className="inline-flex items-center gap-2"><CalendarDays size={13} />วันที่ขอ: {formatDate(group.date)}<button
+            type="button"
+            onClick={() => sort("request_date")}
+            aria-label="สลับการเรียงตามวันที่ขอ"
+            title={sortConfig.key === "request_date" ? `วันที่ขอ: ${sortConfig.direction === "asc" ? "เก่าไปใหม่" : "ใหม่ไปเก่า"} (กดเพื่อสลับ)` : "เรียงตามวันที่ขอ"}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-blue-600 hover:bg-blue-100"
+          >
+            {sortConfig.key !== "request_date" ? <ArrowUpDown size={13} /> : sortConfig.direction === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {sortConfig.key === "request_date" && <span>{sortConfig.direction === "asc" ? "เก่าไปใหม่" : "ใหม่ไปเก่า"}</span>}
+          </button><span className="text-slate-400">· {group.rows.length} รายการ</span></span></td></tr>
           {group.rows.map((row, index) => { const { item } = row; const pending = row.status === "fbp_pending"; return <tr key={`${item.id ?? item.running_doc}-${group.offset + index}`} className="group hover:bg-blue-50/30">
             <td className={`${CELL} sticky left-0 z-10 bg-white text-center group-hover:bg-blue-50`}>{pageStart + group.offset + index + 1}</td>
             <td className={CELL}><p className="font-semibold">{item.running_doc || "-"}</p><p className="mt-1 text-[11px] text-slate-400">ขอ: {formatDate(row.requestDate)}</p></td>
             <td className={CELL}><span className="rounded-md bg-blue-50 px-2 py-1 text-blue-600">{item.dc_type || "-"}</span></td>
             <td className={CELL}><span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-600">{item.dc_code || "-"}</span></td>
-            <td className={CELL}>{item.fleet_type || "-"}</td><td className={CELL}>{item.fleet_truck_type || "-"}</td>
+            <td className="w-[170px] min-w-[170px] max-w-[170px] whitespace-normal break-words px-3 py-3 leading-relaxed">{item.fleet_type || "-"}</td><td className={CELL}>{item.fleet_truck_type || "-"}</td>
             <td className="max-w-[160px] px-3 py-3"><div className="flex flex-wrap gap-1">{row.licenses.length ? <>{row.licenses.slice(0, 2).map((license, i) => <span key={i} title={license} className="max-w-[90px] truncate rounded bg-slate-100 px-2 py-1 text-[11px]">{license}</span>)}{row.licenses.length > 2 && <span title={row.licenses.slice(2).join(", ")} className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-600">+{row.licenses.length - 2}</span>}</> : "-"}</div></td>
             <td className="min-w-[280px] px-3 py-3"><QuantityCell row={row} /></td><td className={CELL}>{formatDate(item.usage_date)}</td><td className={CELL}>{item.request_by || "-"}</td>
             <td className={CELL}><span title={`API status: ${item.status}`} className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ${statusClass(row.status)}`}>{statusLabel(item.status)}</span></td>
@@ -352,13 +365,18 @@ export default function WaitingFleetPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
     </section>
     
-    {openSupplierRatingModal && portalTarget && createPortal(
-      <SupplierRatingModal onClose={() => setOpenSupplierRatingModal(false)} />, portalTarget
-    )}
     {selectedRequest && portalTarget && createPortal(
-      <FleetModalDetail open={true} data={selectedRequest} allRequests={scopedRequests}
-        onClose={() => setSelectedRequest(null)} onSuccess={() => { void fetchRequests(); }} />, portalTarget
-    )}
+  <FleetModalDetail
+    open={true}
+    data={selectedRequest}
+    allRequests={scopedRequests}
+    onClose={() => setSelectedRequest(null)}
+    onSuccess={() => {
+      void fetchRequests();
+    }}
+  />,
+  portalTarget
+)}
     {openExportModal && portalTarget && createPortal(scopedRequests.length > 0 ? (
       <ExportWaitingFleetModal open={true} onClose={() => setOpenExportModal(false)}
         requests={scopedRequests} dcLabel={dcLabel} />
