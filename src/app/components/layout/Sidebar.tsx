@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   usePathname,
   useRouter,
@@ -241,7 +241,7 @@ function matchesMenuPath(
   return matches;
 }
 
-export default function Sidebar({
+function SidebarContent({
   collapsed,
   onToggle,
 }: SidebarProps) {
@@ -1774,5 +1774,13 @@ export default function Sidebar({
         }
       `}</style>
     </div>
+  );
+}
+
+export default function Sidebar(props: SidebarProps) {
+  return (
+    <Suspense fallback={null}>
+      <SidebarContent {...props} />
+    </Suspense>
   );
 }
