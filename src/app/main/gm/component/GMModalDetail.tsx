@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import CheckDC, {
   type IssuePeriodItem,
   type RequestItem,
-} from "../component/CheckDC";
+} from "../../component/CheckDC";
 interface GMModalDetailProps {
   open?: boolean;
   onClose?: () => void;

@@ -23,6 +23,12 @@ import CreateFlowModal from "./CreateFlowModal";
 import DeleteFlowModal from "./DeleteFlowModal";
 import EditFlowModal from "./EditFlowModal";
 
+interface MasterType {
+    id: number | string;
+    type: string;
+    role?: string | null;
+}
+
 interface FlowItem {
     id?: number | string;
     flow_id?: number | string;
@@ -35,6 +41,7 @@ interface FlowItem {
     sla_unit?: string | null;
     updated_at?: string;
     updated_by?: string;
+    create_by?: string;
 }
 
 interface ApiResponse {
@@ -88,6 +95,13 @@ function getFleetType(item: FlowItem): string {
         String(item.fleet_type ?? "").trim() ||
         "ไม่ระบุประเภท"
     );
+}
+
+function formatRole(value?: string | null): string {
+    const roles = Array.from(new Set(String(value ?? "").split(",").map(role => role.trim().toUpperCase()).filter(Boolean)));
+    if (roles.includes("DC") && roles.includes("TC")) return "ขอได้ทั้งคู่";
+    const labels: Record<string, string> = { DC: "คลังขอ", CT: "ส่วนกลางขอ" };
+    return roles.length ? roles.map(role => labels[role] ?? role).join(" / ") : "ยังไม่ระบุ Role";
 }
 
 function getLevel(item: FlowItem): number {
@@ -256,6 +270,35 @@ async function fetchFlowData(
     throw new Error("รูปแบบข้อมูลจาก API ไม่ถูกต้อง");
 }
 
+async function fetchPageData(signal?: AbortSignal) {
+    const [flows, response] = await Promise.all([
+        fetchFlowData(signal),
+        fetch(`${API_BASE_URL}/master_type.php`, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+            signal,
+        }),
+    ]);
+    if (!response.ok) {
+        throw new Error(`โหลดประเภทคำขอไม่สำเร็จ HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    if (result.status !== "success" || !Array.isArray(result.data)) {
+        throw new Error(result.message || "รูปแบบข้อมูลประเภทคำขอไม่ถูกต้อง");
+    }
+    const types: MasterType[] = result.data;
+    const names = new Map(types.map(type => [String(type.id), type.type]));
+    return {
+        types,
+        flows: flows.map(flow => ({
+            ...flow,
+            updated_by: typeof flow.updated_by === "string" ? flow.updated_by : undefined,
+            create_by: typeof flow.create_by === "string" ? flow.create_by : undefined,
+            fleet_type: names.get(String(flow.type)) ?? flow.fleet_type,
+        })),
+    };
+}
+
 async function postAction(
     endpoint: string,
     payload: Record<string, unknown>
@@ -311,7 +354,10 @@ async function postAction(
 
 export default function FleetFlowPage() {
     const [mounted, setMounted] = useState(false);
+    const stickyHeaderRef = useRef<HTMLElement | null>(null);
+    const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
     const [flowData, setFlowData] = useState<FlowItem[]>([]);
+    const [masterTypes, setMasterTypes] = useState<MasterType[]>([]);
 
     const [selectedFleetType, setSelectedFleetType] =
         useState("ทั้งหมด");
@@ -380,12 +426,13 @@ export default function FleetFlowPage() {
                 setLoading(true);
                 setError("");
 
-                const rows = await fetchFlowData(
+                const pageData = await fetchPageData(
                     controller.signal
                 );
 
                 if (!controller.signal.aborted) {
-                    setFlowData(rows);
+                    setFlowData(pageData.flows);
+                    setMasterTypes(pageData.types);
                 }
             } catch (err) {
                 if (controller.signal.aborted) return;
@@ -433,7 +480,7 @@ export default function FleetFlowPage() {
             setRefreshing(true);
             setError("");
 
-            const rows = await fetchFlowData(
+            const pageData = await fetchPageData(
                 controller.signal
             );
 
@@ -441,7 +488,8 @@ export default function FleetFlowPage() {
                 !controller.signal.aborted &&
                 version === refreshVersionRef.current
             ) {
-                setFlowData(rows);
+                setFlowData(pageData.flows);
+                    setMasterTypes(pageData.types);
             }
         } catch (err) {
             if (controller.signal.aborted) return;
@@ -460,6 +508,16 @@ export default function FleetFlowPage() {
         }
     }, []);
 
+    useEffect(() => {
+        const header = stickyHeaderRef.current;
+        if (!header) return;
+        const measure = () => setStickyHeaderHeight(Math.ceil(header.getBoundingClientRect().height));
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(header);
+        return () => observer.disconnect();
+    }, []);
+
     const handleRefresh = () => {
         void refreshFlowData().catch(() => {
             // แสดงข้อผิดพลาดบนหน้าแล้ว
@@ -467,11 +525,9 @@ export default function FleetFlowPage() {
     };
 
     const fleetTypes = useMemo(
-        () =>
-            Array.from(
-                new Set(flowData.map(getFleetType))
-            ).sort((a, b) => a.localeCompare(b, "th")),
-        [flowData]
+        () => Array.from(new Set(masterTypes.map(item => item.type)))
+            .sort((a, b) => a.localeCompare(b, "th")),
+        [masterTypes]
     );
 
     const fleetTypeCounts = useMemo(() => {
@@ -498,20 +554,10 @@ export default function FleetFlowPage() {
         const groups: Record<string, FlowItem[]> =
             Object.create(null);
 
-        for (const item of flowData) {
-            const fleetType = getFleetType(item);
-
-            if (!groups[fleetType]) {
-                groups[fleetType] = [];
-            }
-
-            groups[fleetType].push(item);
-        }
-
-        for (const fleetType of Object.keys(groups)) {
-            groups[fleetType].sort(
-                (a, b) => getLevel(a) - getLevel(b)
-            );
+        for (const type of masterTypes) {
+            groups[type.type] = flowData
+                .filter(flow => String(flow.type) === String(type.id))
+                .sort((a, b) => getLevel(a) - getLevel(b));
         }
 
         if (selectedFleetType === "ทั้งหมด") {
@@ -526,7 +572,7 @@ export default function FleetFlowPage() {
             [selectedFleetType]:
                 groups[selectedFleetType],
         };
-    }, [flowData, selectedFleetType]);
+    }, [masterTypes, flowData, selectedFleetType]);
 
     const totalDisplayedProcesses = useMemo(
         () =>
@@ -973,15 +1019,46 @@ export default function FleetFlowPage() {
     };
 
     return (
-        <main className="min-h-screen w-full min-w-0 max-w-full bg-slate-50 text-[11px] text-slate-800">
-            <div className="mx-auto w-full min-w-0 max-w-[1600px] px-3 py-3 sm:px-4">
-                <header className="flex min-w-0 flex-wrap items-center justify-between gap-3 pb-3">
+        <main className="fleet-flow-page min-h-screen w-full min-w-0 max-w-full bg-slate-50 text-[11px] text-slate-800">
+            <style>{`
+                @media (min-width: 1024px) {
+                    .fleet-flow-page .flow-type-filter {
+                        display: flex;
+                        flex-direction: column;
+                        max-height: calc(100dvh - ${stickyHeaderHeight + 24}px);
+                    }
+                    .fleet-flow-page .flow-type-filter > div,
+                    .fleet-flow-page .flow-type-filter > p {
+                        flex-shrink: 0;
+                    }
+                    .fleet-flow-page .flow-type-filter > nav {
+                        display: block;
+                        min-height: 0;
+                        overflow-y: auto;
+                        overscroll-behavior-y: contain;
+                        scrollbar-gutter: stable;
+                        touch-action: pan-y;
+                    }
+                    .fleet-flow-page .flow-type-filter > nav > button {
+                        width: 100%;
+                        margin-bottom: 6px;
+                    }
+                }
+                .fleet-flow-page header,
+                .fleet-flow-page aside,
+                .fleet-flow-page section {
+                    border: 0;
+                    box-shadow: 0 4px 18px -10px rgba(15, 23, 42, 0.18);
+                }
+            `}</style>
+            <div className="mx-auto w-full min-w-0 max-w-[1600px] px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
+                <header ref={stickyHeaderRef} className="sticky top-0 z-30 mb-5 flex min-w-0 flex-wrap items-center justify-between gap-4 rounded-2xl bg-white/95 px-4 py-4 shadow-[0_4px_18px_-10px_rgba(15,23,42,0.18)] backdrop-blur-md sm:px-5">
                     <div className="min-w-0">
-                        <h1 className="break-words text-base font-bold tracking-tight text-slate-900">
+                        <h1 className="break-words text-xl font-semibold tracking-tight text-slate-900">
                             จัดการขั้นตอนการดำเนินงาน
                         </h1>
 
-                        <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                        <p className="mt-2 text-xs leading-5 text-slate-500">
                             ดูข้อมูลแยกตามประเภทรถ
                             และแก้ไขหลายประเภทพร้อมกัน
                         </p>
@@ -996,7 +1073,7 @@ export default function FleetFlowPage() {
                                 refreshing ||
                                 mutationLocked
                             }
-                            className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+                            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-white shadow-sm px-3 shadow-sm text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
                         >
                             <RefreshCw
                                 className={`h-3.5 w-3.5 ${
@@ -1013,9 +1090,9 @@ export default function FleetFlowPage() {
                                 loading ||
                                 refreshing ||
                                 mutationLocked ||
-                                flowData.length === 0
+                                masterTypes.length === 0
                             }
-                            className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-left text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+                            className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-white shadow-sm px-3 shadow-sm py-2 text-left text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                         >
                             <Pencil className="h-4 w-4 shrink-0" />
 
@@ -1024,7 +1101,7 @@ export default function FleetFlowPage() {
                                     แก้ไขหลายประเภท / หลายขั้นตอน
                                 </span>
 
-                                <span className="mt-0.5 block break-words text-[11px] text-blue-100">
+                                <span className="mt-0.5 block break-words text-[10px] text-slate-400">
                                     เลือกประเภทรถและระดับ
                                     แล้วบันทึกพร้อมกัน
                                 </span>
@@ -1041,7 +1118,7 @@ export default function FleetFlowPage() {
                                 refreshing ||
                                 mutationLocked
                             }
-                            className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
+                            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
                         >
                             <Plus className="h-3.5 w-3.5" />
                             เพิ่มขั้นตอนใหม่
@@ -1049,21 +1126,21 @@ export default function FleetFlowPage() {
                     </div>
                 </header>
 
-                <div className="grid min-w-0 grid-cols-1 items-start gap-3 lg:grid-cols-[200px_minmax(0,1fr)]">
-                    <aside className="min-w-0 rounded-lg border border-slate-200 bg-white lg:sticky lg:top-3">
-                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
+                <div className="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
+                    <aside className="flow-type-filter min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_-10px_rgba(15,23,42,0.16)] lg:sticky  lg:col-start-2 lg:row-start-1" style={{ top: stickyHeaderHeight + 12 }}>
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3.5">
                             <h2 className="text-[11px] font-semibold text-slate-600">
                                 กรองข้อมูลตามประเภทรถ
                             </h2>
 
-                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold">
+                            <span className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-semibold">
                                 {fleetTypes.length}
                             </span>
                         </div>
 
                         <nav
                             aria-label="ตัวกรองประเภทรถ"
-                            className="grid min-w-0 grid-cols-1 gap-1 p-1.5 sm:grid-cols-2 lg:grid-cols-1"
+                            className="grid min-w-0 grid-cols-1 gap-1.5 p-2.5 sm:grid-cols-2 lg:grid-cols-1"
                         >
                             {["ทั้งหมด", ...fleetTypes].map(
                                 (fleetType) => {
@@ -1085,10 +1162,10 @@ export default function FleetFlowPage() {
                                             onClick={() =>
                                                 setSelectedFleetType(fleetType)
                                             }
-                                            className={`flex min-w-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-[11px] leading-4 transition ${
+                                            className={`flex min-w-0 items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-[11px] leading-4 transition ${
                                                 active
-                                                    ? "bg-blue-50 font-semibold text-blue-700"
-                                                    : "text-slate-600 hover:bg-slate-50"
+                                                    ? "bg-blue-50 font-semibold text-blue-700 shadow-sm"
+                                                    : "text-slate-500 hover:bg-slate-50"
                                             }`}
                                         >
                                             <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">
@@ -1098,7 +1175,7 @@ export default function FleetFlowPage() {
                                             <span
                                                 className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
                                                     active
-                                                        ? "bg-blue-100"
+                                                        ? "bg-white text-blue-700"
                                                         : "bg-slate-100 text-slate-500"
                                                 }`}
                                             >
@@ -1110,14 +1187,14 @@ export default function FleetFlowPage() {
                             )}
                         </nav>
 
-                        <p className="hidden border-t border-slate-100 px-3 py-2 text-[11px] leading-4 text-slate-400 lg:block">
+                        <p className="hidden border-t border-slate-100 px-4 py-3 text-[11px] leading-4 text-slate-400 lg:block">
                             ตัวกรองนี้ใช้ดูตาราง
                             เลือกประเภทที่จะบันทึกในหน้าต่างแก้ไข
                         </p>
                     </aside>
 
-                    <div className="w-full min-w-0 max-w-full space-y-2.5">
-                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-1 text-[11px]">
+                    <div className="w-full min-w-0 max-w-full space-y-4 lg:col-start-1 lg:row-start-1">
+                        <div className="sticky z-20 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-3 text-[11px] shadow-[0_2px_10px_-6px_rgba(15,23,42,0.12)]" style={{ top: stickyHeaderHeight + 12 }}>
                             <p className="min-w-0 text-slate-500 [overflow-wrap:anywhere]">
                                 ประเภทที่แสดง{" "}
                                 <span className="font-semibold text-slate-800">
@@ -1142,7 +1219,7 @@ export default function FleetFlowPage() {
                         {loading && (
                             <div
                                 role="status"
-                                className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-12 text-xs text-slate-500"
+                                className="flex items-center justify-center gap-2 rounded-lg bg-white shadow-sm py-12 text-xs text-slate-500"
                             >
                                 <LoaderCircle className="h-4 w-4 animate-spin" />
                                 กำลังโหลดข้อมูล...
@@ -1174,7 +1251,7 @@ export default function FleetFlowPage() {
                         {!loading &&
                             !error &&
                             Object.keys(groupedFlow).length === 0 && (
-                                <div className="rounded-lg border border-slate-200 bg-white py-12 text-center">
+                                <div className="rounded-lg bg-white shadow-sm py-12 text-center">
                                     <h2 className="text-xs font-semibold">
                                         ไม่พบข้อมูลกระบวนการ
                                     </h2>
@@ -1193,18 +1270,21 @@ export default function FleetFlowPage() {
                                 .map(([fleetType, processes]) => (
                                     <section
                                         key={fleetType}
-                                        className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white"
+                                        className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_-10px_rgba(15,23,42,0.16)]"
                                     >
-                                        <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5">
-                                            <div className="flex min-w-0 items-center gap-2">
-                                                <span className="h-3.5 w-1 shrink-0 rounded-full bg-blue-600" />
+                                        <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3.5">
+                                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
 
                                                 <h2 className="min-w-0 text-xs font-semibold text-slate-900 [overflow-wrap:anywhere]">
                                                     {fleetType}
                                                 </h2>
+                                                <span className="shrink-0 rounded-md bg-blue-50 px-2 py-1 text-[10px] font-medium text-blue-700">
+                                                    {formatRole(masterTypes.find(type => type.type === fleetType)?.role)}
+                                                </span>
                                             </div>
 
-                                            <span className="shrink-0 text-[11px] text-slate-500">
+                                            <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
                                                 {processes.length} ขั้นตอน
                                             </span>
                                         </div>
@@ -1225,7 +1305,7 @@ export default function FleetFlowPage() {
                                                     <col style={{ width: "7%" }} />
                                                 </colgroup>
 
-                                                <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                                                <thead className="border-b border-slate-100 bg-slate-50/80 text-slate-600">
                                                     <tr>
                                                         <th
                                                             scope="col"
@@ -1273,6 +1353,13 @@ export default function FleetFlowPage() {
                                                 </thead>
 
                                                 <tbody className="divide-y divide-slate-100 [&_td]:min-w-0 [&_td]:[overflow-wrap:anywhere] [&_p]:[overflow-wrap:anywhere]">
+                                                    {processes.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={6} className="bg-slate-50/50 px-4 py-10 text-center text-xs text-slate-400">
+                                                                ยังไม่ได้กำหนดกระบวนการสำหรับประเภทนี้
+                                                            </td>
+                                                        </tr>
+                                                    )}
                                                     {processes.map(
                                                         (item, index) => {
                                                             const level =
@@ -1333,18 +1420,18 @@ export default function FleetFlowPage() {
                                                                     }
                                                                     className={`transition ${
                                                                         isDragOver
-                                                                            ? "bg-blue-50 ring-1 ring-inset ring-blue-400"
-                                                                            : "hover:bg-slate-50"
+                                                                            ? "bg-blue-50 ring-2 ring-inset ring-blue-300"
+                                                                            : "bg-white hover:bg-slate-50/70"
                                                                     } ${
                                                                         isDragging
                                                                             ? "opacity-40"
                                                                             : ""
                                                                     }`}
                                                                 >
-                                                                    <td className="px-0.5 py-2 text-center align-top">
+                                                                    <td className="px-0.5 py-3 text-center align-top">
                                                                         <span
                                                                             title="ลากแถวเพื่อเปลี่ยนลำดับ"
-                                                                            className="inline-flex h-6 w-full max-w-5 cursor-grab items-center justify-center text-slate-400 active:cursor-grabbing"
+                                                                            className="inline-flex h-7 w-full max-w-6 cursor-grab items-center justify-center rounded-md text-slate-300 transition hover:bg-blue-50 hover:text-blue-600 active:cursor-grabbing"
                                                                         >
                                                                             <GripVertical
                                                                                 aria-hidden="true"
@@ -1353,8 +1440,8 @@ export default function FleetFlowPage() {
                                                                         </span>
                                                                     </td>
 
-                                                                    <td className="px-0.5 py-2 text-center align-top">
-                                                                        <span className="inline-flex min-h-6 w-full max-w-6 items-center justify-center rounded bg-blue-50 text-[11px] font-semibold text-blue-700">
+                                                                    <td className="px-0.5 py-3 text-center align-top">
+                                                                        <span className="inline-flex min-h-7 w-full max-w-7 items-center justify-center rounded-md bg-slate-100 text-[11px] font-semibold text-slate-600">
                                                                             {level ===
                                                                             Number.MAX_SAFE_INTEGER
                                                                                 ? "-"
@@ -1362,41 +1449,43 @@ export default function FleetFlowPage() {
                                                                         </span>
                                                                     </td>
 
-                                                                    <td className="px-1 py-2 align-top sm:px-2">
-                                                                        <p className="whitespace-pre-line text-xs font-medium leading-4 text-slate-900">
+                                                                    <td className="px-2 py-3.5 align-top sm:px-3">
+                                                                        <p className="whitespace-pre-line text-xs font-medium leading-5 text-slate-800">
                                                                             {item.process ||
                                                                                 "-"}
                                                                         </p>
 
                                                                         {sla && (
-                                                                            <span className="mt-1 inline-block max-w-full rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[10px] font-medium leading-4 text-amber-700 [overflow-wrap:anywhere]">
+                                                                            <span className="mt-1.5 inline-block max-w-full rounded-md border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium leading-4 text-slate-500 [overflow-wrap:anywhere]">
                                                                                 SLA {sla}
                                                                             </span>
                                                                         )}
                                                                     </td>
 
-                                                                    <td className="px-1 py-2 align-top sm:px-2">
-                                                                        <p className="whitespace-pre-line leading-4 text-slate-600">
+                                                                    <td className="px-2 py-3.5 align-top sm:px-3">
+                                                                        <p className="whitespace-pre-line leading-5 text-slate-500">
                                                                             {item.detail ||
                                                                                 "-"}
                                                                         </p>
                                                                     </td>
 
-                                                                    <td className="px-1 py-2 align-top sm:px-2">
+                                                                    <td className="px-2 py-3.5 align-top sm:px-3">
                                                                         <p className="leading-4 text-slate-700">
                                                                             {formatUpdatedAt(
                                                                                 item.updated_at
                                                                             )}
                                                                         </p>
 
-                                                                        <p className="mt-0.5 leading-4 text-slate-400">
-                                                                            {item.updated_by
-                                                                                ? `โดย ${item.updated_by}`
-                                                                                : "ไม่ระบุผู้แก้ไข"}
+                                                                        <p className="mt-1 leading-4 text-slate-400">
+                                                                            {item.updated_by?.trim()
+                                                                                ? `โดย ${item.updated_by.trim()}`
+                                                                                : item.create_by?.trim()
+                                                                                    ? `สร้างโดย ${item.create_by.trim()}`
+                                                                                    : "ไม่ระบุผู้บันทึก"}
                                                                         </p>
                                                                     </td>
 
-                                                                    <td className="px-0.5 py-2 align-top">
+                                                                    <td className="px-0.5 py-3 align-top">
                                                                         <div className="flex min-w-0 justify-center">
                                                                             <button
                                                                                 type="button"
@@ -1414,7 +1503,7 @@ export default function FleetFlowPage() {
                                                                                     item.process ||
                                                                                     "กระบวนการ"
                                                                                 }`}
-                                                                                className="inline-flex h-7 w-full max-w-7 min-w-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500 disabled:opacity-50"
+                                                                                className="inline-flex h-7 w-full max-w-7 min-w-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500 disabled:opacity-50"
                                                                             >
                                                                                 {isDeleting ? (
                                                                                     <LoaderCircle className="h-3.5 w-3.5 max-w-full animate-spin" />

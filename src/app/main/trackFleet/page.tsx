@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { Calendar, DateRange } from "react-date-range";
 import type { RangeKeyDict } from "react-date-range";
@@ -55,7 +56,7 @@ interface RequestItem {
   dc_code: string; date: string; request_date?: string;
   request_id?: number | string | null;
   fleet_type: string; fleet_truck_type: string; license_replace: string[] | string;
-  qty: number; usage_date: string; workload: number; truckturn: number;
+  qty: number; usage_date: string; usage_end_date?: string | null; workload: number; truckturn: number;
   status: string; request_by: string; remark: string;
   success_qty?: number | string | null; details?: RequestDetailItem[];
   latest_process_name?: string | null;
@@ -245,7 +246,28 @@ function Field({ label, children, className = "" }: { label: string; children: R
   return <div className={`min-w-0 ${className}`}><label className="mb-1.5 block text-[11px] font-bold text-slate-400">{label}</label>{children}</div>;
 }
 
+type FleetGroup = "new-replacement" | "supplement";
+
 export default function TrackFleetPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">กำลังโหลดหน้าติดตามกองรถ…</div>}>
+      <TrackFleetRoute />
+    </Suspense>
+  );
+}
+
+function TrackFleetRoute() {
+  const searchParams = useSearchParams();
+  const fleetGroup: FleetGroup = searchParams?.get("fleet_group") === "supplement"
+    ? "supplement"
+    : "new-replacement";
+
+  // เปลี่ยนกลุ่มแล้วเริ่มหน้าแรกและล้างข้อมูล/ตัวกรอง/Modal ของกลุ่มก่อนหน้า
+  return <TrackFleetContent key={fleetGroup} fleetGroup={fleetGroup} />;
+}
+
+function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
+  const fleetGroupLabel = fleetGroup === "supplement" ? "รถเสริม" : "รถออกใหม่/ทดแทน";
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
@@ -333,7 +355,7 @@ export default function TrackFleetPage() {
     const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams({ group_mode: "document", page: String(currentPage), limit: String(pageSize) });
+      const params = new URLSearchParams({ fleet_group: fleetGroup, group_mode: "document", page: String(currentPage), limit: String(pageSize) });
       if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
       const userType = textValue(userInfo?.team || userInfo?.TEAM);
       if (userType) params.set("user_type", userType);
@@ -396,7 +418,7 @@ export default function TrackFleetPage() {
       clearTimeout(timeout);
       if (sequence === sequenceRef.current) setLoading(false);
     }
-  }, [contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, debouncedSearchText, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
+  }, [fleetGroup, contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, debouncedSearchText, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
   useEffect(() => {
     void fetchRequests();
     return () => { ++sequenceRef.current; controllerRef.current?.abort(); };
@@ -460,7 +482,7 @@ export default function TrackFleetPage() {
     const step = Number(option.value.split("|")[0]);
     return statusFilter === "all" || (statusFilter === "success" ? step === 8 : statusFilter === "cancel" ? step === 9 || step === 10 : step >= 0 && step < 8);
   }), [filterOptions.process_options, statusFilter]);
-  const pageTitle = `รายการติดตามกองรถออกใหม่/ทดแทน${dcFilter !== "all" ? ` ของ ${dcFilter}` : activeWarehouse && !isCenterUser ? ` ของ ${activeWarehouse}` : ""}`;
+  const pageTitle = `รายการติดตามกอง${fleetGroupLabel}${dcFilter !== "all" ? ` ของ ${dcFilter}` : activeWarehouse && !isCenterUser ? ` ของ ${activeWarehouse}` : ""}`;
   const rangeLabel = hasRequestDateRange ? `${formatThaiDate(dateKey(requestDateRange[0].startDate))} - ${formatThaiDate(dateKey(requestDateRange[0].endDate))}` : "เลือกช่วงวันที่ขอ";
   const handleOpenDocument = (document: DocumentGroup) => {
     const requestIds = Array.from(new Set(
@@ -549,7 +571,7 @@ export default function TrackFleetPage() {
         <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p>
-            <h1 className="mt-2 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg"><Truck size={22} className="text-blue-600" />ติดตามกองรถออกใหม่/ทดแทน</h1>
+            <h1 className="mt-2 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg"><Truck size={22} className="text-blue-600" />ติดตามกอง{fleetGroupLabel}</h1>
             <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600"><Warehouse size={12} />{selectedDcLabel}</span>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -824,7 +846,7 @@ export default function TrackFleetPage() {
             <table className="fleet-document-table border-separate border-spacing-0 text-left text-xs" style={{ tableLayout: "fixed", width: 2420, minWidth: 2420, borderSpacing: 0 }}>
               <colgroup>{[60, 240, 90, 100, 210, 140, 230, 240, 300, 160, 140, 290, 220].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
               <thead className="sticky top-0 z-20"><tr className="text-[11px] font-semibold text-white">
-                {["ลำดับ", "เลขที่เอกสาร", "DC Type", "DC", "ประเภทคำขอ", "ประเภทรถ", "Vendor (ผู้ให้บริการ)", "ทดแทนทะเบียนเก่า", "ข้อมูลรถคันใหม่", "วันที่ใช้งาน", "ผู้ขอ", "สถานะ", "รายละเอียด"].map((column, index) => <th key={column} className={`whitespace-nowrap bg-blue-800 px-3 py-3 ${index === 0 ? "sticky left-0 z-30 text-center" : ""}`}>{index === 1 ? <button type="button" onClick={() => setDocumentSort((sort) => sort === "asc" ? "desc" : "asc")} className="inline-flex items-center gap-2" title="เรียงเลขเอกสารภายในหน้าปัจจุบัน">{column}{documentSort === "asc" ? <ArrowUp size={13} /> : documentSort === "desc" ? <ArrowDown size={13} /> : <ArrowUpDown size={13} />}</button> : column}</th>)}
+                {["ลำดับ", "เลขที่เอกสาร", "DC Type", "DC", "ประเภทคำขอ", "ประเภทรถ", "Vendor (ผู้ให้บริการ)", "ทดแทนทะเบียนเก่า", "ข้อมูลรถคันใหม่", "วันที่ใช้งาน - วันที่สิ้นสุด", "ผู้ขอ", "สถานะ", "รายละเอียด"].map((column, index) => <th key={column} className={`whitespace-nowrap bg-blue-800 px-3 py-3 ${index === 0 ? "sticky left-0 z-30 text-center" : ""}`}>{index === 1 ? <button type="button" onClick={() => setDocumentSort((sort) => sort === "asc" ? "desc" : "asc")} className="inline-flex items-center gap-2" title="เรียงเลขเอกสารภายในหน้าปัจจุบัน">{column}{documentSort === "asc" ? <ArrowUp size={13} /> : documentSort === "desc" ? <ArrowDown size={13} /> : <ArrowUpDown size={13} />}</button> : column}</th>)}
               </tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={13} className="py-16 text-center text-slate-400"><RefreshCw size={24} className="mx-auto mb-3 animate-spin text-blue-500" />กำลังโหลดข้อมูล...</td></tr> : !groupedDocuments.length ? <tr><td colSpan={13} className="py-16 text-center text-slate-400"><Search size={28} className="mx-auto mb-3" />ไม่พบข้อมูลตามเงื่อนไขนี้</td></tr> : sortedDates.map((date) => <Fragment key={date}>
@@ -846,7 +868,7 @@ export default function TrackFleetPage() {
                         const fields = displayVehicleFields(v);
                         return <div style={{ display: "grid", gridTemplateColumns: "70px minmax(0, 1fr)", columnGap: 8, rowGap: 5, fontSize: 11, lineHeight: "18px", width: "100%" }}>{fields.map(([label, value]) => <Fragment key={label}><span className="font-semibold text-slate-400">{label}</span><span className={`break-all font-semibold ${textValue(value) ? "text-slate-700" : "text-slate-400"}`}>{textValue(value) || "ไม่มีข้อมูล"}</span></Fragment>)}</div>;
                       }}</VehicleBlocks></td>
-                      <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => [normalizeDateKey(v.usage_date), normalizeStatus(v.status) === "cancel"]}>{(v) => { const remaining = remainingUsage(v.usage_date); return <><p className="whitespace-nowrap font-semibold">{formatThaiDate(v.usage_date)}</p>{normalizeStatus(v.status) !== "cancel" && <p className={`mt-1 whitespace-nowrap text-[11px] ${remaining.className}`}>{remaining.label}</p>}</>; }}</VehicleBlocks></td>
+                      <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => [normalizeDateKey(v.usage_date), v.usage_end_date?.trim() ? normalizeDateKey(v.usage_end_date) : "", normalizeStatus(v.status) === "cancel"]}>{(v) => { const remaining = remainingUsage(v.usage_date); return <><p className="whitespace-nowrap font-semibold">{formatThaiDate(v.usage_date)}{v.usage_end_date?.trim() ? ` - ${formatThaiDate(v.usage_end_date)}` : ""}</p>{normalizeStatus(v.status) !== "cancel" && <p className={`mt-1 whitespace-nowrap text-[11px] ${remaining.className}`}>{remaining.label}</p>}</>; }}</VehicleBlocks></td>
                       <td><DocumentValues vehicles={vehicles} getValue={(v) => v.request_by} /></td>
                       <td>{(() => { const reference = assessmentReference(vehicles); return reference ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] font-semibold leading-5 text-blue-700">{getProcessStatus(reference)}</p><div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
                         <p>วันที่เริ่ม: {reference.latest_process_str_date ? formatThaiDate(reference.latest_process_str_date) : "-"}</p>

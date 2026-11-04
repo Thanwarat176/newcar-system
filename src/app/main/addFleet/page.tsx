@@ -225,6 +225,106 @@ type ProcessStageFilter =
 type SortKey = "running_doc" | "request_date" | "usage_date";
 type SortDirection = "asc" | "desc";
 
+function SearchableFilterDropdown({
+  label, value, options, allLabel, onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  allLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const keyword = value === "all" ? "" : value;
+  const matches = options.filter((option) =>
+    option.toLowerCase().includes(keyword.trim().toLowerCase()),
+  );
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+  const choose = (next: string) => {
+    onChange(next);
+    setOpen(false);
+  };
+  return (
+    <div ref={containerRef} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
+      <input
+        ref={inputRef}
+        type="text"
+        aria-label={label}
+        aria-expanded={open}
+        autoComplete="off"
+        value={keyword}
+        placeholder={allLabel}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value || "all");
+          setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            setOpen(false);
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+          } else if (event.key === "Enter" && open) {
+            event.preventDefault();
+            if (matches.length) choose(matches[0]);
+          }
+        }}
+        className="h-10 w-full truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-700 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
+      <button
+        type="button"
+        aria-label={`เปิดรายการ${label}`}
+        aria-expanded={open}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          if (open) setOpen(false);
+          else { inputRef.current?.focus(); setOpen(true); }
+        }}
+        className="absolute right-0 top-0 flex h-10 w-8 items-center justify-center rounded-r-xl text-[11px] text-slate-400"
+      >▼</button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div
+            className="py-1"
+            style={{
+              height: 200,
+              maxHeight: 200,
+              overflowY: "auto",
+              overflowX: "hidden",
+              overscrollBehavior: "contain",
+            }}
+          >
+            {[{ value: "all", label: allLabel }, ...matches.map((option) => ({ value: option, label: option }))].map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(option.value)}
+                className={`block w-full break-words px-3 py-2.5 text-left text-xs outline-none hover:bg-blue-50 focus:bg-blue-50 ${value === option.value ? "bg-blue-50 font-semibold text-blue-600" : "text-slate-700"}`}
+              >{option.label}</button>
+            ))}
+            {matches.length === 0 && <p className="px-3 py-3 text-xs text-slate-400">ไม่พบข้อมูลที่ค้นหา</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AddFleetPage() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [processVehicleRows, setProcessVehicleRows] = useState<RequestItem[]>(
@@ -1684,7 +1784,7 @@ export default function AddFleetPage() {
         dcFilter === "all" ||
         String(item.dc_code || "")
           .trim()
-          .toUpperCase() === dcFilter.trim().toUpperCase();
+          .toUpperCase().includes(dcFilter.trim().toUpperCase());
 
       const matchFleetType =
         fleetTypeFilter === "all" ||
@@ -1692,7 +1792,10 @@ export default function AddFleetPage() {
 
       const matchTruckTypeFilter =
         truckTypeFilter === "all" ||
-        String(item.fleet_truck_type || "").trim() === truckTypeFilter;
+        String(item.fleet_truck_type || "")
+          .trim()
+          .toLowerCase()
+          .includes(truckTypeFilter.trim().toLowerCase());
 
       const truckTypeKeyword = truckTypeSearch.trim().toLowerCase();
       const matchTruckType =
@@ -2493,23 +2596,13 @@ export default function AddFleetPage() {
                     className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
                   />
 
-                  <select
+                  <SearchableFilterDropdown
+                    label="ประเภทรถ"
                     value={truckTypeFilter}
-                    onChange={(e) => setTruckTypeFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="all">ทุกประเภทรถ</option>
-
-                    {truckTypeOptions.map((truckType) => (
-                      <option key={truckType} value={truckType}>
-                        {truckType}
-                      </option>
-                    ))}
-                  </select>
-
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
-                    ▼
-                  </span>
+                    options={truckTypeOptions}
+                    allLabel="ทุกประเภทรถ"
+                    onChange={setTruckTypeFilter}
+                  />
                 </div>
               </div>
 
@@ -2560,23 +2653,13 @@ export default function AddFleetPage() {
                     className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400"
                   />
 
-                  <select
+                  <SearchableFilterDropdown
+                    label="DC"
                     value={dcFilter}
-                    onChange={(e) => setDcFilter(e.target.value)}
-                    className="h-10 w-full appearance-none truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="all">ทุก DC</option>
-
-                    {dcOptions.map((dc) => (
-                      <option key={dc} value={dc}>
-                        {dc}
-                      </option>
-                    ))}
-                  </select>
-
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
-                    ▼
-                  </span>
+                    options={dcOptions}
+                    allLabel="ทุก DC"
+                    onChange={setDcFilter}
+                  />
                 </div>
               </div>
 

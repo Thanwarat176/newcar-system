@@ -31,6 +31,7 @@ export interface RequestItem {
   approve_qty_gm?: number | string | null;
   approved_qty?: number | string | null;
   usage_date: string;
+  usage_end_date?: string | null;
 
   workload: number | string | null;
   truckturn: number | string | null;
@@ -1667,7 +1668,7 @@ export default function CheckDC({
                 {[
                   {
                     label: "เลขที่เอกสาร",
-                    value: cleanText(resolvedData.running_doc),
+                    value: (resolvedData.running_doc),
                     sub: "Document number",
                     code: "DOC",
                   },
@@ -1718,6 +1719,14 @@ export default function CheckDC({
                         <p className="mt-0.5 text-[9px] font-medium text-slate-400">
                           {item.sub}
                         </p>
+                        {item.code === "USE" && resolvedData.usage_end_date?.trim() && (
+                          <div className="mt-3">
+                            <p className="text-[10px] font-bold text-slate-500">วันที่สิ้นสุดการใช้งาน</p>
+                            <p className="mt-1 break-words text-sm font-black text-slate-900">
+                              {formatThaiDate(resolvedData.usage_end_date)}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

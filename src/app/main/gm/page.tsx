@@ -32,7 +32,7 @@ import {
   Warehouse,
   X,
 } from "lucide-react";
-import GMModalDetail from "./GMModalDetail";
+import GMModalDetail from "./component/GMModalDetail";
 
 interface SelectedDC {
   DC_CODE?: string;
@@ -54,6 +54,7 @@ interface RequestItem {
   qty: number;
   approve_qty_gm?: number | string | null;
   usage_date: string;
+  usage_end_date?: string | null;
   workload: number;
   truckturn: number;
   status: string;
@@ -1401,7 +1402,7 @@ export default function GmStatusPage() {
                     "ประเภทรถ",
                     "ทะเบียนทดแทน",
                     "จำนวน",
-                    "วันที่ใช้งาน",
+                    "วันที่ใช้งาน - วันที่สิ้นสุด",
                     "ผู้ขอ",
                     "สถานะ",
                     "รายละเอียด",
@@ -1409,7 +1410,7 @@ export default function GmStatusPage() {
                     const sortKey: SortKey | null =
                       col === "เลขที่เอกสาร"
                         ? "running_doc"
-                        : col === "วันที่ใช้งาน"
+                        : col === "วันที่ใช้งาน - วันที่สิ้นสุด"
                           ? "usage_date"
                           : null;
 
@@ -1525,7 +1526,7 @@ export default function GmStatusPage() {
                                 {item.running_doc || "-"}
                               </p>
                               <p className="mt-0.5 text-[11px] text-slate-400">
-                                ใช้: {formatThaiDate(item.usage_date)}
+                                ใช้: {formatThaiDate(item.usage_date)}{item.usage_end_date?.trim() ? ` - ${formatThaiDate(item.usage_end_date)}` : ""}
                               </p>
                             </td>
 
@@ -1614,7 +1615,7 @@ export default function GmStatusPage() {
                             </td>
 
                             <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-600">
-                              {formatThaiDate(item.usage_date)}
+                              {formatThaiDate(item.usage_date)}{item.usage_end_date?.trim() ? ` - ${formatThaiDate(item.usage_end_date)}` : ""}
                             </td>
 
                             <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700">

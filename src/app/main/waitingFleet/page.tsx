@@ -24,7 +24,7 @@ interface RequestItem {
   license_replace: string[] | string; qty: number;
   approve_qty_gm?: number | string | null; approved_qty?: number | string | null;
   not_approved_qty?: number | string | null;
-  usage_date: string; workload: number; truckturn: number; status: string;
+  usage_date: string; usage_end_date?: string | null; workload: number; truckturn: number; status: string;
   request_by: string; remark: string; details?: RequestDetailItem[];
   summary?: { total_requested: number; total_approved: number; total_rejected: number };
   approved_trucks?: { old_license: string; new_truck_type: string; new_vendor_name: string; new_vendor_id: string }[];
@@ -58,7 +58,7 @@ const COLUMNS: { label: string; sort?: SortKey }[] = [
   { label: "ลำดับ" }, { label: "เลขที่เอกสาร", sort: "running_doc" },
   { label: "DC Type" }, { label: "DC" }, { label: "ประเภทคำขอ" },
   { label: "ประเภทรถ" }, { label: "ทะเบียนทดแทน" }, { label: "จำนวน" },
-  { label: "วันที่ใช้งาน", sort: "usage_date" }, { label: "ผู้ขอ" },
+  { label: "วันที่ใช้งาน - วันที่สิ้นสุด", sort: "usage_date" }, { label: "ผู้ขอ" },
   { label: "สถานะ" }, { label: "รายละเอียด" },
 ];
 
@@ -141,6 +141,118 @@ function FilterSelect({ label, value, options, onChange, icon: Icon, className =
       <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
     </span></label>;
 }
+function SearchableFilterDropdown({
+  label, value, options, allLabel, onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  allLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const keyword = value === "all" ? "" : value;
+  const matches = options.filter((option) =>
+    option.toLowerCase().includes(keyword.trim().toLowerCase()),
+  );
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+  const choose = (next: string) => {
+    onChange(next);
+    setOpen(false);
+  };
+  return (
+    <div ref={containerRef} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
+      <input
+        ref={inputRef}
+        type="text"
+        aria-label={label}
+        aria-expanded={open}
+        autoComplete="off"
+        value={keyword}
+        placeholder={allLabel}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value || "all");
+          setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            setOpen(false);
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+          } else if (event.key === "Enter" && open) {
+            event.preventDefault();
+            if (matches.length) choose(matches[0]);
+          }
+        }}
+        className="h-10 w-full truncate rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 shadow-sm outline-none transition placeholder:text-slate-700 hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
+      <button
+        type="button"
+        aria-label={`เปิดรายการ${label}`}
+        aria-expanded={open}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          if (open) setOpen(false);
+          else { inputRef.current?.focus(); setOpen(true); }
+        }}
+        className="absolute right-0 top-0 flex h-10 w-8 items-center justify-center rounded-r-xl text-[11px] text-slate-400"
+      >▼</button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div
+            className="py-1"
+            style={{
+              height: 200,
+              maxHeight: 200,
+              overflowY: "auto",
+              overflowX: "hidden",
+              overscrollBehavior: "contain",
+            }}
+          >
+            {[{ value: "all", label: allLabel }, ...matches.map((option) => ({ value: option, label: option }))].map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(option.value)}
+                className={`block w-full break-words px-3 py-2.5 text-left text-xs outline-none hover:bg-blue-50 focus:bg-blue-50 ${value === option.value ? "bg-blue-50 font-semibold text-blue-600" : "text-slate-700"}`}
+              >{option.label}</button>
+            ))}
+            {matches.length === 0 && <p className="px-3 py-3 text-xs text-slate-400">ไม่พบข้อมูลที่ค้นหา</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchableFilter({ label, value, options, onChange, icon: Icon, className = "" }: {
+  label: string; value: string; options: string[]; onChange: (value: string) => void; icon: LucideIcon; className?: string;
+}) {
+  return <div className={`block ${className}`}>
+    <span className="mb-1.5 block text-[11px] font-bold text-slate-400">{label}</span>
+    <div className="relative">
+      <Icon size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" />
+      <SearchableFilterDropdown label={label} value={value} options={options} allLabel="ทั้งหมด" onChange={onChange} />
+    </div>
+  </div>;
+}
+
 function QuantityCell({ row }: { row: Row }) {
   const { item } = row;
   const approved = quantity(item.approved_qty ?? item.summary?.total_approved);
@@ -245,9 +357,9 @@ export default function WaitingFleetPage() {
       // all does not exclude any API status.
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
       if (requestTypeFilter !== "all" && text(item.fleet_type) !== requestTypeFilter) return false;
-      if (truckTypeFilter !== "all" && text(item.fleet_truck_type) !== truckTypeFilter) return false;
+      if (truckTypeFilter !== "all" && !text(item.fleet_truck_type).toLowerCase().includes(truckTypeFilter.trim().toLowerCase())) return false;
       if (dcTypeFilter !== "all" && code(item.dc_type) !== code(dcTypeFilter)) return false;
-      if (dcFilter !== "all" && code(item.dc_code) !== code(dcFilter)) return false;
+      if (dcFilter !== "all" && !code(item.dc_code).includes(code(dcFilter))) return false;
       if (keyword && !row.searchText.includes(keyword)) return false;
       return !hasRequestDateRange || (row.requestDate !== NO_DATE && row.requestDate >= start && row.requestDate <= end);
     });
@@ -324,14 +436,16 @@ export default function WaitingFleetPage() {
         <Icon size={82} aria-hidden="true" className="pointer-events-none absolute right-2 top-3 opacity-10" /><div className="relative"><p className="text-[11px] font-semibold">{LABELS[card.key]}</p><p className="mt-1 text-[11px] opacity-60">รวมทุกหน้า</p><div className="mt-4 flex items-end justify-between gap-2"><p className="text-2xl font-semibold">{number(count.qty)}<span className="ml-1 text-xs opacity-60">คัน</span></p><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${active ? "bg-white/15" : "bg-white/80"}`}>{number(count.items)} รายการ</span></div></div></button>;
     })}</div>
     <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-4 flex items-center gap-2"><SlidersHorizontal size={17} className="text-blue-600" /><h2 className="text-xs font-semibold">ค้นหาและตัวกรอง</h2></div>
-      <div className="grid gap-3 lg:grid-cols-12">
-        <label className="block lg:col-span-3"><span className="mb-1.5 block text-[11px] font-bold text-slate-400">ค้นหา</span><span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" /><input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..." className={`${INPUT} pl-9 pr-8`} />{searchText && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearchText("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X size={13} /></button>}</span></label>
-        <FilterSelect label="ประเภทคำขอ" value={requestTypeFilter} options={requestTypes} icon={Filter} className="lg:col-span-2" onChange={value => { setRequestTypeFilter(value); setTruckTypeFilter("all"); }} />
-        <FilterSelect label="ประเภทรถ" value={truckTypeFilter} options={truckTypes} icon={Truck} className="lg:col-span-2" onChange={setTruckTypeFilter} />
-        <FilterSelect label="DC Type" value={dcTypeFilter} options={dcTypes} icon={Filter} className="lg:col-span-1" onChange={value => { setDcTypeFilter(value); setDcFilter("all"); }} />
-        <FilterSelect label="DC" value={dcFilter} options={dcOptions} icon={Warehouse} className="lg:col-span-1" onChange={setDcFilter} />
-        <div className="lg:col-span-2"><span className="mb-1.5 block text-[11px] font-bold text-slate-400">วันที่ขอ</span><div className="relative"><button ref={dateButtonRef} type="button" aria-expanded={showPicker} onClick={togglePicker} title={dateLabel} className={`${INPUT} truncate pl-8 pr-7 text-left`}><CalendarDays size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400" />{dateLabel}</button>{hasRequestDateRange && <button type="button" aria-label="ล้างวันที่" onClick={clearDates} className="absolute right-2 top-1/2 -translate-y-1/2"><X size={13} /></button>}</div></div>
-        <div className="flex items-end lg:col-span-1"><button type="button" onClick={clearFilters} className={`${INPUT} flex items-center justify-center gap-1 hover:bg-rose-50`}><Eraser size={14} />ล้าง</button></div>
+
+      <div className="waiting-filter-grid">
+        <label className="block "><span className="mb-1.5 block text-[11px] font-bold text-slate-400">ค้นหา</span><span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400" /><input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..." className={`${INPUT} pl-9 pr-8`} />{searchText && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearchText("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X size={13} /></button>}</span></label>
+        <FilterSelect label="ประเภทคำขอ" value={requestTypeFilter} options={requestTypes} icon={Filter} className="" onChange={value => { setRequestTypeFilter(value); setTruckTypeFilter("all"); }} />
+        <SearchableFilter label="ประเภทรถ" value={truckTypeFilter} options={truckTypes} icon={Truck} className="" onChange={setTruckTypeFilter} />
+        <FilterSelect label="DC Type" value={dcTypeFilter} options={dcTypes} icon={Filter} className="" onChange={value => { setDcTypeFilter(value); setDcFilter("all"); }} />
+        <SearchableFilter label="DC" value={dcFilter} options={dcOptions} icon={Warehouse} className="" onChange={setDcFilter} />
+        <div className="min-w-0 "><span className="mb-1.5 block text-[11px] font-bold text-slate-400">วันที่ขอ</span><div className="relative"><button ref={dateButtonRef} type="button" aria-expanded={showPicker} onClick={togglePicker} title={dateLabel} className={`${INPUT} truncate pl-8 pr-7 text-left`}><CalendarDays size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400" />{dateLabel}</button>{hasRequestDateRange && <button type="button" aria-label="ล้างวันที่" onClick={clearDates} className="absolute right-2 top-1/2 -translate-y-1/2"><X size={13} /></button>}</div></div>
+        <div className="flex items-end "><button type="button" onClick={clearFilters} className={`${INPUT} flex items-center justify-center gap-1 hover:bg-rose-50`}><Eraser size={14} />ล้าง</button></div>
+      
       </div></section>
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3"><div><h2 className="text-xs font-semibold">{title}</h2><p className="mt-1 text-[11px] text-slate-400">หน้านี้ {number(pageRows.length)} รายการ · พบทั้งหมด {number(filteredRows.length)} รายการ</p></div><span className="text-[11px] text-blue-600">เลือกปุ่มท้ายรายการเพื่อดูรายละเอียด</span></div>
       <div className="max-h-[70vh] min-h-[360px] overflow-auto"><table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left text-xs"><thead className="sticky top-0 z-20"><tr>{COLUMNS.map((column, index) => {
@@ -356,7 +470,7 @@ export default function WaitingFleetPage() {
             <td className={CELL}><span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-600">{item.dc_code || "-"}</span></td>
             <td className="w-[170px] min-w-[170px] max-w-[170px] whitespace-normal break-words px-3 py-3 leading-relaxed">{item.fleet_type || "-"}</td><td className={CELL}>{item.fleet_truck_type || "-"}</td>
             <td className="max-w-[160px] px-3 py-3"><div className="flex flex-wrap gap-1">{row.licenses.length ? <>{row.licenses.slice(0, 2).map((license, i) => <span key={i} title={license} className="max-w-[90px] truncate rounded bg-slate-100 px-2 py-1 text-[11px]">{license}</span>)}{row.licenses.length > 2 && <span title={row.licenses.slice(2).join(", ")} className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-600">+{row.licenses.length - 2}</span>}</> : "-"}</div></td>
-            <td className="min-w-[280px] px-3 py-3"><QuantityCell row={row} /></td><td className={CELL}>{formatDate(item.usage_date)}</td><td className={CELL}>{item.request_by || "-"}</td>
+            <td className="min-w-[280px] px-3 py-3"><QuantityCell row={row} /></td><td className={CELL}>{formatDate(item.usage_date)}{text(item.usage_end_date) ? ` - ${formatDate(item.usage_end_date!)}` : ""}</td><td className={CELL}>{item.request_by || "-"}</td>
             <td className={CELL}><span title={`API status: ${item.status}`} className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ${statusClass(row.status)}`}>{statusLabel(item.status)}</span></td>
             <td className={`${CELL} text-right`}><button type="button" onClick={() => setSelectedRequest(item)} className={`inline-flex h-9 min-w-[130px] items-center justify-center gap-2 rounded-xl px-3 text-[11px] font-semibold ${pending ? "bg-blue-700 text-white hover:bg-blue-800" : "border border-slate-200 hover:bg-blue-50"}`}>{pending ? <><PencilLine size={14} />อัปเดตสถานะ</> : <><Eye size={14} />ดูรายละเอียด</>}</button></td>
           </tr>; })}
@@ -385,6 +499,20 @@ export default function WaitingFleetPage() {
         <div className="rounded-2xl bg-white p-6 shadow-xl"><p>ไม่พบข้อมูลสำหรับดึงรายงาน</p><button type="button" onClick={() => setOpenExportModal(false)} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-white">ปิด</button></div>
       </div>
     ), portalTarget)}
-    <style jsx>{`main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { main :global(*) { animation: none !important; transition: none !important; } }`}</style>
+    <style jsx>{`
+        .waiting-filter-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+        .waiting-filter-grid > :global(*) { min-width: 0; }
+        @media (min-width: 1024px) {
+          .waiting-filter-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+          .waiting-filter-grid > :global(:nth-child(1)) { grid-column: span 6; }
+          .waiting-filter-grid > :global(:nth-child(2)),
+          .waiting-filter-grid > :global(:nth-child(3)) { grid-column: span 3; }
+          .waiting-filter-grid > :global(:nth-child(4)),
+          .waiting-filter-grid > :global(:nth-child(5)),
+          .waiting-filter-grid > :global(:nth-child(7)) { grid-column: span 2; }
+          .waiting-filter-grid > :global(:nth-child(6)) { grid-column: span 6; }
+        }
+      
+main :global(button:focus-visible), main :global(select:focus-visible), main :global(input:focus-visible) { outline: 2px solid #2563eb; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { main :global(*) { animation: none !important; transition: none !important; } }`}</style>
   </main></div>;
 }

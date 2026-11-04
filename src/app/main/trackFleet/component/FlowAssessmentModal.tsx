@@ -35,7 +35,7 @@ interface RequestVehicleDetail extends ExtraInfo {
 }
 interface RequestInfo {
   id: Id; running_doc?: string; dc_type?: string; dc_code?: string; fleet_type?: string; fleet_truck_type?: string;
-  qty?: Id; usage_date?: string; request_date?: string; request_by?: string; approved_by?: string | null;
+  qty?: Id; usage_date?: string; usage_end_date?: string | null; request_date?: string; request_by?: string; approved_by?: string | null;
   company_id?: Id | null; company_name?: string | null; approved_company_id?: Id | null;
   approved_qty?: Id | null; approved_company_name?: string | null; approved_truck_type?: string | null;
   workload?: Id; truckturn?: Id; remark?: string; status?: string;
@@ -432,7 +432,14 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                   <InfoCard icon={<ClipboardList size={17} />} label="เลขที่เอกสาร" value={displayDocumentNo || "-"} subValue={`Request ID: ${request.id}`} />
                   <InfoCard icon={<Building2 size={17} />} label="DC" value={request.dc_code || "-"} subValue={request.dc_type || "-"} />
                   <InfoCard icon={<Truck size={17} />} label="ประเภทรถ" value={`${request.fleet_truck_type || "-"} | ${request.fleet_type || "-"} · ${formatNumber(request.qty)} คัน`} subValue="" />
-                  <InfoCard icon={<CalendarDays size={17} />} label="วันที่ต้องการใช้งาน" value={formatDate(request.usage_date)} subValue={remaining(request.usage_date)} />
+                  <InfoCard icon={<CalendarDays size={17} />} label="วันที่ต้องการใช้งาน" value={formatDate(request.usage_date)} subValue={remaining(request.usage_date)}>
+                    {request.usage_end_date?.trim() && (
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <p className="text-[10px] text-slate-500">วันที่สิ้นสุดการใช้งาน</p>
+                        <p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{formatDate(request.usage_end_date)}</p>
+                      </div>
+                    )}
+                  </InfoCard>
                 </div>
                 {documentMode && visibleOldLicenses.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle><ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{visibleOldLicenses.map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul><p className="mt-3 text-[10px] leading-5 text-slate-500">ใช้แบบประเมินชุดเดียว อ้างอิง {selectedCar?.unit_code || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`} การบันทึกขั้นตอนและรายละเอียดรถจะบันทึกที่รายการอ้างอิงนี้</p></section>}
                 <section
@@ -728,5 +735,5 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   );
 }
 function SectionTitle({ children }: { children: ReactNode }) { return <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-xs font-semibold text-slate-800 before:h-4 before:w-1 before:rounded-full before:bg-blue-600 before:content-['']">{children}</h3>; }
-function InfoCard({ icon, label, value, subValue }: { icon: ReactNode; label: string; value: string; subValue: string }) { return <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm"><div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white text-blue-600">{icon}</span><div className="min-w-0"><p className="text-[10px] text-slate-500">{label}</p><p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{value}</p>{subValue && <p className="mt-1 break-words text-[10px] text-slate-400">{subValue}</p>}</div></div></div>; }
+function InfoCard({ icon, label, value, subValue, children }: { icon: ReactNode; label: string; value: string; subValue: string; children?: ReactNode }) { return <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm"><div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white text-blue-600">{icon}</span><div className="min-w-0"><p className="text-[10px] text-slate-500">{label}</p><p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{value}</p>{subValue && <p className="mt-1 break-words text-[10px] text-slate-400">{subValue}</p>}{children}</div></div></div>; }
 function DetailItem({ label, value }: { label: string; value?: string | null }) { return <div><p className="text-[10px] text-slate-400">{label}</p><p className="mt-1 break-words font-semibold text-slate-700">{value || "-"}</p></div>; }

@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
   Truck,
@@ -19,11 +23,15 @@ import {
 
 import { PATHS } from "../../lib/paths";
 
+const SUMMARY_API_URL =
+  "http://192.168.158.210/api_new_truck/api/sidebar_summary.php";
+
 interface SubMenuItem {
   label: string;
   path?: string;
   disabled?: boolean;
   tooltip?: string;
+  badge?: number;
 }
 
 interface MenuItem {
@@ -31,13 +39,24 @@ interface MenuItem {
   path: string;
   icon: LucideIcon;
   children?: SubMenuItem[];
+  badge?: number;
+}
+
+interface SidebarSummary {
+  gm: number;
+  fbp: number;
+  tcas: {
+    new_replacement: number;
+    supplement: number;
+  };
+  user: number;
 }
 
 interface SidebarUser {
-  id?: string;
-  em_id?: string;
-  employee_id?: string;
-  EMPLOYEE_ID?: string;
+  id?: string | number;
+  em_id?: string | number;
+  employee_id?: string | number;
+  EMPLOYEE_ID?: string | number;
   name?: string;
   NAME?: string;
   surname?: string;
@@ -88,6 +107,16 @@ const EMPTY_DATA: SidebarData = {
   selectedDepartments: [],
 };
 
+const EMPTY_SUMMARY: SidebarSummary = {
+  gm: 0,
+  fbp: 0,
+  tcas: {
+    new_replacement: 0,
+    supplement: 0,
+  },
+  user: 0,
+};
+
 const STORAGE_KEYS = [
   "user",
   "selected_dc",
@@ -130,8 +159,7 @@ function readStoredValue(key: string): unknown {
     }
 
     return JSON.parse(value);
-  } catch (error) {
-    console.error(`อ่าน ${key} ไม่สำเร็จ:`, error);
+  } catch {
     return null;
   }
 }
@@ -150,14 +178,68 @@ function uniqueCodes(codes: string[]): string[] {
   return [...result.values()];
 }
 
-const matchesPath = (
+function toCount(value: unknown): number {
+  const count = Number(value);
+
+  return Number.isFinite(count)
+    ? Math.max(0, Math.floor(count))
+    : 0;
+}
+
+function matchesPath(
   pathname: string,
   path?: string
-): boolean =>
-  Boolean(
-    path &&
-      (pathname === path || pathname.startsWith(`${path}/`))
+): boolean {
+  if (!path) return false;
+
+  const targetPath = path.split("?")[0];
+
+  return (
+    pathname === targetPath ||
+    pathname.startsWith(`${targetPath}/`)
   );
+}
+
+function matchesMenuPath(
+  pathname: string,
+  currentSearch: string,
+  path?: string
+): boolean {
+  if (!path || !matchesPath(pathname, path)) {
+    return false;
+  }
+
+  const queryIndex = path.indexOf("?");
+
+  if (queryIndex === -1) {
+    return true;
+  }
+
+  const targetParams = new URLSearchParams(
+    path.slice(queryIndex + 1)
+  );
+
+  const currentParams = new URLSearchParams(
+    currentSearch
+  );
+
+  if (!currentParams.has("fleet_group")) {
+    currentParams.set(
+      "fleet_group",
+      "new-replacement"
+    );
+  }
+
+  let matches = true;
+
+  targetParams.forEach((value, key) => {
+    if (currentParams.get(key) !== value) {
+      matches = false;
+    }
+  });
+
+  return matches;
+}
 
 export default function Sidebar({
   collapsed,
@@ -165,9 +247,14 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentSearch = searchParams.toString();
 
   const [sidebarData, setSidebarData] =
     useState<SidebarData>(EMPTY_DATA);
+
+  const [summary, setSummary] =
+    useState<SidebarSummary>(EMPTY_SUMMARY);
 
   const [openGroups, setOpenGroups] = useState<
     Record<string, boolean>
@@ -182,7 +269,7 @@ export default function Sidebar({
     selectedDepartments,
   } = sidebarData;
 
-  // โหลดใหม่ทั้งเมื่อเปลี่ยนหน้าและเมื่อยืนยันการเลือก
+  // อ่านข้อมูลรูปแบบเดียวกับที่ SelectDCPage บันทึก
   useEffect(() => {
     const loadSidebarData = () => {
       const user = readStoredValue("user");
@@ -210,7 +297,8 @@ export default function Sidebar({
         }
       }
 
-      const validDepartments: SelectedDepartment[] = [];
+      const validDepartments: SelectedDepartment[] =
+        [];
 
       if (Array.isArray(departments)) {
         for (const item of departments) {
@@ -237,14 +325,22 @@ export default function Sidebar({
             }
           : null;
 
-      setSidebarData({
+      const nextData: SidebarData = {
         user: isRecord(user)
           ? (user as SidebarUser)
           : null,
         selectedDC: validDC,
         selectedDCs: validDCs,
         selectedDepartments: validDepartments,
-      });
+      };
+
+      // ไม่เปลี่ยน state ถ้าข้อมูลเหมือนเดิม
+      setSidebarData((previous) =>
+        JSON.stringify(previous) ===
+        JSON.stringify(nextData)
+          ? previous
+          : nextData
+      );
     };
 
     loadSidebarData();
@@ -254,32 +350,33 @@ export default function Sidebar({
       "selectedDCChanged",
       "selectedDepartmentsChanged",
       "storage",
+      "focus",
     ];
 
     events.forEach((event) => {
-      window.addEventListener(event, loadSidebarData);
+      window.addEventListener(
+        event,
+        loadSidebarData
+      );
     });
 
     return () => {
       events.forEach((event) => {
-        window.removeEventListener(event, loadSidebarData);
+        window.removeEventListener(
+          event,
+          loadSidebarData
+        );
       });
     };
-  }, [pathname]);
-
-  useEffect(() => {
-    if (matchesPath(pathname, PATHS.main.trackFleet)) {
-      setOpenGroups((previous) => ({
-        ...previous,
-        [PATHS.main.trackFleet]: true,
-      }));
-    }
   }, [pathname]);
 
   const displayName =
     [
       getText(userInfo?.name, userInfo?.NAME),
-      getText(userInfo?.surname, userInfo?.SURNAME),
+      getText(
+        userInfo?.surname,
+        userInfo?.SURNAME
+      ),
     ]
       .filter(Boolean)
       .join(" ") || "User";
@@ -307,11 +404,13 @@ export default function Sidebar({
     userInfo?.TEAM
   );
 
-  const normalizedDepartment =
-    normalizeValue(originalDepartment);
+  const normalizedDepartment = normalizeValue(
+    originalDepartment
+  );
 
-  const normalizedWarehouse =
-    normalizeValue(originalWarehouse);
+  const normalizedWarehouse = normalizeValue(
+    originalWarehouse
+  );
 
   const loginUser = getText(
     userInfo?.em_id,
@@ -319,10 +418,10 @@ export default function Sidebar({
     userInfo?.EMPLOYEE_ID
   ).toUpperCase();
 
+  // ใช้เงื่อนไขเดียวกับ SelectDCPage
   const isCenterUser =
     loginUser === "CENTER" ||
-    normalizedWarehouse === "CENTER" ||
-    normalizeValue(originalTeam) === "CENTER";
+    normalizedWarehouse === "CENTER";
 
   const selectedWarehouseCodes = useMemo(
     () =>
@@ -334,6 +433,55 @@ export default function Sidebar({
       ]),
     [selectedDCs, selectedDC]
   );
+
+  const selectedTeamCodes = useMemo(
+    () =>
+      uniqueCodes(
+        selectedDepartments.map(
+          (item) => item.value
+        )
+      ).map((code) => normalizeValue(code)),
+    [selectedDepartments]
+  );
+
+  const hasSelectedContext =
+    selectedTeamCodes.length > 0 ||
+    selectedWarehouseCodes.length > 0;
+
+  // CENTER เลือกฝ่าย: ใช้ฝ่ายที่เลือก
+  // CENTER เลือกเฉพาะคลัง: ไม่ใช้ฝ่ายเดิม
+  // ไม่เลือกอะไร: ใช้ฝ่ายเดิมจาก user
+  // ผู้ใช้ทั่วไป: ใช้ฝ่ายเดิม เพราะเลือกได้เฉพาะคลัง
+  const activeDepartments = isCenterUser
+    ? hasSelectedContext
+      ? selectedTeamCodes
+      : [normalizedDepartment]
+    : [normalizedDepartment];
+
+  const hasFullAccess =
+    isCenterUser &&
+    activeDepartments.includes("IMP");
+
+  const isGM = activeDepartments.includes("GM");
+  const isFBP = activeDepartments.includes("FBP");
+  const isTCAS =
+    activeDepartments.includes("TCAS");
+  const isKA = activeDepartments.includes("KA");
+
+  const normalizedRole = normalizeValue(
+    getText(
+      userInfo?.ROLE,
+      userInfo?.role,
+      userInfo?.user_type
+    )
+  );
+
+  const isSuperadmin =
+    normalizedRole === "SUPERADMIN";
+
+  // อิงฝ่ายเดิมเพื่อให้กลับไปเปลี่ยนการเลือกได้
+  const canChangeWarehouse =
+    normalizedDepartment === "IMP";
 
   const displayTeam = useMemo(() => {
     if (isCenterUser) {
@@ -383,52 +531,264 @@ export default function Sidebar({
           .join("")
           .toUpperCase();
 
-  // สิทธิ์ทุกเมนูใช้ warehouse และ department จริงของบัญชี
-  const hasFullAccess =
-    normalizedWarehouse === "CENTER" && normalizedDepartment === "IMP";
-  const isGM = normalizedDepartment === "GM";
-  const isFBP = normalizedDepartment === "FBP";
-  const isTCAS = normalizedDepartment === "TCAS";
-  const isKA = normalizedDepartment === "KA";
-  const normalizedRole = normalizeValue(
-    getText(userInfo?.ROLE, userInfo?.role, userInfo?.user_type)
-  );
-  const isSuperadmin = normalizedRole === "SUPERADMIN";
+  // โหลดจำนวนแจ้งเตือนทั้งสองกลุ่มจาก API
+  useEffect(() => {
+    if (!userInfo) {
+      setSummary(EMPTY_SUMMARY);
+      return;
+    }
+
+    const controller = new AbortController();
+    let loading = false;
+
+    const loadSummary = async () => {
+      if (
+        loading ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
+
+      loading = true;
+
+      try {
+        const url = new URL(SUMMARY_API_URL);
+        url.searchParams.set(
+          "fleet_group",
+          "all"
+        );
+
+        const response = await fetch(
+          url.toString(),
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+            headers: {
+              Accept: "application/json",
+            },
+          }
+        );
+
+        const responseText =
+          await response.text();
+
+        if (!response.ok) {
+          throw new Error(
+            `HTTP ${response.status} ${response.statusText}\n` +
+              `URL: ${url.toString()}\n` +
+              `Response: ${responseText.slice(0, 1000)}`
+          );
+        }
+
+        let result: unknown;
+
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          throw new Error(
+            "API ไม่ได้ส่งข้อมูล JSON:\n" +
+              responseText.slice(0, 1000)
+          );
+        }
+
+        if (
+          !isRecord(result) ||
+          result.status !== "success" ||
+          !isRecord(result.summary) ||
+          !isRecord(result.summary.tcas)
+        ) {
+          throw new Error(
+            "รูปแบบข้อมูล Summary ไม่ถูกต้อง"
+          );
+        }
+
+        const data = result.summary;
+        const tcas = result.summary.tcas;
+
+        if (!controller.signal.aborted) {
+          setSummary({
+            gm: toCount(data.gm),
+            fbp: toCount(data.fbp),
+            tcas: {
+              new_replacement: toCount(
+                tcas.new_replacement
+              ),
+              supplement: toCount(
+                tcas.supplement
+              ),
+            },
+            user: toCount(data.user),
+          });
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        console.error(
+          "โหลดจำนวนแจ้งเตือนไม่สำเร็จ:",
+          error instanceof Error
+            ? error.message
+            : String(error)
+        );
+      } finally {
+        loading = false;
+      }
+    };
+
+    // ล้างเมื่อบัญชีเปลี่ยน
+    setSummary(EMPTY_SUMMARY);
+
+    const refreshSummary = () => {
+      void loadSummary();
+    };
+
+    refreshSummary();
+
+    const interval = window.setInterval(
+      refreshSummary,
+      60_000
+    );
+
+    window.addEventListener(
+      "focus",
+      refreshSummary
+    );
+
+    window.addEventListener(
+      "sidebarSummaryChanged",
+      refreshSummary
+    );
+
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+
+      window.removeEventListener(
+        "focus",
+        refreshSummary
+      );
+
+      window.removeEventListener(
+        "sidebarSummaryChanged",
+        refreshSummary
+      );
+    };
+  }, [pathname, currentSearch, userInfo]);
+
+  useEffect(() => {
+    if (
+      matchesPath(
+        pathname,
+        PATHS.main.trackFleet
+      )
+    ) {
+      setOpenGroups((previous) => ({
+        ...previous,
+        [PATHS.main.trackFleet]: true,
+      }));
+    }
+  }, [pathname, currentSearch]);
 
   const menuItems = useMemo<MenuItem[]>(() => {
     const items: MenuItem[] = [
-      { label: "Dashboard", path: PATHS.main.dashboard, icon: LayoutDashboard },
-      { label: "ขอเพิ่มกองรถ", path: PATHS.main.addFleet, icon: Truck },
+      {
+        label: "Dashboard",
+        path: PATHS.main.dashboard,
+        icon: LayoutDashboard,
+      },
+      {
+        label: "ขอเพิ่มกองรถ",
+        path: PATHS.main.addFleet,
+        icon: Truck,
+      },
     ];
 
     if (hasFullAccess || isGM) {
-      items.push({ label: "คำขอจากคลัง", path: PATHS.main.gm, icon: Inbox });
+      items.push({
+        label: "คำขอจากคลัง",
+        path: PATHS.main.gm,
+        icon: Inbox,
+        badge: summary.gm,
+      });
     }
-    if (hasFullAccess || isFBP) {
-      items.push({ label: "รอประเมินกองรถ", path: PATHS.main.waitingFleet, icon: Clock3 });
-    }
-    if (hasFullAccess || isFBP || isTCAS || isKA) {
-      const children: SubMenuItem[] = [
-        { label: "รถออกใหม่/ทดแทน", path: PATHS.main.trackFleet },
-      ];
-      if (hasFullAccess || isFBP) {
-        children.push({ label: "รถเสริม", disabled: true, tooltip: "กำลังพัฒนา" });
-      }
-      items.push({ label: "ติดตามกองรถ", path: PATHS.main.trackFleet, icon: Route, children });
-    }
-    if (hasFullAccess || isFBP || isTCAS) {
-      items.push({ label: "จัดการกระบวนการทำงาน", path: PATHS.main.manageProcess, icon: Settings });
-    }
-    if (hasFullAccess || isSuperadmin) {
-      items.push({ label: "จัดการการใช้งาน", path: PATHS.main.manageUser, icon: Shield });
-    }
-    return items;
-  }, [hasFullAccess, isGM, isFBP, isTCAS, isKA, isSuperadmin]);
 
-  // ใช้ฝ่ายต้นฉบับ เพื่อให้เปลี่ยนกลับได้
-  // แม้เลือกฝ่ายอื่นหรือเลือกคลังอยู่
-  const canChangeWarehouse =
-    normalizedDepartment === "IMP";
+    if (hasFullAccess || isFBP) {
+      items.push({
+        label: "รอประเมินกองรถ",
+        path: PATHS.main.waitingFleet,
+        icon: Clock3,
+        badge: summary.fbp,
+      });
+    }
+
+    if (
+      hasFullAccess ||
+      isFBP ||
+      isTCAS ||
+      isKA
+    ) {
+      const newReplacementPath =
+        `${PATHS.main.trackFleet}?fleet_group=new-replacement`;
+
+      const supplementPath =
+        `${PATHS.main.trackFleet}?fleet_group=supplement`;
+
+      const children: SubMenuItem[] = [
+        {
+          label: "รถออกใหม่/ทดแทน",
+          path: newReplacementPath,
+          badge:
+            summary.tcas.new_replacement,
+        },
+      ];
+
+      if (hasFullAccess || isFBP) {
+        children.push({
+          label: "รถเสริม",
+          path: supplementPath,
+          badge: summary.tcas.supplement,
+        });
+      }
+
+      items.push({
+        label: "ติดตามกองรถ",
+        path: newReplacementPath,
+        icon: Route,
+        children,
+      });
+    }
+
+    if (
+      hasFullAccess ||
+      isFBP ||
+      isTCAS
+    ) {
+      items.push({
+        label: "จัดการกระบวนการทำงาน",
+        path: PATHS.main.manageProcess,
+        icon: Settings,
+      });
+    }
+
+    if (hasFullAccess) {
+      items.push({
+        label: "จัดการการใช้งาน",
+        path: PATHS.main.manageUser,
+        icon: Shield,
+        badge: summary.user,
+      });
+    }
+
+    return items;
+  }, [
+    hasFullAccess,
+    isGM,
+    isFBP,
+    isTCAS,
+    isKA,
+    isSuperadmin,
+    summary,
+  ]);
 
   const handleChangeWarehouse = () => {
     router.push(PATHS.auth.selectDC);
@@ -440,20 +800,30 @@ export default function Sidebar({
     });
 
     setSidebarData(EMPTY_DATA);
+    setSummary(EMPTY_SUMMARY);
 
-    window.dispatchEvent(new Event("userChanged"));
+    window.dispatchEvent(
+      new Event("userChanged")
+    );
+
     window.dispatchEvent(
       new Event("selectedDCChanged")
+    );
+
+    window.dispatchEvent(
+      new Event("selectedDepartmentsChanged")
     );
 
     router.push("/");
   };
 
-  const handleGroupClick = (path: string) => {
+  const handleGroupClick = (
+    groupKey: string
+  ) => {
     if (collapsed) {
       setOpenGroups((previous) => ({
         ...previous,
-        [path]: true,
+        [groupKey]: true,
       }));
 
       onToggle();
@@ -462,23 +832,35 @@ export default function Sidebar({
 
     setOpenGroups((previous) => ({
       ...previous,
-      [path]: !previous[path],
+      [groupKey]: !previous[groupKey],
     }));
   };
 
   return (
     <div
       className="fleet-sidebar"
-      data-collapsed={collapsed ? "true" : "false"}
-      style={{ width: collapsed ? 72 : 240 }}
+      data-collapsed={
+        collapsed ? "true" : "false"
+      }
+      style={{
+        width: collapsed ? 72 : 240,
+      }}
     >
       <button
         type="button"
         onClick={onToggle}
         aria-controls="fleet-sidebar-content"
         aria-expanded={!collapsed}
-        aria-label={collapsed ? "ขยายเมนู" : "ย่อเมนู"}
-        title={collapsed ? "ขยายเมนู" : "ย่อเมนู"}
+        aria-label={
+          collapsed
+            ? "ขยายเมนู"
+            : "ย่อเมนู"
+        }
+        title={
+          collapsed
+            ? "ขยายเมนู"
+            : "ย่อเมนู"
+        }
         className="sidebar-toggle"
       >
         <span className="toggle-arrow">
@@ -532,6 +914,7 @@ export default function Sidebar({
                 <span className="profile-team-label">
                   Team:{" "}
                 </span>
+
                 <span className="profile-team-value">
                   {displayTeam}
                 </span>
@@ -540,7 +923,9 @@ export default function Sidebar({
               {canChangeWarehouse && (
                 <button
                   type="button"
-                  onClick={handleChangeWarehouse}
+                  onClick={
+                    handleChangeWarehouse
+                  }
                   disabled={collapsed}
                   aria-label="เปลี่ยนฝ่ายหรือ Warehouse"
                   title="เปลี่ยนฝ่าย / Warehouse"
@@ -562,27 +947,48 @@ export default function Sidebar({
           >
             MAIN MENU
           </span>
+
           <span className="caption-mark" />
         </div>
 
         <nav className="sidebar-nav">
           {menuItems.map((item, index) => {
             const Icon = item.icon;
+
             const isActive = matchesPath(
               pathname,
               item.path
             );
 
+            const groupKey =
+              item.path.split("?")[0];
+
             const isGroupOpen =
               !collapsed &&
-              Boolean(openGroups[item.path]);
+              Boolean(
+                openGroups[groupKey]
+              );
 
-            const submenuId = `sidebar-submenu-${index}`;
+            const submenuId =
+              `sidebar-submenu-${index}`;
+
+            const itemLabel =
+              (item.badge ?? 0) > 0
+                ? `${item.label} ${item.badge} รายการ`
+                : item.label;
 
             const content = (
               <span className="menu-content">
                 <span className="menu-icon">
                   <Icon size={17} />
+
+                  {collapsed &&
+                    (item.badge ?? 0) > 0 && (
+                      <span
+                        className="collapsed-notification-dot"
+                        aria-hidden="true"
+                      />
+                    )}
                 </span>
 
                 <span
@@ -592,14 +998,28 @@ export default function Sidebar({
                   {item.label}
                 </span>
 
+                {!collapsed &&
+                  (item.badge ?? 0) > 0 && (
+                    <span
+                      className="notification-badge"
+                      aria-hidden="true"
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+
                 {item.children && (
                   <span
                     className={`group-arrow fade-content ${
-                      isGroupOpen ? "is-open" : ""
+                      isGroupOpen
+                        ? "is-open"
+                        : ""
                     }`}
                     aria-hidden="true"
                   >
-                    <ChevronDown size={14} />
+                    <ChevronDown
+                      size={14}
+                    />
                   </span>
                 )}
               </span>
@@ -614,18 +1034,22 @@ export default function Sidebar({
                   <button
                     type="button"
                     onClick={() =>
-                      handleGroupClick(item.path)
+                      handleGroupClick(
+                        groupKey
+                      )
                     }
-                    aria-label={item.label}
-                    aria-expanded={isGroupOpen}
-                    aria-controls={submenuId}
-                    title={
-                      collapsed
-                        ? item.label
-                        : undefined
+                    aria-label={itemLabel}
+                    aria-expanded={
+                      isGroupOpen
                     }
+                    aria-controls={
+                      submenuId
+                    }
+                    title={itemLabel}
                     className={`menu-item ${
-                      isActive ? "is-active" : ""
+                      isActive
+                        ? "is-active"
+                        : ""
                     }`}
                   >
                     {content}
@@ -633,17 +1057,17 @@ export default function Sidebar({
                 ) : (
                   <Link
                     href={item.path}
-                    aria-label={item.label}
+                    aria-label={itemLabel}
                     aria-current={
-                      isActive ? "page" : undefined
-                    }
-                    title={
-                      collapsed
-                        ? item.label
+                      isActive
+                        ? "page"
                         : undefined
                     }
+                    title={itemLabel}
                     className={`menu-item ${
-                      isActive ? "is-active" : ""
+                      isActive
+                        ? "is-active"
+                        : ""
                     }`}
                   >
                     {content}
@@ -653,79 +1077,130 @@ export default function Sidebar({
                 {item.children && (
                   <div
                     id={submenuId}
-                    aria-hidden={!isGroupOpen}
+                    aria-hidden={
+                      !isGroupOpen
+                    }
                     className={`submenu-motion ${
-                      isGroupOpen ? "is-open" : ""
+                      isGroupOpen
+                        ? "is-open"
+                        : ""
                     }`}
                   >
                     <div className="submenu-clip">
                       <div className="submenu-list">
-                        {item.children.map((child) => {
-                          if (
-                            child.disabled ||
-                            !child.path
-                          ) {
-                            return (
-                              <div
-                                key={child.label}
-                                className="disabled-item-wrap"
-                              >
-                                <button
-                                  type="button"
-                                  tabIndex={
-                                    isGroupOpen ? 0 : -1
+                        {item.children.map(
+                          (child) => {
+                            if (
+                              child.disabled ||
+                              !child.path
+                            ) {
+                              return (
+                                <div
+                                  key={
+                                    child.label
                                   }
-                                  aria-disabled="true"
-                                  title={
-                                    child.tooltip ||
-                                    "กำลังพัฒนา"
-                                  }
-                                  className="submenu-item is-disabled"
+                                  className="disabled-item-wrap"
                                 >
-                                  <span className="submenu-dot" />
-                                  {child.label}
-                                </button>
+                                  <button
+                                    type="button"
+                                    tabIndex={
+                                      isGroupOpen
+                                        ? 0
+                                        : -1
+                                    }
+                                    aria-disabled="true"
+                                    title={
+                                      child.tooltip ||
+                                      "กำลังพัฒนา"
+                                    }
+                                    className="submenu-item is-disabled"
+                                  >
+                                    <span className="submenu-dot" />
 
-                                <span
-                                  role="tooltip"
-                                  className="dev-tooltip"
-                                >
-                                  {child.tooltip ||
-                                    "กำลังพัฒนา"}
+                                    <span className="submenu-label">
+                                      {
+                                        child.label
+                                      }
+                                    </span>
+                                  </button>
+
+                                  <span
+                                    role="tooltip"
+                                    className="dev-tooltip"
+                                  >
+                                    {child.tooltip ||
+                                      "กำลังพัฒนา"}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            const isChildActive =
+                              matchesMenuPath(
+                                pathname,
+                                currentSearch,
+                                child.path
+                              );
+
+                            const childLabel =
+                              (child.badge ??
+                                0) > 0
+                                ? `${child.label} ${child.badge} รายการ`
+                                : child.label;
+
+                            return (
+                              <Link
+                                key={
+                                  child.label
+                                }
+                                href={
+                                  child.path
+                                }
+                                tabIndex={
+                                  isGroupOpen
+                                    ? 0
+                                    : -1
+                                }
+                                aria-label={
+                                  childLabel
+                                }
+                                title={
+                                  childLabel
+                                }
+                                aria-current={
+                                  isChildActive
+                                    ? "page"
+                                    : undefined
+                                }
+                                className={`submenu-item ${
+                                  isChildActive
+                                    ? "is-active"
+                                    : ""
+                                }`}
+                              >
+                                <span className="submenu-dot" />
+
+                                <span className="submenu-label">
+                                  {
+                                    child.label
+                                  }
                                 </span>
-                              </div>
+
+                                {(child.badge ??
+                                  0) > 0 && (
+                                  <span
+                                    className="notification-badge"
+                                    aria-hidden="true"
+                                  >
+                                    {
+                                      child.badge
+                                    }
+                                  </span>
+                                )}
+                              </Link>
                             );
                           }
-
-                          const isChildActive =
-                            matchesPath(
-                              pathname,
-                              child.path
-                            );
-
-                          return (
-                            <Link
-                              key={child.label}
-                              href={child.path}
-                              tabIndex={
-                                isGroupOpen ? 0 : -1
-                              }
-                              aria-current={
-                                isChildActive
-                                  ? "page"
-                                  : undefined
-                              }
-                              className={`submenu-item ${
-                                isChildActive
-                                  ? "is-active"
-                                  : ""
-                              }`}
-                            >
-                              <span className="submenu-dot" />
-                              {child.label}
-                            </Link>
-                          );
-                        })}
+                        )}
                       </div>
                     </div>
                   </div>
@@ -741,7 +1216,9 @@ export default function Sidebar({
             onClick={handleLogout}
             aria-label="ออกจากระบบ"
             title={
-              collapsed ? "ออกจากระบบ" : undefined
+              collapsed
+                ? "ออกจากระบบ"
+                : undefined
             }
             className="menu-item logout-item"
           >
@@ -1064,7 +1541,7 @@ export default function Sidebar({
           display: flex;
           flex: 0 0 216px;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           width: 216px;
           height: 44px;
           padding: 0 8px;
@@ -1072,6 +1549,7 @@ export default function Sidebar({
         }
 
         .menu-icon {
+          position: relative;
           display: flex;
           flex: 0 0 32px;
           align-items: center;
@@ -1092,9 +1570,42 @@ export default function Sidebar({
         .menu-label {
           min-width: 0;
           flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
           white-space: nowrap;
           font-size: 12px;
           font-weight: 600;
+        }
+
+        .notification-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          min-width: 23px;
+          height: 20px;
+          padding: 0 6px;
+          box-sizing: border-box;
+          border-radius: 999px;
+          background: #ef4444;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 1;
+          font-variant-numeric: tabular-nums;
+          box-shadow: 0 2px 6px
+            rgba(239, 68, 68, 0.25);
+        }
+
+        .collapsed-notification-dot {
+          position: absolute;
+          top: 1px;
+          right: 1px;
+          width: 7px;
+          height: 7px;
+          border: 1.5px solid #172554;
+          border-radius: 50%;
+          background: #ef4444;
         }
 
         .group-arrow {
@@ -1138,9 +1649,9 @@ export default function Sidebar({
         }
 
         .submenu-list {
-          width: 174px;
-          margin: 8px 0 4px 40px;
-          padding-left: 12px;
+          width: calc(100% - 28px);
+          margin: 8px 0 4px 28px;
+          padding-left: 8px;
           box-sizing: border-box;
           border-left: 1px solid
             rgba(191, 219, 254, 0.16);
@@ -1149,11 +1660,11 @@ export default function Sidebar({
         .fleet-sidebar :global(.submenu-item) {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           width: 100%;
           min-height: 38px;
           margin-top: 3px;
-          padding: 8px 10px;
+          padding: 8px;
           box-sizing: border-box;
           border: 0;
           border-radius: 9px;
@@ -1176,6 +1687,14 @@ export default function Sidebar({
           color: #dbeafe;
           box-shadow: inset 0 0 0 1px
             rgba(147, 197, 253, 0.12);
+        }
+
+        .submenu-label {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .submenu-dot {
