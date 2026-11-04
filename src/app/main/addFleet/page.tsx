@@ -1,7 +1,7 @@
 "use client";
 
 import NewVehicleRequestModal from "./components/NewVehicleRequestModal";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DateRange, RangeKeyDict } from "react-date-range";
 import "react-date-range/dist/styles.css";
@@ -325,7 +325,7 @@ function SearchableFilterDropdown({
   );
 }
 
-export default function AddFleetPage() {
+function AddFleetContent() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [processVehicleRows, setProcessVehicleRows] = useState<RequestItem[]>(
     [],
@@ -3843,5 +3843,19 @@ export default function AddFleetPage() {
         `}</style>
       </main>
     </div>
+  );
+}
+
+export default function AddFleetPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 text-sm text-slate-500">
+          กำลังโหลดข้อมูล...
+        </div>
+      }
+    >
+      <AddFleetContent />
+    </Suspense>
   );
 }
