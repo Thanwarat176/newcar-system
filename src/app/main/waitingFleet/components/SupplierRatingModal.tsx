@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Save, Search, Star, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { History, RefreshCw, Save, Search, Star, X } from "lucide-react";
 
 const BASE = "http://192.168.158.210/api_new_truck/api";
 const PAGE_SIZE = 20;
@@ -28,7 +28,81 @@ async function readResponse(response: Response): Promise<{ success?: boolean; me
   catch { throw new Error(`API ตอบกลับไม่ใช่ JSON (HTTP ${response.status})`); }
 }
 
+type HistoryRow = { history_id: string | number; rating: string; updated_at: string; update_by: string | null };
+
+function RatingHistoryModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError(""); setRows([]);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${BASE}/rate_supplier.php?id=${encodeURIComponent(supplier.id)}&history=1`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const result = await response.json();
+        if (!response.ok || result?.success !== true) throw new Error(result?.message || "โหลดประวัติไม่สำเร็จ");
+        if (!Array.isArray(result.data)) throw new Error("API ยังไม่รองรับประวัติ กรุณาอัปเดต rate_supplier.php");
+        const valid = result.data.every((row: unknown) =>
+          row !== null && typeof row === "object" &&
+          "history_id" in row && "rating" in row && "updated_at" in row
+        );
+        if (!valid) throw new Error("รูปแบบข้อมูลประวัติไม่ถูกต้อง");
+        if (!controller.signal.aborted) setRows(result.data);
+      } catch (e) {
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "โหลดประวัติไม่สำเร็จ");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [supplier.id, retry]);
+
+  return (
+    <dialog ref={dialogRef} aria-labelledby="supplier-history-title"
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
+      onKeyDown={event => event.stopPropagation()}
+      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+      className="m-auto max-h-[85vh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/60">
+      <header className="flex items-start justify-between gap-3 border-b border-blue-100 bg-blue-50 p-5">
+        <div><h3 id="supplier-history-title" className="flex items-center gap-2 text-base font-bold"><History size={18} />ประวัติเกรดผู้ประกอบการ</h3>
+          <p className="mt-2 text-sm">{supplier.name}</p><p className="mt-1 text-xs text-slate-500">รหัสซับ: {supplier.code} · เรียงล่าสุดก่อน</p></div>
+        <button type="button" autoFocus onClick={onClose} aria-label="ปิดประวัติ" className="rounded-lg p-2 hover:bg-blue-100"><X size={20} /></button>
+      </header>
+      <div className="p-5">
+        {loading ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังโหลดประวัติ...</p> :
+          error ? <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}<button type="button" onClick={() => setRetry(value => value + 1)} className="ml-3 font-semibold underline">ลองอีกครั้ง</button></div> :
+          rows.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีประวัติการบันทึกเกรด</p> :
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">เกรด</th><th className="p-3">วันที่บันทึก</th><th className="p-3">ผู้บันทึก</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">{rows.map((row, index) => {
+              const match = String(row.updated_at ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/);
+              const date = match ? `${match[3]}/${match[2]}/${match[1]} ${match[4] || ""}` : row.updated_at;
+              return <tr key={row.history_id}><td className="p-3"><span className="font-bold text-blue-700">{row.rating}</span>{index === 0 && <span className="ml-2 text-[10px] text-emerald-600">ล่าสุด</span>}</td><td className="whitespace-nowrap p-3 text-xs">{date || "ไม่ระบุ"}</td><td className="break-words p-3 text-xs">{row.update_by || "ไม่ระบุ"}</td></tr>;
+            })}</tbody></table></div>}
+      </div>
+      <footer className="flex justify-end border-t border-slate-100 p-4"><button type="button" onClick={onClose} className="rounded-xl bg-blue-700 px-5 py-2 text-sm font-semibold text-white">ปิดประวัติ</button></footer>
+    </dialog>
+  );
+}
+
 export default function SupplierRatingModal({ onClose }: { onClose: () => void }) {
+  const [historySupplier, setHistorySupplier] = useState<Supplier | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [ratings, setRatings] = useState<Record<string, RatingState>>({});
   const [search, setSearch] = useState("");
@@ -45,7 +119,7 @@ export default function SupplierRatingModal({ onClose }: { onClose: () => void }
       const list: unknown = Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : result?.result;
       if (!Array.isArray(list)) throw new Error("รูปแบบข้อมูลรายชื่อผู้ประกอบการไม่ถูกต้อง");
       const rows = list.filter((x): x is RawSupplier => !!x && typeof x === "object").map(item => {
-        const id = valueOf(item, "id", "company_id", "supplier_id");
+        const id = valueOf(item, "company_id", "supplier_id", "id");
         return { id, code: valueOf(item, "code", "company_code", "supplier_code", "vendor_code") || id, name: valueOf(item, "company_name", "name") };
       }).filter(item => item.id && item.name);
       setSuppliers(Array.from(new Map(rows.map(row => [row.id, row])).values()).sort((a, b) => a.name.localeCompare(b.name, "th", { numeric: true })));
@@ -56,10 +130,10 @@ export default function SupplierRatingModal({ onClose }: { onClose: () => void }
 
   useEffect(() => { void loadSuppliers(); }, [loadSuppliers]);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !historySupplier) onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, historySupplier]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -104,7 +178,10 @@ export default function SupplierRatingModal({ onClose }: { onClose: () => void }
       const surname = String(user.surname || user.SURNAME || "").trim();
       const employeeId = String(user.em_id || user.employee_id || user.EMPLOYEE_ID || user.id || "").trim();
       const fullName = `${name} ${surname}`.trim();
-      const updateBy = fullName || employeeId;
+      const updateBy =
+        fullName && employeeId
+          ? `${fullName} (${employeeId})`
+          : fullName || employeeId;
       if (!updateBy) throw new Error("ไม่พบชื่อหรือรหัสผู้ใช้งาน กรุณาเข้าสู่ระบบใหม่");
       const res = await fetch(`${BASE}/rate_supplier.php`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ id: item.id, rating: selected, update_by: updateBy }) });
       const result = await readResponse(res);
@@ -140,12 +217,13 @@ export default function SupplierRatingModal({ onClose }: { onClose: () => void }
                 return <tr key={item.id} className="align-top hover:bg-blue-50/50"><td className="px-4 py-4 text-center text-xs text-slate-400">{(activePage - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><span className="inline-block max-w-full break-all rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">{item.code}</span></td><td className="break-words px-4 py-4 text-sm font-semibold text-slate-800">{item.name}</td><td className="px-4 py-3">
                   <select aria-label={`คะแนน ${item.name}`} value={state?.value || ""} disabled={!state || state.status !== "ready" || state.saving} onChange={e => setRatings(prev => ({ ...prev, [item.id]: { ...prev[item.id], value: ratingOf(e.target.value), message: "", saveError: false } }))} className={`h-10 w-full rounded-xl border px-3 text-xs font-semibold outline-none transition focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${unrated ? "border-rose-300 bg-rose-50 text-rose-700 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 bg-white text-slate-700 focus:border-blue-400 focus:ring-blue-100"}`}><option value="">เลือกระดับคะแนน</option><option value="E">E (Excellent)</option><option value="G">G (Good)</option><option value="P">P (Pass)</option><option value="I">I (Improvement Required)</option></select>
                   {(!state || state.status === "loading") && <p className="mt-1.5 text-[11px] text-slate-400">กำลังโหลดคะแนน...</p>}{unrated && <p className="mt-1.5 text-[11px] font-medium text-rose-600">ยังไม่ได้เลือกระดับคะแนน</p>}{changed && !state?.message && <p className="mt-1.5 text-[11px] text-amber-600">ยังไม่ได้บันทึก</p>}{state?.message && <p role={state.status === "error" || state.saveError ? "alert" : "status"} className={`mt-1.5 break-words text-[11px] ${state.status === "error" || state.saveError ? "text-rose-600" : "text-emerald-600"}`}>{state.message}</p>}{state?.status === "error" && <button type="button" onClick={() => void loadRating(item.id)} className="mt-1 text-xs font-semibold text-blue-700 underline">โหลดคะแนนอีกครั้ง</button>}
-                </td><td className="px-4 py-4 text-xs leading-relaxed text-slate-500">{state?.status === "ready" && state.saved ? <><p className="break-words font-medium text-slate-700">{state.updateBy || "ไม่ระบุ"}</p><p className="mt-1 text-slate-400">{displayDate}</p></> : <span className="text-slate-400">—</span>}</td><td className="px-4 py-3 text-center"><button type="button" onClick={() => void saveRating(item)} disabled={!state || state.status !== "ready" || !state.value || state.value === state.saved || state.saving} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-700 px-3 text-xs font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"><Save size={14} />{state?.saving ? "บันทึก..." : "บันทึก"}</button></td></tr>;
+                </td><td className="px-4 py-4 text-xs leading-relaxed text-slate-500">{state?.status === "ready" && state.saved ? <><p className="break-words font-medium text-slate-700">{state.updateBy || "ไม่ระบุ"}</p><p className="mt-1 text-slate-400">{displayDate}</p></> : <span className="text-slate-400">—</span>}</td><td className="px-4 py-3 text-center"><button type="button" onClick={() => void saveRating(item)} disabled={!state || state.status !== "ready" || !state.value || state.value === state.saved || state.saving} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-blue-700 px-3 text-xs font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"><Save size={14} />{state?.saving ? "บันทึก..." : "บันทึก"}</button><button type="button" onClick={() => setHistorySupplier(item)} disabled={state?.saving} aria-label={`ดูประวัติ ${item.name}`} className="mt-2 inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-200 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40"><History size={14} />ดูประวัติ</button></td></tr>;
               })}
             </tbody></table></div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-4 text-xs text-slate-500 sm:px-5"><span>แสดง {filtered.length ? (activePage - 1) * PAGE_SIZE + 1 : 0}–{Math.min(activePage * PAGE_SIZE, filtered.length)} จาก {filtered.length.toLocaleString()} รายการ</span><div className="flex items-center gap-2"><button type="button" disabled={activePage <= 1} onClick={() => setPage(activePage - 1)} className="rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50 disabled:opacity-40">ก่อนหน้า</button><span className="px-2">หน้า {activePage} / {totalPages}</span><button type="button" disabled={activePage >= totalPages} onClick={() => setPage(activePage + 1)} className="rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50 disabled:opacity-40">ถัดไป</button></div></div>
           </div>
         </div>
+        {historySupplier && <RatingHistoryModal supplier={historySupplier} onClose={() => setHistorySupplier(null)} />}
         <footer className="flex shrink-0 justify-end border-t border-slate-100 bg-white px-5 py-4"><button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">ปิด</button></footer>
       </div>
     </div>

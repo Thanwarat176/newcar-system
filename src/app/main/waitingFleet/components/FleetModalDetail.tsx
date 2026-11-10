@@ -9,6 +9,7 @@ import {
     type ReactNode,
 } from "react";
 import CheckDC from "../../component/CheckDC";
+import { History, X } from "lucide-react";
 
 interface RequestDetailItem {
     id?: string | number;
@@ -556,6 +557,80 @@ function FleetPopup({
     );
 }
 
+type HistorySupplier = { id: string; code: string; name: string };
+type HistoryRow = { history_id: string | number; rating: string; updated_at: string; update_by: string | null };
+
+function RatingHistoryModal({ supplier, onClose }: { supplier: HistorySupplier; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError(""); setRows([]);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/rate_supplier.php?id=${encodeURIComponent(supplier.id)}&history=1`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const result = await response.json();
+        if (!response.ok || result?.success !== true) throw new Error(result?.message || "โหลดประวัติไม่สำเร็จ");
+        if (!Array.isArray(result.data)) throw new Error("API ยังไม่รองรับประวัติ กรุณาอัปเดต rate_supplier.php");
+        const valid = result.data.every((row: unknown) =>
+          row !== null && typeof row === "object" &&
+          "history_id" in row && "rating" in row && "updated_at" in row
+        );
+        if (!valid) throw new Error("รูปแบบข้อมูลประวัติไม่ถูกต้อง");
+        if (!controller.signal.aborted) setRows(result.data);
+      } catch (e) {
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "โหลดประวัติไม่สำเร็จ");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [supplier.id, retry]);
+
+  return (
+    <dialog ref={dialogRef} aria-labelledby="supplier-history-title"
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
+      onKeyDown={event => event.stopPropagation()}
+      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+      className="m-auto max-h-[85vh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/60">
+      <header className="flex items-start justify-between gap-3 border-b border-blue-100 bg-blue-50 p-5">
+        <div><h3 id="supplier-history-title" className="flex items-center gap-2 text-base font-bold"><History size={18} />ประวัติเกรดผู้ประกอบการ</h3>
+          <p className="mt-2 text-sm">{supplier.name}</p><p className="mt-1 text-xs text-slate-500">รหัสซับ: {supplier.code} · เรียงล่าสุดก่อน</p></div>
+        <button type="button" autoFocus onClick={onClose} aria-label="ปิดประวัติ" className="rounded-lg p-2 hover:bg-blue-100"><X size={20} /></button>
+      </header>
+      <div className="p-5">
+        {loading ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังโหลดประวัติ...</p> :
+          error ? <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}<button type="button" onClick={() => setRetry(value => value + 1)} className="ml-3 font-semibold underline">ลองอีกครั้ง</button></div> :
+          rows.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีประวัติการบันทึกเกรด</p> :
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">เกรด</th><th className="p-3">วันที่บันทึก</th><th className="p-3">ผู้บันทึก</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">{rows.map((row, index) => {
+              const match = String(row.updated_at ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/);
+              const date = match ? `${match[3]}/${match[2]}/${match[1]} ${match[4] || ""}` : row.updated_at;
+              return <tr key={row.history_id}><td className="p-3"><span className="font-bold text-blue-700">{row.rating}</span>{index === 0 && <span className="ml-2 text-[10px] text-emerald-600">ล่าสุด</span>}</td><td className="whitespace-nowrap p-3 text-xs">{date || "ไม่ระบุ"}</td><td className="break-words p-3 text-xs">{row.update_by || "ไม่ระบุ"}</td></tr>;
+            })}</tbody></table></div>}
+      </div>
+      <footer className="flex justify-end border-t border-slate-100 p-4"><button type="button" onClick={onClose} className="rounded-xl bg-blue-700 px-5 py-2 text-sm font-semibold text-white">ปิดประวัติ</button></footer>
+    </dialog>
+  );
+}
+
 export default function FleetModalDetail({
     open,
     onClose,
@@ -563,6 +638,7 @@ export default function FleetModalDetail({
     allRequests,
     onSuccess,
 }: GMModalDetailProps) {
+    const [historySupplier, setHistorySupplier] = useState<HistorySupplier | null>(null);
     const [saving, setSaving] = useState(false);
     const [decisionCompleted, setDecisionCompleted] = useState(false);
     const [message, setMessage] = useState<Notification | null>(null);
@@ -745,6 +821,7 @@ export default function FleetModalDetail({
         setSessionLicenseDecisions({});
         setSelectedRejectedLicenses([]);
         setSupplierRatings({});
+        setHistorySupplier(null);
         setRejectReason("");
         setBatchRejectedQty(0);
         setMessage(null);
@@ -2176,7 +2253,7 @@ export default function FleetModalDetail({
         <div
             role="dialog"
             aria-modal="true"
-            aria-label="ประเมินกองรถ"
+            aria-label="สรรหาผู้ประกอบการ"
             className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/40 p-2 backdrop-blur-sm sm:p-4"
             onMouseDown={(event) => {
                 if (
@@ -2204,7 +2281,7 @@ export default function FleetModalDetail({
 
                             <div className="min-w-0">
                                 <h1 className="text-lg font-semibold text-slate-900">
-                                    ประเมินกองรถ
+                                    สรรหาผู้ประกอบการ
                                 </h1>
 
                                 <p className="mt-1 text-xs text-slate-500">
@@ -2309,7 +2386,7 @@ export default function FleetModalDetail({
                                             ]
                                             : []),
                                         {
-                                            label: "จำนวนที่ FBP ประเมินกองรถและอนุมัติ",
+                                            label: "จำนวนที่ FBP สรรหาผู้ประกอบการและอนุมัติ",
                                             value: savedApprovedQty,
                                             color: "border-emerald-100 bg-emerald-50/70",
                                             dot: "bg-emerald-500",
@@ -2659,6 +2736,14 @@ export default function FleetModalDetail({
                                                                 {ratingSavingRowId === row.rowId
                                                                     ? "กำลังบันทึก..."
                                                                     : "บันทึก"}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={popupBusy || !row.companyId}
+                                                                onClick={() => setHistorySupplier({ id: row.companyId, code: row.companyId, name: row.companyName })}
+                                                                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+                                                            >
+                                                                <History size={14} />ดูประวัติ
                                                             </button>
                                                         </div>
                                                     </div>
@@ -3549,6 +3634,10 @@ export default function FleetModalDetail({
                     </aside>
                 </div>
             </div>
+
+            {historySupplier && (
+                <RatingHistoryModal supplier={historySupplier} onClose={() => setHistorySupplier(null)} />
+            )}
 
             {message ? (
                 <FleetPopup

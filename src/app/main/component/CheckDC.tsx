@@ -357,18 +357,18 @@ function getStatusText(status?: string): string {
     return "รออนุมัติ";
   }
 
-  // รอประเมินกองรถ
+  // รอสรรหาผู้ประกอบการ
   if (
     [
       "wait fleet",
       "waiting fleet",
       "pending_fleet",
       "fleet_pending",
-      "รอประเมินกองรถ",
+      "รอสรรหาผู้ประกอบการ",
       "รอกองรถประเมิน",
     ].includes(value)
   ) {
-    return "รอประเมินกองรถ";
+    return "รอสรรหาผู้ประกอบการ";
   }
 
   // กำลังดำเนินการ
@@ -435,7 +435,7 @@ function getStatusClass(status?: string): string {
 
   if (
     text === "กำลังดำเนินการ" ||
-    text === "รอประเมินกองรถ"
+    text === "รอสรรหาผู้ประกอบการ"
   ) {
     return "border-blue-200 bg-blue-50 text-blue-700";
   }
@@ -1204,7 +1204,7 @@ export default function CheckDC({
     ).length;
 
     const progressCount = sameDcRequests.filter((item) =>
-      ["กำลังดำเนินการ", "รอประเมินกองรถ"].includes(
+      ["กำลังดำเนินการ", "รอสรรหาผู้ประกอบการ"].includes(
         getStatusText(item.status),
       ),
     ).length;
@@ -1793,7 +1793,7 @@ export default function CheckDC({
                     : []),
                   ...(hasDisplayValue(resolvedData.approved_qty)
                     ? [{
-                        label: "จำนวนที่ FBP ประเมินกองรถและอนุมัติ",
+                        label: "จำนวนที่ FBP สรรหาผู้ประกอบการและอนุมัติ",
                         value: `${formatNumber(resolvedData.approved_qty)} คัน`,
                         sub: "FBP assessed and approved quantity",
                         code: "FBP",

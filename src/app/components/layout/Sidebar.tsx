@@ -714,7 +714,7 @@ function SidebarContent({
 
     if (hasFullAccess || isFBP) {
       items.push({
-        label: "รอประเมินกองรถ",
+        label: "สรรหาผู้ประกอบการ",
         path: PATHS.main.waitingFleet,
         icon: Clock3,
         badge: summary.fbp,

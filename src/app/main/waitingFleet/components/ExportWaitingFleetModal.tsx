@@ -877,8 +877,8 @@ export default function ExportRequestModal({
 
         const statusMap: Record<string, string> = {
             gm_pending: "GM กำลังอนุมัติ",
-            center_pending: "กำลังประเมินกองรถ (FBP)",
-            fbp_pending: "กำลังประเมินกองรถ (FBP)",
+            center_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
+            fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
             process: "รอดำเนินการตามกระบวนการ (TCAS)",
             progress: "รอดำเนินการตามกระบวนการ (TCAS)",
             confirm_request: "รอดำเนินการตามกระบวนการ (TCAS)",
@@ -1980,13 +1980,13 @@ export default function ExportRequestModal({
                 "บริษัทขนส่งที่ถูกทดแทน":
                     item.company_name_replace || "",
 
-                "หมายเหตุการประเมินกองรถ":
+                "หมายเหตุการสรรหาผู้ประกอบการ":
                     item.fbp_remark || "",
 
-                "สถานะการประเมินกองรถ":
+                "สถานะการสรรหาผู้ประกอบการ":
                     item.fbp_status || "",
 
-                "วันที่ประเมินกองรถ":
+                "วันที่สรรหาผู้ประกอบการ":
                     item.fbp_approved_date || "",
             };
         });
@@ -2574,15 +2574,15 @@ export default function ExportRequestModal({
                                             </th>
 
                                             <th className="px-3 py-3">
-                                                หมายเหตุการประเมินกองรถ
+                                                หมายเหตุการสรรหาผู้ประกอบการ
                                             </th>
 
                                             <th className="px-3 py-3">
-                                                สถานะการประเมินกองรถ
+                                                สถานะการสรรหาผู้ประกอบการ
                                             </th>
 
                                             <th className="whitespace-nowrap px-3 py-3">
-                                                วันที่ประเมินกองรถ
+                                                วันที่สรรหาผู้ประกอบการ
                                             </th>
                                         </tr>
                                     </thead>

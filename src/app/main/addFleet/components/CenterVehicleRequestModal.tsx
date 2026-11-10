@@ -7,7 +7,7 @@ import React, {
     useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { Truck, X, Save } from "lucide-react";
+import { Truck, X, Save, History } from "lucide-react";
 import { Calendar } from "react-date-range";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
@@ -30,6 +30,12 @@ interface TruckItem {
     truck_type?: string;
     [key: string]: unknown;
 }
+
+const fleetTypeLabels = new Map([
+    ["4WCARGO", "4W Cargo Box"],
+    ["C-4WJ", "4WJC"],
+    ["C-4W H1.9", "4W1.9m"],
+]);
 
 interface UserInfo {
     em_id?: string | number;
@@ -321,6 +327,95 @@ function SummaryField({
     );
 }
 
+const supplierGradeLabels = new Map([
+    ["E", "Excellent"],
+    ["G", "Good"],
+    ["P", "Pass"],
+    ["I", "Improvement Required"],
+]);
+
+type SavedSupplierGrade = { rating: string; updatedAt: string };
+
+function formatSupplierGradeDate(value: unknown): string {
+    if (typeof value !== "string") return "";
+    const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|[ T])/.exec(value.trim());
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+}
+
+type HistorySupplier = { id: string; code: string; name: string };
+type HistoryRow = { history_id: string | number; rating: string; updated_at: string; update_by: string | null };
+
+function RatingHistoryModal({ supplier, onClose }: { supplier: HistorySupplier; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError(""); setRows([]);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/rate_supplier.php?id=${encodeURIComponent(supplier.id)}&history=1`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const result = await response.json();
+        if (!response.ok || result?.success !== true) throw new Error(result?.message || "โหลดประวัติไม่สำเร็จ");
+        if (!Array.isArray(result.data)) throw new Error("API ยังไม่รองรับประวัติ กรุณาอัปเดต rate_supplier.php");
+        const valid = result.data.every((row: unknown) =>
+          row !== null && typeof row === "object" &&
+          "history_id" in row && "rating" in row && "updated_at" in row
+        );
+        if (!valid) throw new Error("รูปแบบข้อมูลประวัติไม่ถูกต้อง");
+        if (!controller.signal.aborted) setRows(result.data);
+      } catch (e) {
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "โหลดประวัติไม่สำเร็จ");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [supplier.id, retry]);
+
+  return (
+    <dialog ref={dialogRef} aria-labelledby="supplier-history-title"
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
+      onKeyDown={event => event.stopPropagation()}
+      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+      className="m-auto max-h-[85vh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/60">
+      <header className="flex items-start justify-between gap-3 border-b border-blue-100 bg-blue-50 p-5">
+        <div><h3 id="supplier-history-title" className="flex items-center gap-2 text-base font-bold"><History size={18} />ประวัติเกรดผู้ประกอบการ</h3>
+          <p className="mt-2 text-sm">{supplier.name}</p><p className="mt-1 text-xs text-slate-500">รหัสซับ: {supplier.code} · เรียงล่าสุดก่อน</p></div>
+        <button type="button" autoFocus onClick={onClose} aria-label="ปิดประวัติ" className="rounded-lg p-2 hover:bg-blue-100"><X size={20} /></button>
+      </header>
+      <div className="p-5">
+        {loading ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังโหลดประวัติ...</p> :
+          error ? <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}<button type="button" onClick={() => setRetry(value => value + 1)} className="ml-3 font-semibold underline">ลองอีกครั้ง</button></div> :
+          rows.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีประวัติการบันทึกเกรด</p> :
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">เกรด</th><th className="p-3">วันที่บันทึก</th><th className="p-3">ผู้บันทึก</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">{rows.map((row, index) => {
+              const match = String(row.updated_at ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/);
+              const date = match ? `${match[3]}/${match[2]}/${match[1]} ${match[4] || ""}` : row.updated_at;
+              return <tr key={row.history_id}><td className="p-3"><span className="font-bold text-blue-700">{row.rating}</span>{index === 0 && <span className="ml-2 text-[10px] text-emerald-600">ล่าสุด</span>}</td><td className="whitespace-nowrap p-3 text-xs">{date || "ไม่ระบุ"}</td><td className="break-words p-3 text-xs">{row.update_by || "ไม่ระบุ"}</td></tr>;
+            })}</tbody></table></div>}
+      </div>
+      <footer className="flex justify-end border-t border-slate-100 p-4"><button type="button" onClick={onClose} className="rounded-xl bg-blue-700 px-5 py-2 text-sm font-semibold text-white">ปิดประวัติ</button></footer>
+    </dialog>
+  );
+}
+
 export default function CenterVehicleRequestModal({
     open,
     onClose,
@@ -329,6 +424,51 @@ export default function CenterVehicleRequestModal({
     providerOptions,
     renderSourceTabs,
 }: VehicleRequestModalProps) {
+    const [historySupplier, setHistorySupplier] = useState<HistorySupplier | null>(null);
+    useEffect(() => { if (!open) setHistorySupplier(null); }, [open]);
+    const [newSupplierGrade, setNewSupplierGrade] = useState("");
+    const [gradeSaving, setGradeSaving] = useState(false);
+    const gradeBusyRef = useRef(false);
+    const [gradeMessage, setGradeMessage] = useState("");
+    const [gradeError, setGradeError] = useState(false);
+    const [gradeLoadErrors, setGradeLoadErrors] = useState<Record<string, boolean>>({});
+    const gradeFetchVersion = useRef(0);
+    const [savedSupplierGrades, setSavedSupplierGrades] = useState<Record<string, SavedSupplierGrade>>({});
+    const saveNewSupplierGrade = async () => {
+        if (!selectedProviderId || !supplierGradeLabels.has(newSupplierGrade) || gradeBusyRef.current) return;
+        const supplierId = selectedProviderId;
+        const grade = newSupplierGrade;
+        gradeBusyRef.current = true;
+        setGradeSaving(true); setGradeMessage(""); setGradeError(false);
+        try {
+            const raw = localStorage.getItem("userInfo") || localStorage.getItem("user") || localStorage.getItem("authUser");
+            const user = raw ? JSON.parse(raw) : null;
+            if (!user || typeof user !== "object" || Array.isArray(user)) throw new Error("กรุณาเข้าสู่ระบบใหม่เพื่อระบุผู้บันทึก");
+            const fullName = [user.name || user.NAME, user.surname || user.SURNAME].filter(Boolean).join(" ").trim();
+            const employeeId = String(user.em_id || user.employee_id || user.EMPLOYEE_ID || user.id || "").trim();
+            const updateBy = fullName && employeeId ? `${fullName} (${employeeId})` : fullName || employeeId;
+            if (!updateBy) throw new Error("ไม่พบข้อมูลผู้บันทึก กรุณาเข้าสู่ระบบใหม่");
+            const response = await fetch(`${API_BASE}/rate_supplier.php`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify({ id: String(supplierId), rating: grade, update_by: updateBy }),
+            });
+            const result = await response.json();
+            if (!response.ok || result?.success !== true) throw new Error(result?.message || "บันทึกเกรดไม่สำเร็จ");
+            setSavedSupplierGrades(previous => ({
+                ...previous,
+                [supplierId]: {
+                    rating: String(result.data?.rating || grade).trim(),
+                    updatedAt: formatSupplierGradeDate(result.data?.updated_at),
+                },
+            }));
+            setNewSupplierGrade("");
+            setGradeMessage("บันทึกเกรดใหม่และเพิ่มประวัติเรียบร้อยแล้ว");
+        } catch (error) {
+            setGradeError(true);
+            setGradeMessage(error instanceof Error ? error.message : "บันทึกเกรดไม่สำเร็จ");
+        } finally { gradeBusyRef.current = false; setGradeSaving(false); }
+    };
     const requestSource = "TC";
     const endDateButtonRef = useRef<HTMLButtonElement | null>(null);
     const [calendarTarget, setCalendarTarget] = useState<"usage_date" | "usage_end_date">("usage_date");
@@ -345,8 +485,9 @@ export default function CenterVehicleRequestModal({
     const [trucks, setTrucks] = useState<
         TruckItem[]
     >([]);
-    const [loadingTrucks, setLoadingTrucks] =
-        useState(false);
+    const [truckTypeMaster, setTruckTypeMaster] = useState<Record<string, unknown>[]>([]);
+    const [loadingTruckTypes, setLoadingTruckTypes] = useState(true);
+    const [truckTypeLoadError, setTruckTypeLoadError] = useState("");
 
     const [masterTypes, setMasterTypes] =
         useState<MasterTypeItem[]>([]);
@@ -520,10 +661,10 @@ export default function CenterVehicleRequestModal({
 
                 return (
                     item.type.trim() === formData.fleet_type.trim() &&
-                    roles.includes("DC")
+                    roles.includes(requestSource)
                 );
             }),
-        [masterTypes, formData.fleet_type]
+        [masterTypes, formData.fleet_type, requestSource]
     );
 
     const waitingDays = useMemo(() => {
@@ -720,23 +861,19 @@ export default function CenterVehicleRequestModal({
         }, [trucks, dcCode]);
 
     const truckTypeOptions = useMemo(() => {
+        const currentDcCode = normalizeText(dcCode);
+        if (!currentDcCode) return [];
+
         const types = new Set<string>();
+        for (const item of truckTypeMaster) {
+            if (normalizeText(getValueIgnoreCase(item, "DC")) !== currentDcCode) continue;
 
-        matchedTrucksByDcCode.forEach(
-            (item) => {
-                const type = getFirstText(
-                    getValueIgnoreCase(
-                        item,
-                        "TRUCK_TYPE"
-                    )
-                );
+            const type = getFirstText(getValueIgnoreCase(item, "TYPE"));
+            if (type) types.add(fleetTypeLabels.get(normalizeText(type)) ?? type);
+        }
 
-                if (type) types.add(type);
-            }
-        );
-
-        return [...types].sort();
-    }, [matchedTrucksByDcCode]);
+        return [...types].sort((a, b) => a.localeCompare(b, "th"));
+    }, [truckTypeMaster, dcCode]);
 
     const warehouseOptions = useMemo(() => {
         const map =
@@ -926,6 +1063,10 @@ export default function CenterVehicleRequestModal({
         [masterTypes]
     );
 
+    useEffect(() => {
+        setNewSupplierGrade(""); setGradeMessage(""); setGradeError(false);
+    }, [selectedProviderId, open]);
+
     const availableProviders =
         useMemo<ProviderOption[]>(() => {
             const options =
@@ -975,11 +1116,96 @@ export default function CenterVehicleRequestModal({
             matchedTrucksByDcCode,
         ]);
 
+    const providerGradeIds = JSON.stringify(availableProviders.map(item => item.id).sort());
+    useEffect(() => {
+        if (!open) return;
+        const controller = new AbortController();
+        const version = ++gradeFetchVersion.current;
+        const ids = JSON.parse(providerGradeIds) as string[];
+        setSavedSupplierGrades({});
+        setGradeLoadErrors({});
+        let cursor = 0;
+        const worker = async () => {
+            while (cursor < ids.length && !controller.signal.aborted) {
+                const id = ids[cursor++];
+                try {
+                    const response = await fetch(`${API_BASE}/rate_supplier.php?id=${encodeURIComponent(id)}`, {
+                        cache: "no-store", signal: controller.signal,
+                    });
+                    const result = await response.json();
+                    if (!response.ok || result?.success !== true) throw new Error("โหลดเกรดไม่สำเร็จ");
+                    if (!controller.signal.aborted && version === gradeFetchVersion.current) {
+                        setSavedSupplierGrades(previous => Object.prototype.hasOwnProperty.call(previous, id)
+                            ? previous : {
+                                ...previous,
+                                [id]: {
+                                    rating: String(result.data?.rating ?? "").trim(),
+                                    updatedAt: formatSupplierGradeDate(result.data?.updated_at),
+                                },
+                            });
+                    }
+                } catch {
+                    if (!controller.signal.aborted && version === gradeFetchVersion.current) {
+                        setGradeLoadErrors(previous => ({ ...previous, [id]: true }));
+                    }
+                }
+            }
+        };
+        void Promise.all(Array.from({ length: Math.min(6, ids.length) }, () => worker()));
+        return () => controller.abort();
+    }, [open, providerGradeIds]);
+
+    const latestGradeText = (id: string) =>
+        Object.prototype.hasOwnProperty.call(savedSupplierGrades, id)
+            ? savedSupplierGrades[id].rating || "ยังไม่มีข้อมูล"
+            : gradeLoadErrors[id] ? "โหลดเกรดไม่สำเร็จ" : "กำลังโหลด...";
+
     const selectedProvider =
         availableProviders.find(
             (item) =>
                 item.id === selectedProviderId
         );
+
+    const gradeProviderId = selectedProvider?.id;
+    const selectedSavedGrade = gradeProviderId ? savedSupplierGrades[gradeProviderId] : undefined;
+
+    useEffect(() => {
+        if (!open || !gradeProviderId || !selectedSavedGrade?.rating || selectedSavedGrade.updatedAt) return;
+        const controller = new AbortController();
+
+        void (async () => {
+            try {
+                const response = await fetch(
+                    `${API_BASE}/rate_supplier.php?id=${encodeURIComponent(gradeProviderId)}&history=1`,
+                    { cache: "no-store", signal: controller.signal },
+                );
+                const result = await response.json();
+                if (!response.ok || result?.success !== true || !Array.isArray(result.data)) return;
+
+                const latest = result.data[0];
+                const updatedAt = formatSupplierGradeDate(latest?.updated_at);
+                if (controller.signal.aborted || latest?.rating !== selectedSavedGrade.rating || !updatedAt) return;
+                setSavedSupplierGrades(previous => previous[gradeProviderId] === selectedSavedGrade
+                    ? { ...previous, [gradeProviderId]: { ...selectedSavedGrade, updatedAt } }
+                    : previous);
+            } catch {
+                // Keep the saved grade visible if its history cannot be loaded.
+            }
+        })();
+
+        return () => controller.abort();
+    }, [open, gradeProviderId, selectedSavedGrade]);
+
+    const currentGradeName = supplierGradeLabels.get(selectedSavedGrade?.rating ?? "");
+    const currentGradeLabel = currentGradeName
+        ? `${selectedSavedGrade?.rating} (${currentGradeName})`
+        : selectedSavedGrade?.rating;
+    const currentGradeDate = selectedSavedGrade?.updatedAt
+        ? `อัปเดตล่าสุด ${selectedSavedGrade.updatedAt}`
+        : "ไม่พบวันที่อัปเดต";
+    const currentGradeOption = currentGradeLabel
+        ? `${currentGradeLabel} (${currentGradeDate})`
+        : gradeProviderId ? `เลือกเกรดใหม่ · ${latestGradeText(gradeProviderId)}` : "เลือกเกรดใหม่";
 
     const isAllNowProvider =
         Boolean(selectedProvider) &&
@@ -1003,7 +1229,7 @@ export default function CenterVehicleRequestModal({
     const filteredProviders =
         availableProviders.filter((item) =>
             normalizeText(
-                `${item.id} ${item.name} ${item.rating || ""
+                `${item.id} ${item.name} ${savedSupplierGrades[item.id]?.rating || item.rating || ""
                 }`
             ).includes(
                 normalizeText(providerSearch)
@@ -1319,8 +1545,6 @@ export default function CenterVehicleRequestModal({
         };
 
         const loadTrucks = async () => {
-            setLoadingTrucks(true);
-
             try {
                 const response = await fetch(
                     `${API_BASE}/trucks.php`,
@@ -1358,16 +1582,42 @@ export default function CenterVehicleRequestModal({
                 setError(
                     "เกิดข้อผิดพลาดในการโหลดข้อมูลรถ"
                 );
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoadingTrucks(false);
+            }
+        };
+
+        const loadTruckTypes = async () => {
+            setLoadingTruckTypes(true);
+            setTruckTypeLoadError("");
+            setTruckTypeMaster([]);
+
+            try {
+                const response = await fetch(`${API_BASE}/get_truck_names.php`, {
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+                const result: unknown = await response.json();
+
+                if (!response.ok || !isRecord(result) ||
+                    result.status !== "success" || !Array.isArray(result.data)) {
+                    throw new Error("โหลดประเภทกองรถไม่สำเร็จ");
                 }
+
+                if (!controller.signal.aborted) {
+                    setTruckTypeMaster(result.data.filter(isRecord));
+                }
+            } catch (err) {
+                if (controller.signal.aborted) return;
+                console.error(err);
+                setTruckTypeLoadError("โหลดประเภทกองรถไม่สำเร็จ กรุณาเปิดฟอร์มใหม่อีกครั้ง");
+            } finally {
+                if (!controller.signal.aborted) setLoadingTruckTypes(false);
             }
         };
 
         void loadMasterTypes();
         void loadWarehouses();
         void loadTrucks();
+        void loadTruckTypes();
 
         return () => controller.abort();
     }, [open]);
@@ -2171,6 +2421,11 @@ export default function CenterVehicleRequestModal({
             return false;
         }
 
+        if (!truckTypeOptions.includes(formData.fleet_truck_type)) {
+            setError(truckTypeLoadError || "กรุณาเลือกประเภทกองรถของคลังนี้ก่อนบันทึกนะครับ");
+            return false;
+        }
+
         if (
             !visibleMasterTypes.some(
                 (item) =>
@@ -2462,7 +2717,7 @@ export default function CenterVehicleRequestModal({
                     formData.truckturn || 0
                 ),
 
-                status: "gm_pending",
+                status: "gm_checking",
                 request_by: requestBy,
                 remark: formData.remark,
 
@@ -3000,7 +3255,7 @@ export default function CenterVehicleRequestModal({
                                                 <input
                                                     type="radio"
                                                     name="provider"
-                                                    disabled={saving}
+                                                    disabled={saving || gradeSaving}
                                                     checked={
                                                         selectedProviderId ===
                                                         item.id
@@ -3019,14 +3274,40 @@ export default function CenterVehicleRequestModal({
                                                     <span className="mt-1 block text-[11px] text-slate-500">
                                                         รหัส {item.id} ·
                                                         เกรด{" "}
-                                                        {item.rating ||
-                                                            "ยังไม่มีข้อมูล"}
+                                                        {latestGradeText(item.id)}
                                                     </span>
                                                 </span>
                                             </label>
                                         )
                                     )}
                                 </div>
+
+                                {selectedProvider && (
+                                    <div className="mt-3 rounded-xl border border-blue-100 bg-white p-3">
+                                        <label htmlFor="new-supplier-grade" className="mb-2 block text-xs font-semibold text-slate-700">เลือกเกรดใหม่สำหรับ {selectedProvider.name}</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            <select id="new-supplier-grade" value={newSupplierGrade} disabled={saving || gradeSaving}
+                                                onChange={event => { setNewSupplierGrade(event.target.value); setGradeMessage(""); }}
+                                                className="min-h-10 min-w-48 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-800">
+                                                <option value="">{currentGradeOption}</option>
+                                                {Array.from(supplierGradeLabels, ([grade, name]) => (
+                                                    <option key={grade} value={grade}>{grade} ({name})</option>
+                                                ))}
+                                            </select>
+                                            <button type="button" disabled={saving || gradeSaving || !newSupplierGrade} onClick={() => void saveNewSupplierGrade()}
+                                                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40"><Save size={14} />{gradeSaving ? "กำลังบันทึก..." : "บันทึกเกรดใหม่"}</button>
+                                        </div>
+                                        {gradeMessage && <p role={gradeError ? "alert" : "status"} className={`mt-2 text-xs ${gradeError ? "text-rose-600" : "text-emerald-600"}`}>{gradeMessage}</p>}
+                                    </div>
+                                )}
+
+                                {selectedProvider && (
+                                    <button type="button" disabled={saving}
+                                        onClick={() => setHistorySupplier({ id: selectedProvider.id, code: selectedProvider.id, name: selectedProvider.name })}
+                                        className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40">
+                                        <History size={14} />ดูประวัติเกรดผู้ให้บริการที่เลือก
+                                    </button>
+                                )}
 
                                 {!filteredProviders.length && (
                                     <p className="py-3 text-slate-500">
@@ -3490,19 +3771,20 @@ export default function CenterVehicleRequestModal({
                                         onChange={handleChange}
                                         disabled={
                                             !dcCode ||
-                                            loadingTrucks ||
+                                            loadingTruckTypes ||
+                                            Boolean(truckTypeLoadError) ||
                                             saving
                                         }
                                         className={inputClass}
                                     >
                                         <option value="">
-                                            {loadingTrucks
-                                                ? "กำลังโหลด..."
-                                                : !dcCode
-                                                    ? "กรุณาเลือกคลัง"
-                                                    : truckTypeOptions.length
-                                                        ? "-- เลือกประเภทรถ --"
-                                                        : "ไม่พบประเภทรถของคลังนี้"}
+                                            {!dcCode
+                                                ? "กรุณาเลือกคลัง"
+                                                : loadingTruckTypes
+                                                    ? "กำลังโหลดประเภทกองรถ..."
+                                                    : truckTypeLoadError || (truckTypeOptions.length
+                                                        ? "-- เลือกประเภทกองรถ --"
+                                                        : "ไม่พบประเภทกองรถของคลังนี้")}
                                         </option>
 
                                         {truckTypeOptions.map(
@@ -4142,7 +4424,7 @@ export default function CenterVehicleRequestModal({
                                     <dl className="space-y-3 p-3 text-xs">
                                         <div className="min-w-0">
                                             <dd className="inline break-words font-semibold text-slate-800">
-                                                {`[${selectedProvider?.id || "-"}] ${selectedProvider?.name || "-"}, (เกรด: ${selectedProvider?.rating || "-"})`}
+                                                {`[${selectedProvider?.id || "-"}] ${selectedProvider?.name || "-"}, (เกรด: ${selectedProvider ? latestGradeText(selectedProvider.id) : "-"})`}
                                             </dd>
                                         </div>
 
@@ -4386,6 +4668,9 @@ export default function CenterVehicleRequestModal({
                     </div>,
                     document.body
                 )}
+            {open && historySupplier && (
+                <RatingHistoryModal supplier={historySupplier} onClose={() => setHistorySupplier(null)} />
+            )}
         </>
     );
 }

@@ -96,8 +96,8 @@ type DashboardSummaryKey = "all" | "gm" | "fbp" | "tcas" | "success" | "cancel";
 type DashboardSummary = Record<DashboardSummaryKey, { qty: number; items: number }>;
 const DASHBOARD_SUMMARY_CARDS = [
   { key: "all", label: "ทั้งหมด", detail: "คำขอทุกสถานะ", color: "#2563eb", tint: "#eff6ff" },
-  { key: "gm", label: "GM พิจารณาใบตำขอ", detail: "GM พิจารณาตามความเหมาะสม", color: "#d97706", tint: "#fffbeb" },
-  { key: "fbp", label: "ประเมินกองรถ (FBP)", detail: "พิจารณาจากส่วนการ", color: "#7c3aed", tint: "#f5f3ff" },
+  { key: "gm", label: "GM พิจารณาใบคำขอ", detail: "GM พิจารณาตามความเหมาะสม", color: "#d97706", tint: "#fffbeb" },
+  { key: "fbp", label: "สรรหาผู้ประกอบการ (FBP)", detail: "พิจารณาจากส่วนการ", color: "#7c3aed", tint: "#f5f3ff" },
   { key: "tcas", label: "ติดตามกองรถออกใหม่/\n รถทดแทน (TCAS)", detail: "อยู่ระหว่างดำเนินการตามกระบวนการออกรถ", color: "#0891b2", tint: "#ecfeff" },
   { key: "success", label: "ส่งมอบเข้าคลังแล้ว", detail: "ส่งมอบรถเข้าคลังแล้ว", color: "#059669", tint: "#ecfdf5" },
   { key: "cancel", label: "ยกเลิกหนังสือ", detail: "รายการคำขอที่โดนยกเลิกทุกสถานะ", color: "#e11d48", tint: "#fff1f2" },
@@ -547,6 +547,38 @@ function buildMonthlyTimeline(
     };
   });
 }
+function MonthlyDeliveryBars({ points, year, loading, error }: {
+  points: TimelinePoint[]; year: number; loading: boolean; error: string | null;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const months = points.map((point, index) => ({
+    label: point.label,
+    planned: Math.max(0, point.planned - (points[index - 1]?.planned ?? 0)),
+    actual: point.actual === null ? null : Math.max(0, point.actual - (points[index - 1]?.actual ?? 0)),
+  }));
+  const total = months.reduce((sum, month) => sum + (month.actual ?? 0), 0);
+  const plan = months.reduce((sum, month) => sum + month.planned, 0);
+  const maximum = Math.max(1, ...months.flatMap(month => [month.planned, month.actual ?? 0]));
+  const ceiling = Math.ceil(maximum / 4) * 4;
+  const selected = hovered === null ? null : months[hovered];
+  return <section className="fleet-monthly-bars" aria-label="เปรียบเทียบแผนและยอดส่งมอบรายเดือน">
+    <div className="fleet-monthly-bars-heading"><div><h3>แผนและยอดส่งมอบรายเดือน</h3><p>จำนวนรถในแต่ละเดือน · ปี {year + 543} · ตามตัวกรองด้านบน</p></div>
+      <div className="fleet-monthly-bars-total"><span>ส่งมอบแล้ว</span><strong>{loading || error ? "—" : total.toLocaleString("th-TH")} <small>คัน</small></strong>{!loading && !error && plan > 0 && <span className="fleet-monthly-bars-rate">{Math.round(total / plan * 100)}% ของแผนทั้งปี</span>}</div></div>
+    {loading || error || !points.length ? <div className="fleet-empty" role={error ? "alert" : "status"}>{loading ? "กำลังโหลดข้อมูลกราฟ..." : error || "ยังไม่มีข้อมูลรายเดือน"}</div> : <>
+    <div className="fleet-monthly-bars-scroll"><svg viewBox="0 0 1000 218" role="img" aria-label={`แผนและยอดส่งมอบรายเดือน ปี ${year + 543}`} onMouseLeave={() => setHovered(null)}>
+      {[0,1,2,3,4].map(tick => <g key={tick}><line x1="58" x2="976" y1={178-tick*37} y2={178-tick*37} stroke="#e8edf3"/><text x="47" y={183-tick*37} textAnchor="end" fill="#7c8ca2" fontSize="15">{(ceiling*tick/4).toLocaleString("th-TH")}</text></g>)}
+      {months.map((month,index) => { const x=68+index*76; return <g key={month.label} tabIndex={0} role="img" aria-label={`${month.label}: แผน ${month.planned} คัน ส่งมอบ ${month.actual === null ? "ยังไม่มีข้อมูล" : `${month.actual} คัน`}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => setHovered(index)}>
+        <title>{month.label}: แผน {month.planned} คัน · ส่งมอบ {month.actual ?? "ยังไม่มีข้อมูล"}</title>
+        <rect x={x-7} y="30" width="66" height="148" fill={hovered===index ? "#f1f5f9" : "transparent"} rx="8"/>
+        <rect x={x} y={178-month.planned/ceiling*148} width="21" height={month.planned/ceiling*148} rx="6" fill="#94a3b8"/>
+        <rect x={x+25} y={178-(month.actual??0)/ceiling*148} width="21" height={(month.actual??0)/ceiling*148} rx="6" fill="#2563eb"/>
+        <text className="fleet-chart-month" x={x+23} y="202" textAnchor="middle" fill="#53647a" fontSize="15">{MONTH_SHORT_NAMES[index]}</text>
+      </g>; })}
+      {selected && hovered !== null && <g pointerEvents="none" transform={`translate(${Math.min(748,Math.max(60,68+hovered*76-80))},42)`}><rect width="245" height="82" rx="12" fill="white" stroke="#dce4ef"/><text x="14" y="23" fontSize="16" fontWeight="700" fill="#30445f">{selected.label}</text><text x="14" y="46" fontSize="15" fill="#30445f">แผน {selected.planned.toLocaleString("th-TH")} คัน</text><text x="14" y="66" fontSize="15" fill="#53647a">ส่งมอบ {selected.actual === null ? "ยังไม่มีข้อมูล" : `${selected.actual.toLocaleString("th-TH")} คัน`}</text></g>}
+    </svg></div><div className="fleet-monthly-bars-legend"><span><i style={{background:"#94a3b8"}}/>แผนส่งมอบ</span><span><i style={{background:"#2563eb"}}/>ส่งมอบแล้ว</span></div></>}
+  </section>;
+}
+
 function SummaryIcon({ type }: { type: "plan" | "actual" | "pending" }) {
   return (
     <svg
@@ -921,12 +953,27 @@ function FleetStatusByDc({
     }
     return totals;
   }, [cardScopeRequests]);
-  // Use exact incoming vehicle IDs so filtering one vehicle never includes its siblings.
+  // Request-level totals must not be limited to IDs present in incoming rows.
   const summaryScope = useMemo(() => {
-    const ids = cardScopeRequests.map(row => String(row.incoming_truck_id ?? "").trim());
-    return ids.length > 0 && ids.every(id => /^[1-9][0-9]*$/.test(id))
-      ? Array.from(new Set(ids)).sort().join(",") : "";
-  }, [cardScopeRequests]);
+    if (!warehouseScope.ready || suppliedRequests !== undefined) return "";
+    const params = new URLSearchParams({ summary_only: "1", year: String(selectedYear), exclude_temporary: "1" });
+    if (!warehouseScope.showAll) {
+      if (warehouseScope.codes.length) params.set("warehouse_codes", warehouseScope.codes.join(","));
+      else params.set("empty_scope", "1");
+    }
+    if (monthFilter !== "all") params.set("month", monthFilter);
+    if (dcTypeFilter !== "all") params.set("dc_type", dcTypeFilter);
+    if (requestTypeFilter !== "all") params.set("fleet_type", requestTypeFilter);
+    if (areaFilter !== "all") params.set("dc_code", areaFilter);
+    // These filters describe incoming vehicles; count each matching request once.
+    if (fbpFilter !== "all" || truckTypeFilter !== "all") {
+      if (loading) return "";
+      const ids = Array.from(new Set(cardScopeRequests.map(row => String(row.id ?? "")).filter(id => /^[1-9][0-9]*$/.test(id))));
+      if (ids.length) params.set("request_ids", ids.join(","));
+      else params.set("empty_scope", "1");
+    }
+    return params.toString();
+  }, [warehouseScope, suppliedRequests, selectedYear, monthFilter, dcTypeFilter, requestTypeFilter, areaFilter, fbpFilter, truckTypeFilter, loading, cardScopeRequests]);
   const [apiCardState, setApiCardState] = useState<{
     scope: string; summary: DashboardSummary | null; error: string;
   }>({ scope: "", summary: null, error: "" });
@@ -936,34 +983,29 @@ function FleetStatusByDc({
     setApiCardState({ scope: summaryScope, summary: null, error: "" });
     async function loadSummary() {
       try {
-        const totals = Object.fromEntries(DASHBOARD_SUMMARY_CARDS.map(({ key }) =>
-          [key, { qty: 0, items: 0 }])) as DashboardSummary;
-        const ids = summaryScope.split(",");
-        for (let offset = 0; offset < ids.length; offset += 100) {
-          const url = new URL(dashboardApiUrl, window.location.href);
-          url.searchParams.delete("request_ids");
-          url.searchParams.delete("warehouse");
-          url.searchParams.set("incoming_truck_ids", ids.slice(offset, offset + 100).join(","));
-          url.searchParams.set("summary_only", "1");
-          const response = await fetch(url.toString(), { cache: "no-store", signal: controller.signal });
-          const payload = await response.json();
-          if (!response.ok || payload?.status !== "success" || !payload.summary) {
-            throw new Error(payload?.message || "โหลด summary ไม่สำเร็จ");
-          }
-          for (const { key } of DASHBOARD_SUMMARY_CARDS) {
-            const qty = Number(payload.summary[key]?.qty);
-            const items = Number(payload.summary[key]?.items);
-            if (!Number.isFinite(qty) || qty < 0 || !Number.isFinite(items) || items < 0) {
-              throw new Error("รูปแบบ summary ไม่ถูกต้อง");
-            }
-            totals[key].qty += qty;
-            totals[key].items += items;
-          }
+        const url = new URL(dashboardApiUrl, window.location.href);
+        // A fresh scope prevents old ID/year/warehouse parameters leaking in.
+        url.search = summaryScope;
+        const response = await fetch(url.toString(), { cache: "no-store", signal: controller.signal });
+        const payload = await response.json();
+        if (!response.ok || payload?.status !== "success" || !payload.summary) {
+          throw new Error(payload?.message || "โหลดสรุปสถานะไม่สำเร็จ");
         }
+        if (payload.meta?.summary_counting_unit !== "request_truck.qty" || payload.meta?.summary_filter_version !== 2) {
+          throw new Error("กรุณาอัปเดต get_dashboard.php ให้รองรับการรวมจำนวนคันจากคำขอ");
+        }
+        const totals = Object.fromEntries(DASHBOARD_SUMMARY_CARDS.map(({ key }) => {
+          const qty = Number(payload.summary[key]?.qty);
+          const items = Number(payload.summary[key]?.items);
+          if (!Number.isSafeInteger(qty) || qty < 0 || !Number.isSafeInteger(items) || items < 0) {
+            throw new Error("รูปแบบสรุปสถานะไม่ถูกต้อง");
+          }
+          return [key, { qty, items }];
+        })) as DashboardSummary;
         if (!controller.signal.aborted) setApiCardState({ scope: summaryScope, summary: totals, error: "" });
       } catch (error) {
         if (!controller.signal.aborted) setApiCardState({ scope: summaryScope, summary: null,
-          error: error instanceof Error ? error.message : "โหลด summary ไม่สำเร็จ" });
+          error: error instanceof Error ? error.message : "โหลดสรุปสถานะไม่สำเร็จ" });
       }
     }
     void loadSummary();
@@ -972,7 +1014,6 @@ function FleetStatusByDc({
   const cardSummaryError = summaryScope && apiCardState.scope === summaryScope ? apiCardState.error : "";
   const cardSummaryLoading = Boolean(summaryScope &&
     (apiCardState.scope !== summaryScope || (!apiCardState.summary && !apiCardState.error)));
-  // Supplied request-level rows have no incoming IDs; retain their quantity-based summary.
   const filteredCardSummary = summaryScope && apiCardState.scope === summaryScope && apiCardState.summary
     ? apiCardState.summary : localCardSummary;
   const stageScrollRef = useRef<HTMLDivElement>(null);
@@ -1419,7 +1460,7 @@ function FleetStatusByDc({
       if (!Number.isFinite(qty) || qty <= 0) return acc;
       const status = dashboardStatusGroup(item.status);
       if (status === "success") acc.delivered += qty;
-      if (status === "tcas" && Number.isInteger(Number(item.latest_process_level)) && Number(item.latest_process_level) >= 1 && Number(item.latest_process_level) <= 7) acc.remaining += qty;
+      if (status === "tcas" && Number.isInteger(Number(item.latest_process_level)) && Number(item.latest_process_level) >= 0 && Number(item.latest_process_level) <= 7) acc.remaining += qty;
       return acc;
     }, { delivered: 0, remaining: 0 });
     return { ...result, total: result.delivered + result.remaining };
@@ -1517,7 +1558,9 @@ function FleetStatusByDc({
   const timelineMax = yStep * 4;
   const chartX = (index: number) =>
     48 + (index * 704) / Math.max(1, timeline.length - 1);
-  const chartY = (value: number) => 220 - (value / timelineMax) * 184;
+  const chartBottom = 180;
+  const chartTop = 30;
+  const chartY = (value: number) => chartBottom - (value / timelineMax) * (chartBottom - chartTop);
   const plannedPath = timeline
     .map(
       (point, index) =>
@@ -1539,54 +1582,54 @@ function FleetStatusByDc({
       aria-busy={isLoading || timelineLoading}
     >
       <style>{`
-.fleet-dashboard{--ink:#243650;--muted:#73839a;--line:#e0e7f0;--blue:#285fac;--surface:#fff;box-sizing:border-box;width:100%;min-width:0;padding:18px;background:#f1f5fa;border:1px solid #e3eaf3;border-radius:20px;color:var(--ink);font-family:inherit;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums}
+.fleet-dashboard{--ink:#243650;--muted:#73839a;--line:#e0e7f0;--blue:#285fac;--surface:#fff;box-sizing:border-box;width:100%;min-width:0;padding:18px;background:#f1f5fa;border:1px solid #e3eaf3;border-radius:20px;color:var(--ink);font-family:inherit;font-size:13px;line-height:1.5;font-variant-numeric:tabular-nums}
 .fleet-dashboard *{box-sizing:border-box}.fleet-dashboard :is(h2,h3,p){margin:0}.fleet-dashboard :is(button,input,select){font:inherit}.fleet-dashboard button{cursor:pointer}.fleet-dashboard button:disabled{opacity:.5;cursor:default}.fleet-dashboard :is(button,input,select):focus-visible{outline:2px solid #3979d7;outline-offset:3px}.fleet-dashboard :is(input,select){min-width:0}.fleet-dashboard svg{flex-shrink:0}
-.fleet-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;margin-bottom:16px;background:linear-gradient(110deg,#173153,#25517f);border-radius:15px;color:#fff}.fleet-eyebrow{font-size:9px;font-weight:750;letter-spacing:1.8px;color:#a9cef8;margin-bottom:3px}.fleet-dashboard h2{font-size:22px;line-height:1.35;letter-spacing:-.4px}.fleet-subtitle{font-size:11px;color:#bdd0e8;margin-top:5px!important}
-.fleet-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:33px;padding:6px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#4c6382;font-size:11px;font-weight:650;white-space:nowrap;transition:background .15s,border-color .15s}.fleet-button:hover{background:#eef4fc;border-color:#b7cce8}.fleet-button-primary{background:var(--blue);border-color:var(--blue);color:#fff}.fleet-button-primary:hover{background:#214e8b;color:#fff}.fleet-heading .fleet-button{background:#ffffff16;border-color:#ffffff36;color:#fff}.fleet-heading .fleet-button:hover{background:#ffffff29}
-.fleet-filter-heading,.fleet-summary-heading-line{display:flex;align-items:center;gap:8px}.fleet-filter-heading{margin:0 2px 8px}.fleet-filter-heading h3,.fleet-api-summary-heading{font-size:12px;font-weight:750;color:#355174}.fleet-section-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:#e1eafb;color:#456f9f;font-size:9px;font-weight:800;flex-shrink:0}.fleet-filter-context{margin-left:auto;font-size:10px;color:var(--muted)}
+.fleet-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;margin-bottom:16px;background:linear-gradient(110deg,#173153,#25517f);border-radius:15px;color:#fff}.fleet-eyebrow{font-size:10px;font-weight:750;letter-spacing:1.8px;color:#a9cef8;margin-bottom:3px}.fleet-dashboard h2{font-size:24px;line-height:1.35;letter-spacing:-.4px}.fleet-subtitle{font-size:12px;color:#bdd0e8;margin-top:5px!important}
+.fleet-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:33px;padding:6px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#4c6382;font-size:12px;font-weight:650;white-space:nowrap;transition:background .15s,border-color .15s}.fleet-button:hover{background:#eef4fc;border-color:#b7cce8}.fleet-button-primary{background:var(--blue);border-color:var(--blue);color:#fff}.fleet-button-primary:hover{background:#214e8b;color:#fff}.fleet-heading .fleet-button{background:#ffffff16;border-color:#ffffff36;color:#fff}.fleet-heading .fleet-button:hover{background:#ffffff29}
+.fleet-filter-heading,.fleet-summary-heading-line{display:flex;align-items:center;gap:8px}.fleet-filter-heading{margin:0 2px 8px}.fleet-filter-heading h3{font-size:12px;font-weight:750;color:#355174}.fleet-api-summary-heading{font-size:14px;font-weight:750;color:#355174}.fleet-filter-context{margin-left:auto;font-size:10px;color:var(--muted)}
 .fleet-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end;gap:10px;padding:13px 15px;background:#fff;border:1px solid var(--line);border-radius:13px}.fleet-label{display:block;font-size:10px;font-weight:650;color:#718299;margin-bottom:5px}.fleet-field{display:block;width:100%;height:34px;padding:5px 9px;border:1px solid #dce5f0;border-radius:8px;background:#f7f9fc;color:#304c70;font-size:11px;transition:border-color .15s,box-shadow .15s}.fleet-field:hover:not(:disabled){border-color:#a2bbda}.fleet-field:focus{border-color:#6f9ad3;box-shadow:0 0 0 3px #3979d710;outline:none}.fleet-field:disabled{color:#9aa7b9}.fleet-filter-note{margin:6px 2px 0!important;font-size:10px;color:#8291a6}
-.fleet-api-summary{margin:17px 0 0}.fleet-api-summary-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.fleet-api-summary-subtitle{font-size:10px;color:#8192a9;margin-top:2px!important}.fleet-api-summary-badge{font-size:10px;color:#7190b6;border:1px solid #dde6f4;border-radius:999px;padding:5px 9px;white-space:nowrap}.fleet-api-summary-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.fleet-api-summary-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:151px;padding:14px 13px;border:1px solid #dce6f2;border-radius:14px;box-shadow:0 3px 9px #26466a06;text-align:left;isolation:isolate;overflow:hidden;transition:transform .15s,box-shadow .15s}.fleet-api-summary-card:after{content:"";position:absolute;right:-22px;top:-30px;width:95px;height:95px;border:18px solid currentColor;border-radius:50%;opacity:.035;z-index:-1}.fleet-api-summary-card:before{content:"";position:absolute;bottom:0;left:14px;right:14px;height:3px;background:currentColor;opacity:.35;border-radius:4px 4px 0 0}.fleet-api-summary-card.is-total{border-color:#315eaf}.fleet-api-summary-card.is-total:before{background:white;opacity:.2}.fleet-api-summary-card:hover{transform:translateY(-2px);box-shadow:0 7px 18px #26466a13}.fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:1px}.fleet-api-summary-card.is-total.is-selected{outline-color:#4776dc}.fleet-api-summary-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;min-height:47px}.fleet-api-summary-label{font-size:10.5px;line-height:1.55;font-weight:700;color:#49607e;white-space:pre-line;overflow-wrap:anywhere}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#e4eeff}.fleet-api-summary-icon{display:flex;align-items:center;justify-content:center;width:29px;height:29px;border-radius:9px;background:#ffffffaa;flex-shrink:0}.fleet-api-summary-icon svg{width:18px;height:18px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff22}.fleet-api-summary-number{display:flex;align-items:baseline;gap:6px;margin:7px 0}.fleet-api-summary-number strong{font-size:29px;line-height:1.2;font-weight:800;letter-spacing:-1px}.fleet-api-summary-number span{font-size:9px;opacity:.7}.fleet-api-summary-detail{display:block;min-height:30px;font-size:9.5px;line-height:1.5;opacity:.8}.fleet-api-summary-note{font-size:10px;color:#8091a8;margin:8px 2px 0!important}
-.fleet-delivery-summary{display:grid;grid-template-columns:minmax(260px,1fr) minmax(360px,1.35fr);gap:16px;align-items:stretch}.fleet-delivery-summary>div:first-child{display:flex;flex-direction:column;min-width:0}.fleet-delivery-summary .fleet-delivery-cards{display:grid;grid-template-columns:1fr;grid-template-rows:repeat(3,minmax(0,1fr));flex:1}.fleet-delivery-summary .fleet-delivery-card+.fleet-delivery-card{border-left:0;border-top:1px solid #e7edf5}.delivery-stage-panel{border:1px solid #dce4ef;border-radius:13px;background:#fff;padding:16px}.delivery-stage-panel h3{margin:0 0 12px;color:#334f76;font-size:15px}.delivery-stage-panel h3 small{font-size:11px;color:#7990aa}.delivery-stage-row{display:grid;grid-template-columns:26px minmax(0,1fr) minmax(100px,42%);gap:8px;align-items:center;min-height:36px;border-bottom:1px solid #edf1f6}.delivery-stage-number{width:23px;height:23px;display:grid;place-items:center;border-radius:50%;background:#e9f0fb;color:#5275a3;font-size:11px;font-weight:700}.delivery-stage-name{font-size:12px;color:#334155}.delivery-stage-value{display:flex;align-items:center;gap:8px;min-width:0}.delivery-stage-value strong{font-size:12px;min-width:32px;text-align:right;color:#334155}.delivery-stage-bar-track{height:10px;flex:1;background:#f1f5f9;border-radius:9px;overflow:hidden}.delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.delivery-stage-total{display:flex;justify-content:space-between;padding:11px 4px 0;font-size:13px;color:#334155}.delivery-stage-panel p{margin:8px 0 0!important;color:#8796aa;font-size:10px}@media(max-width:900px){.fleet-delivery-summary{grid-template-columns:1fr}}@media(max-width:560px){.delivery-stage-panel{padding:12px}.delivery-stage-row{grid-template-columns:24px minmax(0,1fr) minmax(75px,35%);gap:5px}.delivery-stage-name{font-size:11px}}
-.fleet-delivery-summary{margin:17px 0 12px}.fleet-delivery-heading{font-size:12px;color:#3d587c;margin-bottom:9px!important}.fleet-delivery-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}.fleet-delivery-card{padding:12px 17px;min-width:0}.fleet-delivery-card+.fleet-delivery-card{border-left:1px solid #e7edf5}.fleet-delivery-label{font-size:11px;font-weight:650;color:#5b7392}.fleet-delivery-label small{font-size:9px;font-weight:500;margin-left:5px;color:#95a2b5}.fleet-delivery-number{display:flex;align-items:center;gap:9px;margin-top:7px;color:#416999}.fleet-delivery-number svg{width:27px;height:27px;padding:4px;background:#eff4fb;border-radius:8px}.fleet-delivery-number strong{font-size:26px;line-height:1.2;font-weight:800}.fleet-delivery-unit{font-size:9px;display:inline;margin-left:6px;color:var(--muted)}.fleet-delivery-note{font-size:9px;color:#91a0b3;margin-top:7px!important}.fleet-delivery-progress-row{display:flex;align-items:center;gap:8px;margin-top:8px}.fleet-delivery-progress-track{height:5px;border-radius:99px;overflow:hidden;flex:1;background:#eef2f7}.fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-delivery-percent{font-size:10px;color:#7990aa}
-.fleet-panels{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(270px,1fr);gap:0;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:hidden}.fleet-panel{min-width:0;background:#fff;overflow:hidden}.fleet-panels>.fleet-panel+.fleet-panel{border-left:1px solid #e5ecf4}.fleet-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;min-height:65px;border-bottom:1px solid #e9eef6;background:linear-gradient(100deg,#fafcff,#fff)}.fleet-panel h3{font-size:12px;font-weight:750;color:#324f73}.fleet-panel-description{font-size:10px;color:#8a9aaf;margin-top:3px!important;line-height:1.5}.fleet-panel-header>span{font-size:10px;color:#7890af;white-space:nowrap}.fleet-panel-content{padding:13px 15px}.fleet-year-select{width:100px;flex-shrink:0}.fleet-chart-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.fleet-chart{display:block;width:100%;min-width:520px;height:260px}.fleet-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:10px;color:#7c8da6;margin-top:9px}.fleet-legend>span{display:inline-flex;align-items:center;gap:6px}.fleet-legend i{display:inline-block;width:7px;height:7px;border-radius:2px}
-.fleet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:180px;padding:20px;color:#8192a8;font-size:11px;text-align:center;background:linear-gradient(180deg,#fff,#fafcff)}.fleet-error{display:block;margin:12px 0;padding:12px 14px;background:#fff2f3;color:#a83e55;border:1px solid #f1d8de;border-left:3px solid #d64f6c;border-radius:10px;font-size:11px;overflow-wrap:anywhere}.fleet-error p{margin-top:4px}.fleet-warehouse-list{max-height:260px;overflow:auto;scrollbar-width:thin;padding-right:5px}.fleet-warehouse{padding:9px 0;border-bottom:1px solid #eef2f8}.fleet-warehouse:last-child{border-bottom:0}.fleet-row{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5px}.fleet-warehouse-name{font-size:11px;font-weight:750;color:#456185}.fleet-row-meta{font-size:10px;color:#8799b0}.fleet-bar{display:flex;width:100%;height:7px;background:#edf2f8;border-radius:99px;overflow:hidden}.fleet-bar>span{height:100%;display:block}.fleet-warehouse-detail{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:5px;color:#8190a5}
-.fleet-stage-layout{display:grid;grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);gap:0;margin-top:16px;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:auto;scrollbar-width:thin;align-items:start}.fleet-stage-layout>.fleet-panel+.fleet-panel{border-left:1px solid #e2eaf4}.fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:78px;min-height:78px;max-height:78px;padding:11px 14px}.fleet-stage-layout .fleet-panel-description{max-height:30px;overflow:hidden}.fleet-stage-scroll{height:auto;max-height:none;overflow-x:auto;scrollbar-width:thin;background:#fff}.fleet-stage-table{width:100%;min-width:640px;table-layout:auto;border-collapse:separate;border-spacing:0;font-size:10px}.fleet-stage-table :is(th,td){padding:5px 8px;border-bottom:1px solid #e9eff6;text-align:center;font-variant-numeric:tabular-nums}.fleet-stage-table thead th{position:sticky;top:0;z-index:5;height:58px;min-width:118px;max-width:170px;background:#3c5473;color:#fff;font-size:10px;font-weight:650;line-height:1.5;border-right:1px solid #ffffff18}.fleet-stage-table .fleet-step-name{display:block;font-size:10px;line-height:1.5;max-width:170px;color:inherit}.fleet-header-unit{display:block;font-size:8px;opacity:.65;margin-top:3px}.fleet-step-label{display:inline-block;font-size:8px;background:#ffffff20;color:inherit;border-radius:4px;padding:1px 5px}.fleet-stage-table .fleet-truck-row{height:38px}.fleet-stage-table .fleet-truck-row :is(th,td){height:38px;white-space:nowrap;background:#fff}.fleet-stage-table .fleet-truck-row th{text-align:left;font-weight:500;color:#506a8c}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#edf5ff}.fleet-stage-table .fleet-dc-group{height:32px}.fleet-stage-table .fleet-dc-group :is(th,td){height:32px;background:#edf2f9;color:#456183;white-space:nowrap;font-weight:750;text-align:left}.fleet-truck-label{display:inline-block;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:#e5edf9;padding:5px 7px;font-size:10px;font-weight:750;color:#4d719d}.fleet-dc-merged{vertical-align:middle;background:#f5f8fc!important}.fleet-warehouse-marker{display:inline-block;width:4px;height:12px;border-radius:3px;background:#7395c3;margin-right:7px;vertical-align:middle}.fleet-group-quantity{float:right;font-size:9px;color:#899bb2}.fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;padding:2px 6px;border:1px solid #dce7f6;border-radius:6px;background:#edf3fb;color:#406b9e;font-size:10px;font-weight:750}.fleet-count-button:hover{background:#dbeafa;border-color:#9fbee3}.fleet-stage-completed .fleet-count-button{background:#e7f6ed;color:#16805b;border-color:#cfe8da}.fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0f1;color:#b35464;border-color:#eed3d9}.fleet-stage-table .fleet-stage-total{background:#f1f5fc!important;font-weight:800;color:#3a6497}.fleet-cell-empty{color:#c1ccdc}.fleet-month-table{min-width:360px;table-layout:fixed}.fleet-month-table thead th{min-width:60px;white-space:nowrap}.fleet-month-table .fleet-truck-row td{font-weight:650;color:#557399}.fleet-locked-table{--dc-lock-width:72px}.fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width);max-width:var(--dc-lock-width);z-index:3;background:#f4f7fc}.fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:160px;max-width:180px;z-index:3;background:#fff;box-shadow:3px 0 7px #203d6008}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{z-index:7;background:#3c5473}.fleet-lock-warehouse{max-width:230px;overflow:hidden;text-overflow:ellipsis}.fleet-step-toggle{border:0;background:transparent;color:#7d92ae;padding:4px 5px;border-radius:6px;flex-shrink:0;font-size:10px;white-space:nowrap}.fleet-step-toggle:hover{background:#edf3fb;color:#456c9c}
-.fleet-vendor-tooltip{position:fixed;z-index:10000;pointer-events:none;width:288px;max-width:calc(100vw - 24px);max-height:220px;overflow:auto;padding:12px 14px;border:1px solid #dce6f3;border-radius:11px;background:#fff;color:#496482;box-shadow:0 12px 36px #162e5424}.fleet-vendor-tooltip-heading{font-size:10px;color:#7c90ac;font-weight:750;border-bottom:1px solid #e9eef5;padding-bottom:7px;margin-bottom:7px}.fleet-vendor-tooltip-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:4px 0;font-size:11px}.fleet-vendor-tooltip-row span{overflow-wrap:anywhere}.fleet-vendor-tooltip-row strong{white-space:nowrap;color:#3d679a}.fleet-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:9px;color:#8c9bb0;margin-top:13px}
-.fleet-month-counter{font-size:10px;white-space:nowrap;color:#507caf;background:#edf4ff;border:1px solid #dbe7f8;padding:6px 9px;border-radius:8px}.fleet-month-open:hover{background:#dfebfd}.fleet-month-dialog{position:fixed;inset:0;margin:auto;width:min(410px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:0;border:1px solid #dce6f3;border-radius:18px;background:#fff;color:#304c70;box-shadow:0 22px 70px #17305240}.fleet-month-dialog::backdrop{background:#1a305660;backdrop-filter:blur(3px)}.fleet-month-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 19px;background:#f7faff}.fleet-month-dialog-heading h3{font-size:14px}.fleet-month-dialog-heading p{font-size:11px;color:#8195af;margin-top:5px!important}.fleet-month-close{width:29px;height:29px;border:0;background:#eaf0f9;color:#637d9f;border-radius:8px;font-size:22px!important}.fleet-month-picker{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:16px 19px}.fleet-month-chip{padding:9px 5px;border:1px solid #dfe7f3;border-radius:9px;color:#6f86a5;background:#f8faff;font-size:11px;font-weight:650}.fleet-month-chip.is-selected{background:#2e61b6;border-color:#2e61b6;color:#fff}.fleet-month-chip:hover:not(:disabled):not(.is-selected){background:#edf3ff}.fleet-month-picker-note{padding:0 19px 15px;font-size:10px;line-height:1.6;color:#8b9bb1}.fleet-month-dialog-footer{display:flex;justify-content:flex-end;padding:12px 19px;background:#f8faff;border-top:1px solid #e8eef7}
-.sla-overdue-embed{margin:17px 0;padding:0;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:0 3px 12px #29476c03}.sla-shell{width:100%}.sla-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:13px 15px;border-bottom:1px solid #edf1f7;background:linear-gradient(100deg,#fff8f5,#fff 60%)}.sla-eyebrow{font-size:9px!important;font-weight:800;letter-spacing:1.3px;color:#bc7153}.sla-heading h3{font-size:13px;color:#3e5472;margin-top:2px!important}.sla-description{font-size:10px;color:#8a9bb2;margin-top:4px!important}.sla-refresh{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;background:#fff;border:1px solid #dbe5f2;border-radius:8px;color:#53749d;font-size:10px!important}.sla-refresh:hover{background:#f2f6fd}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 15px;border-bottom:1px solid #e8eef6}.sla-kpi{display:flex;align-items:center;gap:10px;padding:12px 14px}.sla-kpi+.sla-kpi{border-left:1px solid #e8eef6}.sla-kpi-icon{display:flex;align-items:center;justify-content:center;width:31px;height:31px;border-radius:9px;flex-shrink:0}.sla-kpi-icon.rose{background:#fff0f3;color:#bf4765}.sla-kpi-icon.amber{background:#fff5df;color:#b27d21}.sla-kpi-icon.blue{background:#edf4ff;color:#477db7}.sla-kpi-label{font-size:10px;color:#8a9ab0}.sla-kpi-value{font-size:19px;font-weight:800;line-height:1.3;margin-top:2px!important;color:#3e5778}.sla-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:11px 15px}.sla-search{position:relative;flex:1;min-width:220px}.sla-search svg{position:absolute;left:10px;top:9px;color:#9baabd}.sla-control{height:33px;padding:5px 10px;border:1px solid #dce5f2;background:#f9fbfe;border-radius:8px;font-size:11px!important;color:#536e91;max-width:100%}.sla-search input{width:100%;padding-left:32px}.sla-clear{border:0;background:transparent;color:#4073b6;font-size:10px!important}.sla-clear:hover{text-decoration:underline}.sla-table-scroll{max-height:330px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable}.sla-table{width:100%;min-width:1040px;text-align:left;border-spacing:0;border-collapse:separate;font-size:11px}.sla-table thead{position:sticky;top:0;z-index:2;background:#3c5473;color:#fff}.sla-table th{white-space:nowrap;padding:10px 12px;font-size:10px;font-weight:650;border-right:1px solid #ffffff18}.sla-table td{padding:10px 12px;border-bottom:1px solid #e9eff6;vertical-align:top;line-height:1.5}.sla-table tbody tr:nth-child(even){background:#fafcff}.sla-table tbody tr:hover{background:#eff5ff}.sla-table td p{margin-top:3px;font-size:10px;color:#8b9bb1}.sla-strong{font-weight:650;color:#4c6383}.sla-id{font-size:9px!important;color:#a2b0c3!important}.sla-days{background:#fff3f5;color:#b34360;white-space:nowrap;text-align:right}.sla-days>span{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:800}.sla-days p{color:#b96e82!important;font-size:9px!important}.sla-limit{white-space:nowrap;text-align:right;color:#6b829f}.sla-action{min-width:180px;max-width:320px;white-space:pre-line;font-size:10px;color:#b5536e;font-weight:650}.sla-state-message{position:sticky;left:12px;display:block;width:min(650px,calc(100vw - 85px));text-align:center}.sla-state{height:135px;text-align:center;color:#8c9ab0;padding:22px!important}.sla-table .sla-state{background:#fafcff;text-align:center}.sla-error{display:flex;gap:9px;align-items:flex-start;margin:0 15px 12px;padding:12px;border:1px solid #f0d8df;border-radius:9px;background:#fff4f6;color:#ae4964;font-size:11px}.sla-error svg{flex-shrink:0}.sla-error p{margin-top:4px!important;overflow-wrap:anywhere}.sla-error-api{font-size:10px;opacity:.7}.sla-table-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:9px 15px;font-size:9px;color:#8d9eb4;border-top:1px solid #e9eff6}.sla-spin{animation:fleet-spin 1s linear infinite}@keyframes fleet-spin{to{transform:rotate(360deg)}}
+.fleet-api-summary{margin:17px 0 0}.fleet-api-summary-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.fleet-api-summary-subtitle{font-size:11px;color:#8192a9;margin-top:2px!important}.fleet-api-summary-badge{font-size:11px;color:#7190b6;border:1px solid #dde6f4;border-radius:999px;padding:5px 9px;white-space:nowrap}.fleet-api-summary-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.fleet-api-summary-card{position:relative;display:flex;flex-direction:column;min-width:0;min-height:151px;padding:14px 13px;border:1px solid #dce6f2;border-radius:14px;box-shadow:0 3px 9px #26466a06;text-align:left;isolation:isolate;overflow:hidden;transition:transform .15s,box-shadow .15s}.fleet-api-summary-card:after{content:"";position:absolute;right:-22px;top:-30px;width:95px;height:95px;border:18px solid currentColor;border-radius:50%;opacity:.035;z-index:-1}.fleet-api-summary-card:before{content:"";position:absolute;bottom:0;left:14px;right:14px;height:3px;background:currentColor;opacity:.35;border-radius:4px 4px 0 0}.fleet-api-summary-card.is-total{border-color:#315eaf}.fleet-api-summary-card.is-total:before{background:white;opacity:.2}.fleet-api-summary-card:hover{transform:translateY(-2px);box-shadow:0 7px 18px #26466a13}.fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:1px}.fleet-api-summary-card.is-total.is-selected{outline-color:#4776dc}.fleet-api-summary-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;min-height:47px}.fleet-api-summary-label{font-size:11.5px;line-height:1.55;font-weight:700;color:#49607e;white-space:pre-line;overflow-wrap:anywhere}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#e4eeff}.fleet-api-summary-icon{display:flex;align-items:center;justify-content:center;width:29px;height:29px;border-radius:9px;background:#ffffffaa;flex-shrink:0}.fleet-api-summary-icon svg{width:18px;height:18px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff22}.fleet-api-summary-number{display:flex;align-items:baseline;gap:6px;margin:7px 0}.fleet-api-summary-number strong{font-size:31px;line-height:1.2;font-weight:800;letter-spacing:-1px}.fleet-api-summary-number span{font-size:10px;opacity:.7}.fleet-api-summary-detail{display:block;min-height:30px;font-size:10.5px;line-height:1.5;opacity:.8}.fleet-api-summary-note{font-size:11px;color:#8091a8;margin:8px 2px 0!important}
+.fleet-delivery-summary{display:grid;grid-template-columns:minmax(260px,1fr) minmax(360px,1.35fr);gap:16px;align-items:stretch}.fleet-delivery-summary>div:first-child{display:flex;flex-direction:column;min-width:0}.fleet-delivery-summary .fleet-delivery-cards{display:grid;grid-template-columns:1fr;grid-template-rows:repeat(3,minmax(0,1fr));flex:1}.fleet-delivery-summary .fleet-delivery-card+.fleet-delivery-card{border-left:0;border-top:1px solid #e7edf5}.delivery-stage-panel{border:1px solid #dce4ef;border-radius:13px;background:#fff;padding:16px}.delivery-stage-panel h3{margin:0 0 12px;color:#334f76;font-size:17px}.delivery-stage-panel h3 small{font-size:12px;color:#7990aa}.delivery-stage-row{display:grid;grid-template-columns:26px minmax(0,1fr) minmax(100px,42%);gap:8px;align-items:center;min-height:36px;border-bottom:1px solid #edf1f6}.delivery-stage-number{width:23px;height:23px;display:grid;place-items:center;border-radius:50%;background:#e9f0fb;color:#5275a3;font-size:12px;font-weight:700}.delivery-stage-name{font-size:13px;color:#334155}.delivery-stage-value{display:flex;align-items:center;gap:8px;min-width:0}.delivery-stage-value strong{font-size:13px;min-width:32px;text-align:right;color:#334155}.delivery-stage-bar-track{height:10px;flex:1;background:#f1f5f9;border-radius:9px;overflow:hidden}.delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.delivery-stage-total{display:flex;justify-content:space-between;padding:11px 4px 0;font-size:15px;color:#334155}.delivery-stage-panel p{margin:8px 0 0!important;color:#8796aa;font-size:11px}@media(max-width:900px){.fleet-delivery-summary{grid-template-columns:1fr}}@media(max-width:560px){.delivery-stage-panel{padding:12px}.delivery-stage-row{grid-template-columns:24px minmax(0,1fr) minmax(75px,35%);gap:5px}.delivery-stage-name{font-size:12px}}
+.fleet-delivery-summary{margin:17px 0 12px}.fleet-delivery-heading{font-size:13px;color:#3d587c;margin-bottom:9px!important}.fleet-delivery-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}.fleet-delivery-card{padding:12px 17px;min-width:0}.fleet-delivery-card+.fleet-delivery-card{border-left:1px solid #e7edf5}.fleet-delivery-label{font-size:12px;font-weight:650;color:#5b7392}.fleet-delivery-label small{font-size:10px;font-weight:500;margin-left:5px;color:#95a2b5}.fleet-delivery-number{display:flex;align-items:center;gap:9px;margin-top:7px;color:#416999}.fleet-delivery-number svg{width:27px;height:27px;padding:4px;background:#eff4fb;border-radius:8px}.fleet-delivery-number strong{font-size:28px;line-height:1.2;font-weight:800}.fleet-delivery-unit{font-size:10px;display:inline;margin-left:6px;color:var(--muted)}.fleet-delivery-note{font-size:10px;color:#91a0b3;margin-top:7px!important}.fleet-delivery-progress-row{display:flex;align-items:center;gap:8px;margin-top:8px}.fleet-delivery-progress-track{height:5px;border-radius:99px;overflow:hidden;flex:1;background:#eef2f7}.fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-delivery-percent{font-size:11px;color:#7990aa}
+.fleet-panels{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(270px,1fr);gap:0;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:hidden}.fleet-panel{min-width:0;background:#fff;overflow:hidden}.fleet-panels>.fleet-panel+.fleet-panel{border-left:1px solid #e5ecf4}.fleet-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;min-height:65px;border-bottom:1px solid #e9eef6;background:linear-gradient(100deg,#fafcff,#fff)}.fleet-panel h3{font-size:13px;font-weight:750;color:#324f73}.fleet-panel-description{font-size:11px;color:#8a9aaf;margin-top:3px!important;line-height:1.5}.fleet-panel-header>span{font-size:11px;color:#7890af;white-space:nowrap}.fleet-panel-content{padding:13px 15px}.fleet-year-select{width:100px;flex-shrink:0}.fleet-chart-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.fleet-chart{display:block;width:100%;min-width:520px;height:260px}.fleet-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;color:#7c8da6;margin-top:9px}.fleet-legend>span{display:inline-flex;align-items:center;gap:6px}.fleet-legend i{display:inline-block;width:7px;height:7px;border-radius:2px}
+.fleet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:180px;padding:20px;color:#8192a8;font-size:12px;text-align:center;background:linear-gradient(180deg,#fff,#fafcff)}.fleet-error{display:block;margin:12px 0;padding:12px 14px;background:#fff2f3;color:#a83e55;border:1px solid #f1d8de;border-left:3px solid #d64f6c;border-radius:10px;font-size:12px;overflow-wrap:anywhere}.fleet-error p{margin-top:4px}.fleet-warehouse-list{max-height:260px;overflow:auto;scrollbar-width:thin;padding-right:5px}.fleet-warehouse{padding:9px 0;border-bottom:1px solid #eef2f8}.fleet-warehouse:last-child{border-bottom:0}.fleet-row{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:5px}.fleet-warehouse-name{font-size:12px;font-weight:750;color:#456185}.fleet-row-meta{font-size:11px;color:#8799b0}.fleet-bar{display:flex;width:100%;height:7px;background:#edf2f8;border-radius:99px;overflow:hidden}.fleet-bar>span{height:100%;display:block}.fleet-warehouse-detail{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-top:5px;color:#8190a5}
+.fleet-stage-layout{display:grid;grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);gap:0;margin-top:16px;border:1px solid var(--line);border-radius:15px;background:#fff;overflow:auto;scrollbar-width:thin;align-items:start}.fleet-stage-layout>.fleet-panel+.fleet-panel{border-left:1px solid #e2eaf4}.fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:78px;min-height:78px;max-height:78px;padding:11px 14px}.fleet-stage-layout .fleet-panel-description{max-height:30px;overflow:hidden}.fleet-stage-scroll{height:auto;max-height:none;overflow-x:auto;scrollbar-width:thin;background:#fff}.fleet-stage-table{width:100%;min-width:640px;table-layout:auto;border-collapse:separate;border-spacing:0;font-size:11px}.fleet-stage-table :is(th,td){padding:5px 8px;border-bottom:1px solid #e9eff6;text-align:center;font-variant-numeric:tabular-nums}.fleet-stage-table thead th{position:sticky;top:0;z-index:5;height:58px;min-width:118px;max-width:170px;background:#3c5473;color:#fff;font-size:11px;font-weight:650;line-height:1.5;border-right:1px solid #ffffff18}.fleet-stage-table .fleet-step-name{display:block;font-size:11px;line-height:1.5;max-width:170px;color:inherit}.fleet-header-unit{display:block;font-size:9px;opacity:.65;margin-top:3px}.fleet-step-label{display:inline-block;font-size:9px;background:#ffffff20;color:inherit;border-radius:4px;padding:1px 5px}.fleet-stage-table .fleet-truck-row{height:38px}.fleet-stage-table .fleet-truck-row :is(th,td){height:38px;white-space:nowrap;background:#fff}.fleet-stage-table .fleet-truck-row th{text-align:left;font-weight:500;color:#506a8c}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#edf5ff}.fleet-stage-table .fleet-dc-group{height:32px}.fleet-stage-table .fleet-dc-group :is(th,td){height:32px;background:#edf2f9;color:#456183;white-space:nowrap;font-weight:750;text-align:left}.fleet-truck-label{display:inline-block;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.fleet-dc-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:#e5edf9;padding:5px 7px;font-size:11px;font-weight:750;color:#4d719d}.fleet-dc-merged{vertical-align:middle;background:#f5f8fc!important}.fleet-warehouse-marker{display:inline-block;width:4px;height:12px;border-radius:3px;background:#7395c3;margin-right:7px;vertical-align:middle}.fleet-group-quantity{float:right;font-size:10px;color:#899bb2}.fleet-count-button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:25px;padding:2px 6px;border:1px solid #dce7f6;border-radius:6px;background:#edf3fb;color:#406b9e;font-size:11px;font-weight:750}.fleet-count-button:hover{background:#dbeafa;border-color:#9fbee3}.fleet-stage-completed .fleet-count-button{background:#e7f6ed;color:#16805b;border-color:#cfe8da}.fleet-stage-table td[data-stage="9"] .fleet-count-button,.fleet-stage-table td[data-stage="10"] .fleet-count-button{background:#fff0f1;color:#b35464;border-color:#eed3d9}.fleet-stage-table .fleet-stage-total{background:#f1f5fc!important;font-weight:800;color:#3a6497}.fleet-cell-empty{color:#c1ccdc}.fleet-month-table{min-width:360px;table-layout:fixed}.fleet-month-table thead th{min-width:60px;white-space:nowrap}.fleet-month-table .fleet-truck-row td{font-weight:650;color:#557399}.fleet-locked-table{--dc-lock-width:72px}.fleet-locked-table .fleet-lock-dc{position:sticky;left:0;width:var(--dc-lock-width);min-width:var(--dc-lock-width);max-width:var(--dc-lock-width);z-index:3;background:#f4f7fc}.fleet-locked-table .fleet-lock-truck{position:sticky;left:var(--dc-lock-width);min-width:160px;max-width:180px;z-index:3;background:#fff;box-shadow:3px 0 7px #203d6008}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{z-index:7;background:#3c5473}.fleet-lock-warehouse{max-width:230px;overflow:hidden;text-overflow:ellipsis}.fleet-step-toggle{border:0;background:transparent;color:#7d92ae;padding:4px 5px;border-radius:6px;flex-shrink:0;font-size:11px;white-space:nowrap}.fleet-step-toggle:hover{background:#edf3fb;color:#456c9c}
+.fleet-vendor-tooltip{position:fixed;z-index:10000;pointer-events:none;width:288px;max-width:calc(100vw - 24px);max-height:220px;overflow:auto;padding:12px 14px;border:1px solid #dce6f3;border-radius:11px;background:#fff;color:#496482;box-shadow:0 12px 36px #162e5424}.fleet-vendor-tooltip-heading{font-size:11px;color:#7c90ac;font-weight:750;border-bottom:1px solid #e9eef5;padding-bottom:7px;margin-bottom:7px}.fleet-vendor-tooltip-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:4px 0;font-size:12px}.fleet-vendor-tooltip-row span{overflow-wrap:anywhere}.fleet-vendor-tooltip-row strong{white-space:nowrap;color:#3d679a}.fleet-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:10px;color:#8c9bb0;margin-top:13px}
+.fleet-month-counter{font-size:11px;white-space:nowrap;color:#507caf;background:#edf4ff;border:1px solid #dbe7f8;padding:6px 9px;border-radius:8px}.fleet-month-open:hover{background:#dfebfd}.fleet-month-dialog{position:fixed;inset:0;margin:auto;width:min(410px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:0;border:1px solid #dce6f3;border-radius:18px;background:#fff;color:#304c70;box-shadow:0 22px 70px #17305240}.fleet-month-dialog::backdrop{background:#1a305660;backdrop-filter:blur(3px)}.fleet-month-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 19px;background:#f7faff}.fleet-month-dialog-heading h3{font-size:16px}.fleet-month-dialog-heading p{font-size:12px;color:#8195af;margin-top:5px!important}.fleet-month-close{width:29px;height:29px;border:0;background:#eaf0f9;color:#637d9f;border-radius:8px;font-size:24px!important}.fleet-month-picker{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:16px 19px}.fleet-month-chip{padding:9px 5px;border:1px solid #dfe7f3;border-radius:9px;color:#6f86a5;background:#f8faff;font-size:12px;font-weight:650}.fleet-month-chip.is-selected{background:#2e61b6;border-color:#2e61b6;color:#fff}.fleet-month-chip:hover:not(:disabled):not(.is-selected){background:#edf3ff}.fleet-month-picker-note{padding:0 19px 15px;font-size:11px;line-height:1.6;color:#8b9bb1}.fleet-month-dialog-footer{display:flex;justify-content:flex-end;padding:12px 19px;background:#f8faff;border-top:1px solid #e8eef7}
+.sla-overdue-embed{margin:17px 0;padding:0;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:0 3px 12px #29476c03}.sla-shell{width:100%}.sla-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:13px 15px;border-bottom:1px solid #edf1f7;background:linear-gradient(100deg,#fff8f5,#fff 60%)}.sla-eyebrow{font-size:10px!important;font-weight:800;letter-spacing:1.3px;color:#bc7153}.sla-heading h3{font-size:15px;color:#3e5472;margin-top:2px!important}.sla-description{font-size:11px;color:#8a9bb2;margin-top:4px!important}.sla-refresh{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;background:#fff;border:1px solid #dbe5f2;border-radius:8px;color:#53749d;font-size:11px!important}.sla-refresh:hover{background:#f2f6fd}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 15px;border-bottom:1px solid #e8eef6}.sla-kpi{display:flex;align-items:center;gap:10px;padding:12px 14px}.sla-kpi+.sla-kpi{border-left:1px solid #e8eef6}.sla-kpi-icon{display:flex;align-items:center;justify-content:center;width:31px;height:31px;border-radius:9px;flex-shrink:0}.sla-kpi-icon.rose{background:#fff0f3;color:#bf4765}.sla-kpi-icon.amber{background:#fff5df;color:#b27d21}.sla-kpi-icon.blue{background:#edf4ff;color:#477db7}.sla-kpi-label{font-size:11px;color:#8a9ab0}.sla-kpi-value{font-size:21px;font-weight:800;line-height:1.3;margin-top:2px!important;color:#3e5778}.sla-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:11px 15px}.sla-search{position:relative;flex:1;min-width:220px}.sla-search svg{position:absolute;left:10px;top:9px;color:#9baabd}.sla-control{height:33px;padding:5px 10px;border:1px solid #dce5f2;background:#f9fbfe;border-radius:8px;font-size:12px!important;color:#536e91;max-width:100%}.sla-search input{width:100%;padding-left:32px}.sla-clear{border:0;background:transparent;color:#4073b6;font-size:10px!important}.sla-clear:hover{text-decoration:underline}.sla-table-scroll{max-height:330px;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable}.sla-table{width:100%;min-width:1040px;text-align:left;border-spacing:0;border-collapse:separate;font-size:12px}.sla-table thead{position:sticky;top:0;z-index:2;background:#3c5473;color:#fff}.sla-table th{white-space:nowrap;padding:10px 12px;font-size:11px;font-weight:650;border-right:1px solid #ffffff18}.sla-table td{padding:10px 12px;border-bottom:1px solid #e9eff6;vertical-align:top;line-height:1.5}.sla-table tbody tr:nth-child(even){background:#fafcff}.sla-table tbody tr:hover{background:#eff5ff}.sla-table td p{margin-top:3px;font-size:11px;color:#8b9bb1}.sla-strong{font-weight:650;color:#4c6383}.sla-id{font-size:10px!important;color:#a2b0c3!important}.sla-days{background:#fff3f5;color:#b34360;white-space:nowrap;text-align:right}.sla-days>span{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:800}.sla-days p{color:#b96e82!important;font-size:10px!important}.sla-limit{white-space:nowrap;text-align:right;color:#6b829f}.sla-action{min-width:180px;max-width:320px;white-space:pre-line;font-size:11px;color:#b5536e;font-weight:650}.sla-state-message{position:sticky;left:12px;display:block;width:min(650px,calc(100vw - 85px));text-align:center}.sla-state{height:135px;text-align:center;color:#8c9ab0;padding:22px!important}.sla-table .sla-state{background:#fafcff;text-align:center}.sla-error{display:flex;gap:9px;align-items:flex-start;margin:0 15px 12px;padding:12px;border:1px solid #f0d8df;border-radius:9px;background:#fff4f6;color:#ae4964;font-size:12px}.sla-error svg{flex-shrink:0}.sla-error p{margin-top:4px!important;overflow-wrap:anywhere}.sla-error-api{font-size:11px;opacity:.7}.sla-table-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:9px 15px;font-size:10px;color:#8d9eb4;border-top:1px solid #e9eff6}.sla-spin{animation:fleet-spin 1s linear infinite}@keyframes fleet-spin{to{transform:rotate(360deg)}}
 @media(min-width:1350px){.fleet-filters{grid-template-columns:repeat(8,minmax(0,1fr))}}
 @media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card{min-height:137px}.fleet-api-summary-top{min-height:35px}.fleet-panels{grid-template-columns:minmax(0,1.6fr) minmax(240px,1fr)}}
-@media(max-width:850px){.fleet-dashboard{padding:13px}.fleet-panels{grid-template-columns:1fr}.fleet-panels>.fleet-panel+.fleet-panel{border-left:0;border-top:1px solid var(--line)}.fleet-chart{height:250px}.fleet-warehouse-list{max-height:230px}.fleet-heading h2{font-size:20px}.fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(330px,1fr)}}
-@media(max-width:560px){.fleet-dashboard{padding:10px;border-radius:14px}.fleet-heading{padding:14px;align-items:flex-start;flex-wrap:wrap;gap:10px}.fleet-heading h2{font-size:18px}.fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:9px}.fleet-field{height:36px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.fleet-api-summary-card{min-height:147px;padding:12px 11px}.fleet-api-summary-top{min-height:46px}.fleet-api-summary-number strong{font-size:27px}.fleet-api-summary-badge{display:none}.fleet-delivery-card{padding:10px 9px}.fleet-delivery-number{gap:5px}.fleet-delivery-number svg{display:none}.fleet-delivery-number strong{font-size:22px}.fleet-delivery-label{font-size:10px}.fleet-delivery-label small{display:none}.sla-heading{padding:12px}.sla-kpis{margin:0 8px}.sla-kpi{padding:10px 7px;gap:5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:16px}.sla-kpi-label{font-size:9px}.sla-toolbar{padding:10px 12px}.sla-search{flex-basis:100%;min-width:0}.sla-toolbar select{flex:1;min-width:0}.sla-table-footer{padding:9px 12px}.fleet-footer{font-size:9px}.fleet-chart{height:230px}}
+@media(max-width:850px){.fleet-dashboard{padding:13px}.fleet-panels{grid-template-columns:1fr}.fleet-panels>.fleet-panel+.fleet-panel{border-left:0;border-top:1px solid var(--line)}.fleet-chart{height:250px}.fleet-warehouse-list{max-height:230px}.fleet-heading h2{font-size:22px}.fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(330px,1fr)}}
+@media(max-width:560px){.fleet-dashboard{padding:10px;border-radius:14px}.fleet-heading{padding:14px;align-items:flex-start;flex-wrap:wrap;gap:10px}.fleet-heading h2{font-size:20px}.fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:9px}.fleet-field{height:36px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.fleet-api-summary-card{min-height:147px;padding:12px 11px}.fleet-api-summary-top{min-height:46px}.fleet-api-summary-number strong{font-size:29px}.fleet-api-summary-badge{display:none}.fleet-delivery-card{padding:10px 9px}.fleet-delivery-number{gap:5px}.fleet-delivery-number svg{display:none}.fleet-delivery-number strong{font-size:24px}.fleet-delivery-label{font-size:11px}.fleet-delivery-label small{display:none}.sla-heading{padding:12px}.sla-kpis{margin:0 8px}.sla-kpi{padding:10px 7px;gap:5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:18px}.sla-kpi-label{font-size:10px}.sla-toolbar{padding:10px 12px}.sla-search{flex-basis:100%;min-width:0}.sla-toolbar select{flex:1;min-width:0}.sla-table-footer{padding:9px 12px}.fleet-footer{font-size:10px}.fleet-chart{height:230px}}
 @media(prefers-reduced-motion:reduce){.fleet-dashboard *{animation:none!important;transition:none!important}.fleet-api-summary-card:hover{transform:none}}
 
 .fleet-dashboard{background:#edf1f7;border-radius:18px;padding:18px;border-color:#dce4ef}
 .fleet-heading{background:#fff;color:#223754;box-shadow:none;border:1px solid #dfe6f0;border-bottom:3px solid #243f6b;border-radius:14px;padding:16px 18px;min-height:90px;margin-bottom:17px}
 .fleet-brand{display:flex;align-items:center;gap:13px;min-width:0}.fleet-brand-icon{display:flex;align-items:center;justify-content:center;width:46px;height:46px;background:#213b63;border-radius:13px;color:#cce2ff;box-shadow:0 5px 13px #1d335815;flex-shrink:0}
-.fleet-heading h2{font-size:23px;color:#213b63;line-height:1.25}.fleet-heading .fleet-eyebrow{color:#6a84a7;font-size:9px;letter-spacing:2px}.fleet-heading .fleet-subtitle{color:#7e91ac;font-size:11px}.fleet-heading .fleet-button{background:#243f6b;border-color:#243f6b;color:#fff;min-height:35px}.fleet-heading .fleet-button:hover{background:#162e52}
+.fleet-heading h2{font-size:25px;color:#213b63;line-height:1.25}.fleet-heading .fleet-eyebrow{color:#6a84a7;font-size:10px;letter-spacing:2px}.fleet-heading .fleet-subtitle{color:#7e91ac;font-size:12px}.fleet-heading .fleet-button{background:#243f6b;border-color:#243f6b;color:#fff;min-height:35px}.fleet-heading .fleet-button:hover{background:#162e52}
 .fleet-filter-heading{margin-bottom:8px}.fleet-filters{border:1px solid #dbe4f0;border-radius:12px;background:#f9fbfe;padding:12px 14px}.fleet-field{background:#fff;height:34px;border-color:#d6e1ef}.fleet-filter-context{color:#3a6498;background:#dfe9f9;border-radius:6px;padding:3px 8px;font-weight:650}
-.fleet-api-summary{margin-top:17px}.fleet-api-summary-grid{gap:0;border:1px solid #dce4ee;border-radius:15px;overflow:hidden;background:#fff;box-shadow:0 5px 14px #19365d05;grid-template-columns:1.05fr repeat(5,minmax(0,1fr))}.fleet-api-summary-card{border:0;border-radius:0;padding:15px 15px 13px;min-height:150px;box-shadow:none;transition:background .15s;overflow:hidden}.fleet-api-summary-card+.fleet-api-summary-card{border-left:1px solid #e6ecf4}.fleet-api-summary-card:after{display:none}.fleet-api-summary-card:before{left:15px;right:15px;bottom:11px;height:2px;opacity:.3}.fleet-api-summary-card:hover{transform:none;box-shadow:inset 0 0 0 999px #5579aa06}.fleet-api-summary-card.is-selected{outline:0;box-shadow:inset 0 0 0 2px currentColor;background:#f8fbff!important}.fleet-api-summary-card.is-total.is-selected{background:#1d3358!important;box-shadow:none}.fleet-api-summary-card.is-total{border:0}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#d6e5fc}.fleet-api-summary-icon{width:30px;height:30px;border:1px solid #e8edf4;background:#f7f9fc;border-radius:9px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff15;border-color:#ffffff20;color:#b6d3ff}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-number{margin:8px 0 7px}.fleet-api-summary-number strong{font-size:32px}.fleet-api-summary-detail{padding-bottom:10px;min-height:32px;font-size:9px}.fleet-api-summary-card.is-total .fleet-api-summary-number{color:#fff}
-.sla-overdue-embed{border-radius:15px;border:1px solid #dfdfe8;background:#fff;box-shadow:0 5px 17px #1d335806;margin-top:18px}.sla-heading{background:#fff;border-bottom:1px solid #e7eaf1;padding:13px 16px;position:relative}.sla-heading:before{content:"";position:absolute;left:0;top:15px;bottom:15px;width:4px;background:#d66355;border-radius:0 4px 4px 0}.sla-eyebrow{font-size:8px!important;letter-spacing:1.6px;color:#bc776a}.sla-heading h3{font-size:14px;color:#293f61}.sla-description{font-size:10px}.sla-workspace{display:grid;grid-template-columns:183px minmax(0,1fr);align-items:stretch}.sla-kpis{display:flex;flex-direction:column;margin:0;padding:6px 12px;background:linear-gradient(160deg,#f8f4f3,#f4f7fc);border:0;border-right:1px solid #e6e9f0}.sla-kpi{padding:17px 3px;gap:9px;flex:1;align-items:flex-start}.sla-kpi+.sla-kpi{border-left:0;border-top:1px solid #e0e5ed}.sla-kpi-icon{width:29px;height:29px;border:1px solid #e9e2e4;border-radius:9px}.sla-kpi-label{font-size:10px;line-height:1.5;color:#8592a5}.sla-kpi-value{font-size:25px;line-height:1.3;color:#304867;margin-top:5px!important}.sla-kpi:first-child .sla-kpi-value{color:#b84c5a}.sla-kpi:nth-child(2) .sla-kpi-value{color:#a1742d}.sla-kpi:nth-child(3) .sla-kpi-value{color:#4776aa}.sla-table-section{min-width:0}.sla-toolbar{padding:11px 12px;border-bottom:1px solid #edf0f6;background:#fbfcff}.sla-control{background:#fff;height:33px;font-size:10px!important}.sla-table th{background:#edf2fa;color:#4d688d;border-bottom:1px solid #d9e3f1;border-right:0;font-weight:750;font-size:9px;padding:9px 11px}.sla-table td{padding:10px 11px}.sla-table thead{background:#edf2fa}.sla-table-scroll{max-height:320px}.sla-error{margin:10px 12px;padding:9px 11px;font-size:10px;border-left:3px solid #ce7182;background:#fff6f7}.sla-error-api{font-size:9px}.sla-state{height:125px}.sla-state-message{width:min(650px,calc(100vw - 300px));font-size:10px}.sla-table-footer{padding:8px 12px;background:#fbfcff;font-size:9px}
-.fleet-delivery-heading{font-size:13px;color:#334f76}.fleet-delivery-cards{background:#fff;border:1px solid #dce4ef;border-radius:13px}.fleet-delivery-card{position:relative;padding:13px 17px}.fleet-delivery-card:after{content:"";position:absolute;right:17px;top:16px;width:7px;height:7px;border-radius:50%;background:#7498c8}.fleet-delivery-card:nth-child(2):after{background:#17a776}.fleet-delivery-card:nth-child(3):after{background:#e3944b}.fleet-delivery-label{font-size:11px;color:#58759a}.fleet-delivery-number strong{font-size:27px}.fleet-panels{grid-template-columns:minmax(0,1.65fr) minmax(285px,1fr);border-radius:14px;border-color:#dce4ef}.fleet-panel-header{background:#f9fbfe;padding:13px 16px}.fleet-panel-header h3{font-size:13px}.fleet-stage-layout{border-radius:14px;border-color:#dce4ef;margin-top:18px}.fleet-stage-layout .fleet-panel-header{background:#f8faff}.fleet-stage-table thead th{background:#2c4569;font-weight:650}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{background:#2c4569}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#eaf3ff}
+.fleet-api-summary{margin-top:17px}.fleet-api-summary-grid{gap:0;border:1px solid #dce4ee;border-radius:15px;overflow:hidden;background:#fff;box-shadow:0 5px 14px #19365d05;grid-template-columns:1.05fr repeat(5,minmax(0,1fr))}.fleet-api-summary-card{border:0;border-radius:0;padding:15px 15px 13px;min-height:150px;box-shadow:none;transition:background .15s;overflow:hidden}.fleet-api-summary-card+.fleet-api-summary-card{border-left:1px solid #e6ecf4}.fleet-api-summary-card:after{display:none}.fleet-api-summary-card:before{left:15px;right:15px;bottom:11px;height:2px;opacity:.3}.fleet-api-summary-card:hover{transform:none;box-shadow:inset 0 0 0 999px #5579aa06}.fleet-api-summary-card.is-selected{outline:0;box-shadow:inset 0 0 0 2px currentColor;background:#f8fbff!important}.fleet-api-summary-card.is-total.is-selected{background:#1d3358!important;box-shadow:none}.fleet-api-summary-card.is-total{border:0}.fleet-api-summary-card.is-total .fleet-api-summary-label{color:#d6e5fc}.fleet-api-summary-icon{width:30px;height:30px;border:1px solid #e8edf4;background:#f7f9fc;border-radius:9px}.fleet-api-summary-card.is-total .fleet-api-summary-icon{background:#ffffff15;border-color:#ffffff20;color:#b6d3ff}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-number{margin:8px 0 7px}.fleet-api-summary-number strong{font-size:34px}.fleet-api-summary-detail{padding-bottom:10px;min-height:32px;font-size:10px}.fleet-api-summary-card.is-total .fleet-api-summary-number{color:#fff}
+.sla-overdue-embed{border-radius:15px;border:1px solid #dfdfe8;background:#fff;box-shadow:0 5px 17px #1d335806;margin-top:18px}.sla-heading{background:#fff;border-bottom:1px solid #e7eaf1;padding:13px 16px;position:relative}.sla-heading:before{content:"";position:absolute;left:0;top:15px;bottom:15px;width:4px;background:#d66355;border-radius:0 4px 4px 0}.sla-eyebrow{font-size:9px!important;letter-spacing:1.6px;color:#bc776a}.sla-heading h3{font-size:16px;color:#293f61}.sla-description{font-size:11px}.sla-workspace{display:grid;grid-template-columns:183px minmax(0,1fr);align-items:stretch}.sla-kpis{display:flex;flex-direction:column;margin:0;padding:6px 12px;background:linear-gradient(160deg,#f8f4f3,#f4f7fc);border:0;border-right:1px solid #e6e9f0}.sla-kpi{padding:17px 3px;gap:9px;flex:1;align-items:flex-start}.sla-kpi+.sla-kpi{border-left:0;border-top:1px solid #e0e5ed}.sla-kpi-icon{width:29px;height:29px;border:1px solid #e9e2e4;border-radius:9px}.sla-kpi-label{font-size:11px;line-height:1.5;color:#8592a5}.sla-kpi-value{font-size:27px;line-height:1.3;color:#304867;margin-top:5px!important}.sla-kpi:first-child .sla-kpi-value{color:#b84c5a}.sla-kpi:nth-child(2) .sla-kpi-value{color:#a1742d}.sla-kpi:nth-child(3) .sla-kpi-value{color:#4776aa}.sla-table-section{min-width:0}.sla-toolbar{padding:11px 12px;border-bottom:1px solid #edf0f6;background:#fbfcff}.sla-control{background:#fff;height:33px;font-size:11px!important}.sla-table th{background:#edf2fa;color:#4d688d;border-bottom:1px solid #d9e3f1;border-right:0;font-weight:750;font-size:10px;padding:9px 11px}.sla-table td{padding:10px 11px}.sla-table thead{background:#edf2fa}.sla-table-scroll{max-height:320px}.sla-error{margin:10px 12px;padding:9px 11px;font-size:11px;border-left:3px solid #ce7182;background:#fff6f7}.sla-error-api{font-size:10px}.sla-state{height:125px}.sla-state-message{width:min(650px,calc(100vw - 300px));font-size:11px}.sla-table-footer{padding:8px 12px;background:#fbfcff;font-size:10px}
+.fleet-delivery-heading{font-size:15px;color:#334f76}.fleet-delivery-cards{background:#fff;border:1px solid #dce4ef;border-radius:13px}.fleet-delivery-card{position:relative;padding:13px 17px}.fleet-delivery-card:after{content:"";position:absolute;right:17px;top:16px;width:7px;height:7px;border-radius:50%;background:#7498c8}.fleet-delivery-card:nth-child(2):after{background:#17a776}.fleet-delivery-card:nth-child(3):after{background:#e3944b}.fleet-delivery-label{font-size:12px;color:#58759a}.fleet-delivery-number strong{font-size:29px}.fleet-panels{grid-template-columns:minmax(0,1.65fr) minmax(285px,1fr);border-radius:14px;border-color:#dce4ef}.fleet-panel-header{background:#f9fbfe;padding:13px 16px}.fleet-panel-header h3{font-size:15px}.fleet-stage-layout{border-radius:14px;border-color:#dce4ef;margin-top:18px}.fleet-stage-layout .fleet-panel-header{background:#f8faff}.fleet-stage-table thead th{background:#2c4569;font-weight:650}.fleet-locked-table thead .fleet-lock-dc,.fleet-locked-table thead .fleet-lock-truck{background:#2c4569}.fleet-stage-table .fleet-truck-row:hover :is(th,td){background:#eaf3ff}
 @media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card:nth-child(n+4){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(4){border-left:0}.fleet-api-summary-card{min-height:140px}.sla-workspace{grid-template-columns:160px minmax(0,1fr)}.sla-kpis{padding:5px 9px}.sla-kpi{gap:6px}}
-@media(max-width:850px){.fleet-panels{grid-template-columns:1fr}.sla-workspace{grid-template-columns:1fr}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 10px;background:#f8faff;border-right:0;border-bottom:1px solid #e6e9f0}.sla-kpi{padding:11px 7px;align-items:center}.sla-kpi+.sla-kpi{border-top:0;border-left:1px solid #e6e9f0}.sla-kpi-value{font-size:22px}.sla-state-message{width:min(650px,calc(100vw - 85px))}}
-@media(max-width:560px){.fleet-heading{padding:13px;gap:11px}.fleet-brand{gap:10px}.fleet-brand-icon{width:35px;height:35px;border-radius:10px}.fleet-brand-icon svg{width:21px;height:21px}.fleet-heading h2{font-size:18px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fleet-api-summary-card{padding:13px 11px;min-height:150px}.fleet-api-summary-card:nth-child(n+3){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(odd){border-left:0}.fleet-api-summary-card:nth-child(4){border-left:1px solid #e6ecf4}.fleet-api-summary-number strong{font-size:29px}.sla-kpi{padding:11px 5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:18px}.sla-kpi-label{font-size:9px}.sla-table-footer{font-size:9px}.fleet-heading .fleet-button{min-height:32px;font-size:10px}.fleet-api-summary-top{min-height:47px}}
+@media(max-width:850px){.fleet-panels{grid-template-columns:1fr}.sla-workspace{grid-template-columns:1fr}.sla-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 10px;background:#f8faff;border-right:0;border-bottom:1px solid #e6e9f0}.sla-kpi{padding:11px 7px;align-items:center}.sla-kpi+.sla-kpi{border-top:0;border-left:1px solid #e6e9f0}.sla-kpi-value{font-size:24px}.sla-state-message{width:min(650px,calc(100vw - 85px))}}
+@media(max-width:560px){.fleet-heading{padding:13px;gap:11px}.fleet-brand{gap:10px}.fleet-brand-icon{width:35px;height:35px;border-radius:10px}.fleet-brand-icon svg{width:21px;height:21px}.fleet-heading h2{font-size:20px}.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fleet-api-summary-card{padding:13px 11px;min-height:150px}.fleet-api-summary-card:nth-child(n+3){border-top:1px solid #e6ecf4}.fleet-api-summary-card:nth-child(odd){border-left:0}.fleet-api-summary-card:nth-child(4){border-left:1px solid #e6ecf4}.fleet-api-summary-number strong{font-size:31px}.sla-kpi{padding:11px 5px}.sla-kpi-icon{display:none}.sla-kpi-value{font-size:20px}.sla-kpi-label{font-size:10px}.sla-table-footer{font-size:10px}.fleet-heading .fleet-button{min-height:32px;font-size:11px}.fleet-api-summary-top{min-height:47px}}
 
 /* Shared report frame and prominent export action. */
 .fleet-report-block{margin-top:20px;border:1px solid #cad9ea;border-radius:16px;background:#fff;overflow:hidden;box-shadow:0 4px 16px #1d335809}
 .fleet-report-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 18px;background:#edf4fc;border-bottom:1px solid #d4e1f0}
 .fleet-report-heading{display:flex;align-items:center;gap:12px;min-width:0}
 .fleet-report-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:43px;height:43px;border:1px solid #cfdef0;border-radius:11px;background:#fff;color:#285fac}
-.fleet-report-heading h3{font-size:15px;font-weight:750;color:#213b63}
-.fleet-report-heading p{margin-top:4px!important;font-size:11px;color:#607998}
-.fleet-export-excel{display:inline-flex;align-items:center;justify-content:center;gap:11px;flex-shrink:0;min-height:49px;padding:10px 19px;border:1px solid #047857;border-radius:10px;background:#078452;color:#fff;box-shadow:0 3px 8px #04785726;font-family:inherit;font-size:14px;font-weight:750;line-height:1.3;cursor:pointer;transition:background .15s,box-shadow .15s}
-.fleet-export-excel small{display:block;margin-top:3px;font-size:10px;font-weight:400;color:#d1fae5}
+.fleet-report-heading h3{font-size:17px;font-weight:750;color:#213b63}
+.fleet-report-heading p{margin-top:4px!important;font-size:12px;color:#607998}
+.fleet-export-excel{display:inline-flex;align-items:center;justify-content:center;gap:11px;flex-shrink:0;min-height:49px;padding:10px 19px;border:1px solid #047857;border-radius:10px;background:#078452;color:#fff;box-shadow:0 3px 8px #04785726;font-family:inherit;font-size:16px;font-weight:750;line-height:1.3;cursor:pointer;transition:background .15s,box-shadow .15s}
+.fleet-export-excel small{display:block;margin-top:3px;font-size:11px;font-weight:400;color:#d1fae5}
 .fleet-export-excel:hover:not(:disabled){background:#066a43;box-shadow:0 4px 12px #04785735}
 .fleet-export-excel:focus-visible{outline:3px solid #34d399;outline-offset:3px}
 .fleet-export-excel:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .fleet-report-block .fleet-stage-layout{margin-top:0;border:0;border-radius:0;box-shadow:none}
-.fleet-report-error{padding:10px 18px;background:#fff1f2;border-bottom:1px solid #fecdd3;color:#be123c;font-size:12px}
-@media(max-width:650px){.fleet-report-toolbar{align-items:stretch;flex-direction:column;padding:14px;gap:13px}.fleet-report-heading h3{font-size:14px}.fleet-export-excel{width:100%}.fleet-report-heading p{font-size:10px}}
+.fleet-report-error{padding:10px 18px;background:#fff1f2;border-bottom:1px solid #fecdd3;color:#be123c;font-size:13px}
+@media(max-width:650px){.fleet-report-toolbar{align-items:stretch;flex-direction:column;padding:14px;gap:13px}.fleet-report-heading h3{font-size:16px}.fleet-export-excel{width:100%}.fleet-report-heading p{font-size:11px}}
 
 /* Separate status cards with oversized background icons. */
 .fleet-api-summary-grid{gap:11px;grid-template-columns:repeat(6,minmax(0,1fr));border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
@@ -1594,19 +1637,19 @@ function FleetStatusByDc({
 .fleet-api-summary-card:before,.fleet-api-summary-card:after{display:none}
 .fleet-api-summary-card.is-total{border-color:#1d3358!important}
 .fleet-api-summary-top{display:block;min-height:42px;padding-right:4px}
-.fleet-api-summary-label{position:relative;z-index:1;max-width:100%;font-size:10.5px;line-height:1.6;white-space:pre-line}
+.fleet-api-summary-label{position:relative;z-index:1;max-width:100%;font-size:11.5px;line-height:1.6;white-space:pre-line}
 .fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{position:absolute;right:-17px;bottom:-15px;top:auto;width:110px;height:110px;border:0;border-radius:0;background:transparent;color:inherit;opacity:.085;pointer-events:none;z-index:-1;transform:rotate(-12deg);box-shadow:none}
 .fleet-api-summary-icon svg{width:105px;height:105px;stroke-width:1.2}
 .fleet-api-summary-card.is-total .fleet-api-summary-icon{opacity:.11;color:#dceaff}
 .fleet-api-summary-number{position:relative;z-index:1;margin:10px 0 8px}
-.fleet-api-summary-number strong{font-size:32px;letter-spacing:-.8px}
-.fleet-api-summary-detail{position:relative;z-index:1;max-width:92%;font-size:9.5px;line-height:1.5;padding:0;min-height:29px;opacity:.85}
+.fleet-api-summary-number strong{font-size:34px;letter-spacing:-.8px}
+.fleet-api-summary-detail{position:relative;z-index:1;max-width:92%;font-size:10.5px;line-height:1.5;padding:0;min-height:29px;opacity:.85}
 .fleet-api-summary-card:hover{transform:translateY(-3px);box-shadow:0 9px 23px #1d335814}
 .fleet-api-summary-card.is-selected{outline:2px solid currentColor;outline-offset:2px;box-shadow:0 5px 16px #1d33580c;background:#fff!important}
 .fleet-api-summary-card.is-total.is-selected{outline:2px solid #5074aa;outline-offset:2px;background:#1d3358!important}
 .fleet-api-summary-card:focus-visible{outline:3px solid #3979d7;outline-offset:3px}
 @media(max-width:1150px){.fleet-api-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.fleet-api-summary-card{min-height:145px}.fleet-api-summary-top{min-height:35px}}
-@media(max-width:560px){.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.fleet-api-summary-card{padding:13px 12px;min-height:150px}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{width:95px;height:95px;bottom:-14px;right:-12px}.fleet-api-summary-icon svg{width:95px;height:95px}.fleet-api-summary-number strong{font-size:28px}.fleet-api-summary-detail{font-size:9px}}
+@media(max-width:560px){.fleet-api-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.fleet-api-summary-card{padding:13px 12px;min-height:150px}.fleet-api-summary-top{min-height:44px}.fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{width:95px;height:95px;bottom:-14px;right:-12px}.fleet-api-summary-icon svg{width:95px;height:95px}.fleet-api-summary-number strong{font-size:30px}.fleet-api-summary-detail{font-size:10px}}
 
 /* Reference-inspired soft filter panel. */
 .fleet-filter-shell{background:#fff;border:1px solid #e2e9f4;border-radius:19px;overflow:hidden;box-shadow:0 5px 20px #24436905;margin-bottom:15px}
@@ -1635,10 +1678,10 @@ function FleetStatusByDc({
 /* Compact status cards and wrapping responsive filters. */
 .fleet-api-summary-card{min-height:119px!important;padding:11px 12px!important}
 .fleet-api-summary-top{min-height:32px!important}
-.fleet-api-summary-label{font-size:10px;line-height:1.45}
+.fleet-api-summary-label{font-size:11px;line-height:1.45}
 .fleet-api-summary-number{margin:5px 0 4px}
-.fleet-api-summary-number strong{font-size:27px}
-.fleet-api-summary-detail{min-height:24px;font-size:9px;line-height:1.4;padding:0}
+.fleet-api-summary-number strong{font-size:29px}
+.fleet-api-summary-detail{min-height:24px;font-size:10px;line-height:1.4;padding:0}
 .fleet-api-summary-icon,.fleet-api-summary-card.is-total .fleet-api-summary-icon{width:88px;height:88px;right:-12px;bottom:-14px}
 .fleet-api-summary-icon svg{width:88px;height:88px}
 .fleet-filter-shell .fleet-filter-heading{min-height:54px;padding:10px 15px}
@@ -1654,115 +1697,114 @@ function FleetStatusByDc({
 .fleet-filter-shell .fleet-field{height:36px;min-height:36px;font-size:10.5px;padding-top:5px;padding-bottom:5px;border-radius:10px}
 .fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px;font-size:10px;border-radius:10px}
 .fleet-filter-shell .fleet-label{font-size:9px;margin-bottom:5px}
-@media(max-width:560px){.fleet-api-summary-card{min-height:123px!important;padding:10px 11px!important}.fleet-api-summary-top{min-height:35px!important}.fleet-api-summary-number strong{font-size:25px}.fleet-api-summary-detail{font-size:8.5px}.fleet-filter-shell .fleet-filters{padding:10px 12px;gap:9px}.fleet-filter-shell .fleet-field{font-size:10px;height:36px;min-height:36px}.fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px}}
+@media(max-width:560px){.fleet-api-summary-card{min-height:123px!important;padding:10px 11px!important}.fleet-api-summary-top{min-height:35px!important}.fleet-api-summary-number strong{font-size:27px}.fleet-api-summary-detail{font-size:9.5px}.fleet-filter-shell .fleet-filters{padding:10px 12px;gap:9px}.fleet-filter-shell .fleet-field{font-size:10px;height:36px;min-height:36px}.fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px}}
 
 .sla-table th:last-child{position:sticky;right:0;z-index:3;min-width:128px;background:#edf2fa;text-align:center;box-shadow:-4px 0 7px #243b5a06}
 .sla-table .sla-detail-cell{position:sticky;right:0;z-index:1;min-width:128px;background:#fff;vertical-align:middle;text-align:center;box-shadow:-4px 0 7px #243b5a06}
 .sla-table tbody tr:nth-child(even) .sla-detail-cell{background:#fafcff}
 .sla-table tbody tr:hover .sla-detail-cell{background:#eff5ff}
-.sla-detail-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 9px;border:1px solid #d4e3fa;border-radius:9px;background:#edf4ff;color:#3768ad;font-size:10px!important;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s}
+.sla-detail-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 9px;border:1px solid #d4e3fa;border-radius:9px;background:#edf4ff;color:#3768ad;font-size:11px!important;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s}
 .sla-detail-button:hover{background:#dceaff;border-color:#a6c4ee}
 .sla-detail-button:focus-visible{outline:2px solid #3979d7;outline-offset:2px}
 .sla-kpi:nth-child(2) .sla-kpi-value{color:#4776aa}
 @media(max-width:850px){.sla-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* รูปแบบสรุปการส่งมอบตามภาพตัวอย่าง */
 .fleet-delivery-summary{grid-template-columns:minmax(190px,240px) minmax(380px,1fr);gap:32px;margin:20px 0 24px;align-items:stretch}
-.fleet-delivery-heading{font-size:15px;color:#18294a;margin:0 0 10px!important}
+.fleet-delivery-heading{font-size:17px;color:#18294a;margin:0 0 10px!important}
 .fleet-delivery-summary .fleet-delivery-cards{gap:14px;border:0;background:transparent;overflow:visible}
 .fleet-delivery-summary .fleet-delivery-card{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:14px 16px;background:#fff;border:1px solid #b9d9eb;border-radius:18px;box-shadow:0 6px 12px rgba(30,53,78,.18);min-height:150px}
 .fleet-delivery-summary .fleet-delivery-card+.fleet-delivery-card{border:1px solid #b9d9eb}
 .fleet-delivery-summary .fleet-delivery-card:after{display:none}
-.fleet-delivery-summary .fleet-delivery-label{color:#111;font-size:15px;font-weight:750;line-height:1.2}
-.fleet-delivery-summary .fleet-delivery-label small{display:block;margin:2px 0 0;font-size:13px;color:#222}
+.fleet-delivery-summary .fleet-delivery-label{color:#111;font-size:17px;font-weight:750;line-height:1.2}
+.fleet-delivery-summary .fleet-delivery-label small{display:block;margin:2px 0 0;font-size:15px;color:#222}
 .fleet-delivery-summary .fleet-delivery-number{justify-content:center;gap:18px;margin-top:10px;color:#111}
 .fleet-delivery-summary .fleet-delivery-number svg{display:block;width:45px;height:45px;padding:0;background:transparent}
-.fleet-delivery-summary .fleet-delivery-number strong{font-size:37px;line-height:1}
-.fleet-delivery-summary .fleet-delivery-unit{display:block;margin:2px 0 0;font-size:12px;color:#222}
-.fleet-delivery-summary .fleet-delivery-note{font-size:10px;color:#777;margin:5px 0 0!important}
+.fleet-delivery-summary .fleet-delivery-number strong{font-size:39px;line-height:1}
+.fleet-delivery-summary .fleet-delivery-unit{display:block;margin:2px 0 0;font-size:13px;color:#222}
+.fleet-delivery-summary .fleet-delivery-note{font-size:11px;color:#777;margin:5px 0 0!important}
 .fleet-delivery-summary .fleet-delivery-progress-row{width:100%;margin-top:8px;gap:8px}
 .fleet-delivery-summary .fleet-delivery-progress-track{height:14px;background:#dedede}
-.fleet-delivery-summary .fleet-delivery-percent{font-size:15px;color:#222}
+.fleet-delivery-summary .fleet-delivery-percent{font-size:17px;color:#222}
 .delivery-stage-panel{padding:24px 28px;border:1px solid #b9d9eb;border-radius:18px;box-shadow:0 6px 12px rgba(30,53,78,.18);display:flex;flex-direction:column}
-.delivery-stage-panel h3{color:#160c85;font-size:21px;font-weight:800;margin:0 0 16px}
+.delivery-stage-panel h3{color:#160c85;font-size:23px;font-weight:800;margin:0 0 16px}
 .delivery-stage-panel h3 small{font-size:inherit;color:inherit}
 .delivery-stage-list{flex:1;display:flex;flex-direction:column}
 .delivery-stage-row{grid-template-columns:28px minmax(0,1fr) minmax(115px,45%);gap:5px;min-height:43px;flex:1;border-bottom:1px solid #dedede}
-.delivery-stage-number{width:25px;height:25px;background:#e3eafa;color:#fff;font-size:13px}
-.delivery-stage-name{font-size:14px;color:#171717}
+.delivery-stage-number{width:25px;height:25px;background:#e3eafa;color:#fff;font-size:15px}
+.delivery-stage-name{font-size:16px;color:#171717}
 .delivery-stage-value{height:100%;border-left:1px solid #dedede;padding-left:10px;gap:5px}
-.delivery-stage-value strong{min-width:0;text-align:left;color:#171717;font-size:14px;font-weight:500}
+.delivery-stage-value strong{min-width:0;text-align:left;color:#171717;font-size:16px;font-weight:500}
 .delivery-stage-bar-track{height:25px;flex:0 1 70%;width:70%;background:transparent;overflow:visible;border-radius:0}
 .delivery-stage-bar-track span{border-radius:0 12px 12px 0;min-width:0}
-.delivery-stage-total{background:#ececec;padding:12px 16px;margin-top:0;color:#111;font-size:15px;font-weight:700}
-.delivery-stage-panel p{margin:10px 0 0!important;font-size:10px;color:#8796aa}
+.delivery-stage-total{background:#ececec;padding:12px 16px;margin-top:0;color:#111;font-size:17px;font-weight:700}
+.delivery-stage-panel p{margin:10px 0 0!important;font-size:11px;color:#8796aa}
 @media(max-width:700px){.fleet-delivery-summary{grid-template-columns:1fr;gap:18px}.fleet-delivery-summary .fleet-delivery-cards{grid-template-columns:1fr;grid-template-rows:repeat(3,auto);gap:10px}.fleet-delivery-summary .fleet-delivery-card{min-height:130px}.delivery-stage-row{min-height:42px}}
-@media(max-width:560px){.fleet-delivery-summary .fleet-delivery-cards{grid-template-columns:1fr;grid-template-rows:repeat(3,auto)}.fleet-delivery-summary .fleet-delivery-card{min-height:130px}.delivery-stage-panel{padding:17px 14px}.delivery-stage-panel h3{font-size:17px}.delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(90px,38%)}.delivery-stage-name{font-size:12px}}
+@media(max-width:560px){.fleet-delivery-summary .fleet-delivery-cards{grid-template-columns:1fr;grid-template-rows:repeat(3,auto)}.fleet-delivery-summary .fleet-delivery-card{min-height:130px}.delivery-stage-panel{padding:17px 14px}.delivery-stage-panel h3{font-size:19px}.delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(90px,38%)}.delivery-stage-name{font-size:13px}}
 
 /* สรุปสถานะในกรอบเดียว */
 .fleet-dashboard .fleet-delivery-summary{display:grid;grid-template-columns:190px minmax(0,1fr);gap:16px;align-items:stretch;margin:16px 0;padding:16px;background:#fff;border:1px solid #dce4ef;border-radius:14px}
 .fleet-dashboard .fleet-delivery-summary>div:first-child{display:flex;flex-direction:column;min-width:0}
-.fleet-dashboard .fleet-delivery-heading{margin:0 0 8px!important;color:#334f76;font-size:12px;font-weight:700}
+.fleet-dashboard .fleet-delivery-heading{margin:0 0 8px!important;color:#334f76;font-size:13px;font-weight:700}
 .fleet-dashboard .fleet-delivery-cards{display:grid;grid-template-columns:1fr;grid-template-rows:repeat(3,1fr);flex:1;gap:6px;background:transparent;border:0;border-radius:0;overflow:visible}
 .fleet-dashboard .fleet-delivery-card{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:center;min-height:0;padding:9px 11px;text-align:left;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;box-shadow:none}
 .fleet-dashboard .fleet-delivery-card+.fleet-delivery-card{border:1px solid #e2e8f0}.fleet-dashboard .fleet-delivery-card:after{display:none}
-.fleet-dashboard .fleet-delivery-label{color:#526780;font-size:11px;font-weight:700;line-height:1.3}.fleet-dashboard .fleet-delivery-label small{display:inline;margin-left:4px;color:#8a9aab;font-size:10px;font-weight:500}
-.fleet-dashboard .fleet-delivery-number{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-top:4px;color:#334f76}.fleet-dashboard .fleet-delivery-number svg{display:block;width:25px;height:25px;padding:0;background:transparent}.fleet-dashboard .fleet-delivery-number strong{font-size:23px;line-height:1.1;font-weight:800}.fleet-dashboard .fleet-delivery-unit{display:inline;margin-left:5px;color:#74859a;font-size:10px}
-.fleet-dashboard .fleet-delivery-note{margin:4px 0 0!important;color:#94a3b8;font-size:9px;line-height:1.3}.fleet-dashboard .fleet-delivery-progress-row{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px}.fleet-dashboard .fleet-delivery-progress-track{flex:1;height:5px;overflow:hidden;background:#e5eaf0;border-radius:99px}.fleet-dashboard .fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .fleet-delivery-percent{min-width:28px;color:#71839a;font-size:10px;text-align:right}
-.fleet-dashboard .delivery-stage-panel{display:flex;flex-direction:column;min-width:0;padding:0 0 0 16px;background:transparent;border:0;border-left:1px solid #e7edf5;border-radius:0;box-shadow:none}.fleet-dashboard .delivery-stage-panel h3{margin:0 0 8px!important;color:#334f76;font-size:13px;font-weight:700}.fleet-dashboard .delivery-stage-panel h3 small{color:#8a9aab;font-size:10px;font-weight:500}
-.fleet-dashboard .delivery-stage-list{display:flex;flex:1;flex-direction:column}.fleet-dashboard .delivery-stage-row{display:grid;grid-template-columns:22px minmax(0,1fr) minmax(90px,34%);align-items:center;gap:7px;flex:1;min-height:27px;border-bottom:1px solid #edf1f5}.fleet-dashboard .delivery-stage-number{display:grid;place-items:center;width:20px;height:20px;color:#55759e;background:#e9f0fa;border-radius:50%;font-size:10px;font-weight:700}.fleet-dashboard .delivery-stage-name{min-width:0;color:#44556b;font-size:11px;line-height:1.3}
-.fleet-dashboard .delivery-stage-value{display:flex;align-items:center;gap:7px;min-width:0;height:auto;padding:0;border:0}.fleet-dashboard .delivery-stage-bar-track{flex:1;width:auto;height:8px;overflow:hidden;background:#f1f5f9;border-radius:99px}.fleet-dashboard .delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .delivery-stage-value strong{min-width:30px;color:#34455b;font-size:11px;font-weight:700;text-align:right}.fleet-dashboard .delivery-stage-total{display:flex;justify-content:space-between;margin-top:6px;padding:7px 9px;color:#334155;background:#f1f5f9;border-radius:6px;font-size:11px;font-weight:700}.fleet-dashboard .delivery-stage-panel p{margin:5px 0 0!important;color:#94a3b8;font-size:9px}
-@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:12px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto;gap:6px}.fleet-dashboard .fleet-delivery-card{padding:8px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:19px}.fleet-dashboard .fleet-delivery-label small{display:block;margin:0}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0;border-top:1px solid #e7edf5;border-left:0}.fleet-dashboard .delivery-stage-row{grid-template-columns:20px minmax(0,1fr) minmax(70px,32%);gap:5px}}
+.fleet-dashboard .fleet-delivery-label{color:#526780;font-size:12px;font-weight:700;line-height:1.3}.fleet-dashboard .fleet-delivery-label small{display:inline;margin-left:4px;color:#8a9aab;font-size:11px;font-weight:500}
+.fleet-dashboard .fleet-delivery-number{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-top:4px;color:#334f76}.fleet-dashboard .fleet-delivery-number svg{display:block;width:25px;height:25px;padding:0;background:transparent}.fleet-dashboard .fleet-delivery-number strong{font-size:25px;line-height:1.1;font-weight:800}.fleet-dashboard .fleet-delivery-unit{display:inline;margin-left:5px;color:#74859a;font-size:11px}
+.fleet-dashboard .fleet-delivery-note{margin:4px 0 0!important;color:#94a3b8;font-size:10px;line-height:1.3}.fleet-dashboard .fleet-delivery-progress-row{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px}.fleet-dashboard .fleet-delivery-progress-track{flex:1;height:5px;overflow:hidden;background:#e5eaf0;border-radius:99px}.fleet-dashboard .fleet-delivery-progress-track>span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .fleet-delivery-percent{min-width:28px;color:#71839a;font-size:11px;text-align:right}
+.fleet-dashboard .delivery-stage-panel{display:flex;flex-direction:column;min-width:0;padding:0 0 0 16px;background:transparent;border:0;border-left:1px solid #e7edf5;border-radius:0;box-shadow:none}.fleet-dashboard .delivery-stage-panel h3{margin:0 0 8px!important;color:#334f76;font-size:15px;font-weight:700}.fleet-dashboard .delivery-stage-panel h3 small{color:#8a9aab;font-size:11px;font-weight:500}
+.fleet-dashboard .delivery-stage-list{display:flex;flex:1;flex-direction:column}.fleet-dashboard .delivery-stage-row{display:grid;grid-template-columns:22px minmax(0,1fr) minmax(90px,34%);align-items:center;gap:7px;flex:1;min-height:27px;border-bottom:1px solid #edf1f5}.fleet-dashboard .delivery-stage-number{display:grid;place-items:center;width:20px;height:20px;color:#55759e;background:#e9f0fa;border-radius:50%;font-size:11px;font-weight:700}.fleet-dashboard .delivery-stage-name{min-width:0;color:#44556b;font-size:12px;line-height:1.3}
+.fleet-dashboard .delivery-stage-value{display:flex;align-items:center;gap:7px;min-width:0;height:auto;padding:0;border:0}.fleet-dashboard .delivery-stage-bar-track{flex:1;width:auto;height:8px;overflow:hidden;background:#f1f5f9;border-radius:99px}.fleet-dashboard .delivery-stage-bar-track span{display:block;height:100%;border-radius:inherit}.fleet-dashboard .delivery-stage-value strong{min-width:30px;color:#34455b;font-size:12px;font-weight:700;text-align:right}.fleet-dashboard .delivery-stage-total{display:flex;justify-content:space-between;margin-top:6px;padding:7px 9px;color:#334155;background:#f1f5f9;border-radius:6px;font-size:12px;font-weight:700}.fleet-dashboard .delivery-stage-panel p{margin:5px 0 0!important;color:#94a3b8;font-size:10px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:12px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto;gap:6px}.fleet-dashboard .fleet-delivery-card{padding:8px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:21px}.fleet-dashboard .fleet-delivery-label small{display:block;margin:0}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0;border-top:1px solid #e7edf5;border-left:0}.fleet-dashboard .delivery-stage-row{grid-template-columns:20px minmax(0,1fr) minmax(70px,32%);gap:5px}}
 
 /* ขยายสรุปการส่งมอบขึ้นหนึ่งระดับ */
 .fleet-dashboard .fleet-delivery-summary{grid-template-columns:220px minmax(0,1fr);gap:18px;padding:18px}
-.fleet-dashboard .fleet-delivery-heading{font-size:14px}
+.fleet-dashboard .fleet-delivery-heading{font-size:16px}
 .fleet-dashboard .fleet-delivery-cards{gap:8px}
 .fleet-dashboard .fleet-delivery-card{padding:11px 13px}
-.fleet-dashboard .fleet-delivery-label{font-size:13px}
-.fleet-dashboard .fleet-delivery-label small{font-size:11px}
+.fleet-dashboard .fleet-delivery-label{font-size:15px}
+.fleet-dashboard .fleet-delivery-label small{font-size:12px}
 .fleet-dashboard .fleet-delivery-number{gap:10px;margin-top:6px}
 .fleet-dashboard .fleet-delivery-number svg{width:30px;height:30px}
-.fleet-dashboard .fleet-delivery-number strong{font-size:28px}
-.fleet-dashboard .fleet-delivery-unit{font-size:12px}
-.fleet-dashboard .fleet-delivery-note{font-size:10px}
+.fleet-dashboard .fleet-delivery-number strong{font-size:30px}
+.fleet-dashboard .fleet-delivery-unit{font-size:13px}
+.fleet-dashboard .fleet-delivery-note{font-size:11px}
 .fleet-dashboard .fleet-delivery-progress-track{height:7px}
-.fleet-dashboard .fleet-delivery-percent{font-size:11px}
+.fleet-dashboard .fleet-delivery-percent{font-size:12px}
 .fleet-dashboard .delivery-stage-panel{padding-left:18px}
-.fleet-dashboard .delivery-stage-panel h3{font-size:15px}
-.fleet-dashboard .delivery-stage-panel h3 small{font-size:12px}
+.fleet-dashboard .delivery-stage-panel h3{font-size:17px}
+.fleet-dashboard .delivery-stage-panel h3 small{font-size:13px}
 .fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(100px,34%);gap:8px;min-height:32px}
-.fleet-dashboard .delivery-stage-number{width:23px;height:23px;font-size:11px}
-.fleet-dashboard .delivery-stage-name{font-size:13px}
+.fleet-dashboard .delivery-stage-number{width:23px;height:23px;font-size:12px}
+.fleet-dashboard .delivery-stage-name{font-size:15px}
 .fleet-dashboard .delivery-stage-bar-track{height:10px}
-.fleet-dashboard .delivery-stage-value strong{font-size:13px;min-width:34px}
-.fleet-dashboard .delivery-stage-total{padding:8px 10px;font-size:13px}
-.fleet-dashboard .delivery-stage-panel p{font-size:10px}
-@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:14px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto}.fleet-dashboard .fleet-delivery-card{padding:9px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:22px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:23px minmax(0,1fr) minmax(70px,32%);gap:5px}.fleet-dashboard .delivery-stage-name{font-size:12px}}
+.fleet-dashboard .delivery-stage-value strong{font-size:15px;min-width:34px}
+.fleet-dashboard .delivery-stage-total{padding:8px 10px;font-size:15px}
+.fleet-dashboard .delivery-stage-panel p{font-size:11px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:12px;padding:14px}.fleet-dashboard .fleet-delivery-cards{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto}.fleet-dashboard .fleet-delivery-card{padding:9px}.fleet-dashboard .fleet-delivery-number svg{display:none}.fleet-dashboard .fleet-delivery-number strong{font-size:24px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:23px minmax(0,1fr) minmax(70px,32%);gap:5px}.fleet-dashboard .delivery-stage-name{font-size:13px}}
 
 /* ขยายส่วนสถานะออกรถและกราฟแผน */
 .fleet-dashboard .fleet-delivery-summary{grid-template-columns:260px minmax(0,1fr);gap:22px;padding:22px}
-.fleet-dashboard .fleet-delivery-heading{font-size:17px}
+.fleet-dashboard .fleet-delivery-heading{font-size:19px}
 .fleet-dashboard .fleet-delivery-card{padding:14px 16px}
-.fleet-dashboard .fleet-delivery-label{font-size:15px}
-.fleet-dashboard .fleet-delivery-label small{font-size:13px}
+.fleet-dashboard .fleet-delivery-label{font-size:17px}
+.fleet-dashboard .fleet-delivery-label small{font-size:15px}
 .fleet-dashboard .fleet-delivery-number svg{width:36px;height:36px}
-.fleet-dashboard .fleet-delivery-number strong{font-size:34px}
-.fleet-dashboard .fleet-delivery-unit{font-size:13px}
-.fleet-dashboard .fleet-delivery-note{font-size:12px}
-.fleet-dashboard .fleet-delivery-percent{font-size:13px}
-.fleet-dashboard .delivery-stage-panel h3{font-size:18px}
-.fleet-dashboard .delivery-stage-panel h3 small{font-size:14px}
+.fleet-dashboard .fleet-delivery-number strong{font-size:36px}
+.fleet-dashboard .fleet-delivery-unit{font-size:15px}
+.fleet-dashboard .fleet-delivery-note{font-size:13px}
+.fleet-dashboard .fleet-delivery-percent{font-size:15px}
+.fleet-dashboard .delivery-stage-panel h3{font-size:20px}
+.fleet-dashboard .delivery-stage-panel h3 small{font-size:16px}
 .fleet-dashboard .delivery-stage-row{grid-template-columns:29px minmax(0,1fr) minmax(110px,34%);min-height:38px}
-.fleet-dashboard .delivery-stage-number{width:26px;height:26px;font-size:13px}
-.fleet-dashboard .delivery-stage-name,.fleet-dashboard .delivery-stage-value strong,.fleet-dashboard .delivery-stage-total{font-size:15px}
-.fleet-dashboard .delivery-stage-panel p{font-size:12px}
+.fleet-dashboard .delivery-stage-number{width:26px;height:26px;font-size:15px}
+.fleet-dashboard .delivery-stage-name,.fleet-dashboard .delivery-stage-value strong,.fleet-dashboard .delivery-stage-total{font-size:17px}
+.fleet-dashboard .delivery-stage-panel p{font-size:13px}
 .fleet-dashboard .fleet-timeline .fleet-panel-header{padding:16px 18px}
-.fleet-dashboard .fleet-timeline .fleet-panel-header h3{font-size:17px}
-.fleet-dashboard .fleet-timeline .fleet-panel-description{font-size:13px}
+.fleet-dashboard .fleet-timeline .fleet-panel-header h3{font-size:19px}
+.fleet-dashboard .fleet-timeline .fleet-panel-description{font-size:15px}
 .fleet-dashboard .fleet-timeline .fleet-panel-content{padding:16px 18px}
-.fleet-dashboard .fleet-timeline .fleet-chart{height:320px}
-.fleet-dashboard .fleet-timeline .fleet-legend{font-size:13px;gap:16px}
-@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:14px;padding:15px}.fleet-dashboard .fleet-delivery-card{padding:10px}.fleet-dashboard .fleet-delivery-number strong{font-size:25px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(70px,32%)}.fleet-dashboard .delivery-stage-name{font-size:13px}.fleet-dashboard .fleet-timeline .fleet-chart{height:280px}}
+.fleet-dashboard .fleet-timeline .fleet-legend{font-size:15px;gap:16px}
+@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:14px;padding:15px}.fleet-dashboard .fleet-delivery-card{padding:10px}.fleet-dashboard .fleet-delivery-number strong{font-size:27px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(70px,32%)}.fleet-dashboard .delivery-stage-name{font-size:15px}}
 
 /* เพิ่มพื้นที่ฝั่งสรุปและขยับตารางไปทางขวา */
 @media (min-width: 651px) {
@@ -1773,11 +1815,137 @@ function FleetStatusByDc({
   .fleet-dashboard .delivery-stage-panel { padding-left: 24px; }
 }
 
-/* Scale the original dashboard to 125% at normal browser zoom. */
-.fleet-dashboard{zoom:1.25}
+/* Reduce the previous 125% scale by a quarter while keeping the full-width layout. */
+.fleet-dashboard{zoom:.9375}
 .fleet-dashboard .fleet-stage-layout{grid-template-columns:minmax(540px,2fr) minmax(330px,1fr);overflow-x:auto;align-items:start}
 .fleet-dashboard .fleet-stage-layout>.fleet-panel>.fleet-panel-header{height:auto;min-height:78px;max-height:none;flex-wrap:wrap}
 .fleet-dashboard .fleet-stage-layout .fleet-panel-description{max-height:none;overflow:visible}
+
+/* Filter layout follows the panel width, including sidebar and page scaling. */
+.fleet-dashboard .fleet-filter-shell{container-type:inline-size}
+.fleet-dashboard .fleet-filter-shell .fleet-filters{grid-template-columns:minmax(0,1fr);gap:9px 12px;padding:10px 12px;width:100%;box-sizing:border-box}
+.fleet-dashboard .fleet-filter-shell .fleet-filters>*{min-width:0;max-width:100%;box-sizing:border-box}
+.fleet-dashboard .fleet-filter-shell .fleet-label{font-size:12px;font-weight:700;line-height:1.4;margin-bottom:4px;color:#425b7a}
+.fleet-dashboard .fleet-filter-shell .fleet-field{height:36px;min-height:36px;font-size:12px;box-sizing:border-box}
+.fleet-dashboard .fleet-filter-shell .fleet-filters>.fleet-button{height:36px;min-height:36px;font-size:12px}
+.fleet-dashboard .fleet-filter-shell .fleet-filter-heading h3{font-size:14px;line-height:1.4}
+.fleet-dashboard .fleet-filter-shell .fleet-filter-heading{min-height:0;padding:8px 12px;gap:8px}
+.fleet-dashboard .fleet-filter-shell .fleet-filter-context{font-size:11px;white-space:normal}
+.fleet-dashboard .fleet-filter-shell .fleet-filter-note{font-size:11px;line-height:1.5;padding:0 12px 8px}
+.fleet-dashboard .fleet-filter-shell .fleet-filter-emblem{width:28px;height:28px}
+@container (min-width:420px){.fleet-dashboard .fleet-filter-shell .fleet-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container (min-width:820px){.fleet-dashboard .fleet-filter-shell .fleet-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@container (min-width:1700px){.fleet-dashboard .fleet-filter-shell .fleet-filters{grid-template-columns:repeat(8,minmax(0,1fr))}}
+
+.fleet-monthly-bars{margin:18px 0;padding:22px;background:#fff;border:1px solid #dce4ef;border-radius:16px;min-width:0}
+.fleet-monthly-bars-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.fleet-monthly-bars-heading h3{font-size:20px;color:#30445f;margin:0}
+.fleet-monthly-bars-heading p{font-size:13px;color:#7c8ca2;margin:6px 0 0!important}
+.fleet-monthly-bars-total{display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:#718299;font-size:13px}
+.fleet-monthly-bars-total strong{font-size:30px;color:#20242b}.fleet-monthly-bars-total small{font-size:15px;font-weight:500}
+.fleet-monthly-bars-rate{background:#e7f7ef;color:#15805a;border-radius:8px;padding:6px 9px}
+.fleet-monthly-bars-scroll{margin-top:12px}
+.fleet-comparison-charts .fleet-monthly-bars-scroll svg,
+.fleet-dashboard .fleet-comparison-charts .fleet-chart{
+  display:block;
+  width:100%;
+  min-width:0;
+  height:auto;
+}
+.fleet-monthly-bars-legend{display:flex;justify-content:center;flex-wrap:wrap;gap:24px;font-size:15px;color:#53647a}
+.fleet-monthly-bars-legend span{display:flex;align-items:center;gap:8px}.fleet-monthly-bars-legend i{width:10px;height:10px;border-radius:50%}
+@media(max-width:560px){.fleet-monthly-bars{padding:15px}.fleet-monthly-bars-heading h3{font-size:18px}}
+
+.fleet-comparison-region{container: fleet-comparison / inline-size}
+.fleet-dashboard .fleet-comparison-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:16px;align-items:stretch;margin:18px 0}
+.fleet-comparison-charts{display:flex;flex-direction:column;gap:16px;min-width:0}
+.fleet-dashboard .fleet-comparison-charts>.fleet-monthly-bars{margin:0}
+.fleet-comparison-charts>.fleet-panel,.fleet-warehouse-panel{border:1px solid #dce4ef;border-radius:16px;overflow:hidden}
+.fleet-dashboard .fleet-warehouse-panel .fleet-panel-header h3{font-size:19px}
+.fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-list{max-height:850px;overflow:auto}
+.fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-name{font-size:16px}
+.fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-detail{font-size:13px;flex-wrap:wrap}
+.fleet-dashboard .fleet-warehouse-panel .fleet-warehouse{padding:14px 0}
+.fleet-dashboard .fleet-warehouse-panel .fleet-bar{height:10px}
+/* Fit both charts and the warehouse list in the desktop comparison viewport. */
+@container fleet-comparison (width > 720px) {
+  .fleet-dashboard .fleet-comparison-layout {
+    height: max(460px, calc(100dvh - 144px));
+    min-height: 0;
+  }
+  .fleet-comparison-charts {
+    display: grid;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    min-height: 0;
+  }
+  .fleet-comparison-charts > .fleet-monthly-bars {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 12px 16px;
+  }
+  .fleet-comparison-charts > .fleet-timeline,
+  .fleet-comparison-layout > .fleet-warehouse-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .fleet-dashboard .fleet-comparison-charts .fleet-panel-header,
+  .fleet-dashboard .fleet-warehouse-panel .fleet-panel-header {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: 9px 16px;
+  }
+  .fleet-dashboard .fleet-comparison-charts .fleet-panel-content,
+  .fleet-dashboard .fleet-warehouse-panel .fleet-panel-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 8px 16px;
+  }
+  .fleet-monthly-bars-heading,
+  .fleet-monthly-bars-legend,
+  .fleet-comparison-layout .fleet-legend {
+    flex: 0 0 auto;
+  }
+  .fleet-comparison-charts .fleet-monthly-bars-scroll,
+  .fleet-comparison-charts .fleet-chart-scroll,
+  .fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-list {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .fleet-comparison-charts .fleet-monthly-bars-scroll {
+    margin-top: 4px;
+  }
+  .fleet-comparison-charts .fleet-monthly-bars-scroll svg,
+  .fleet-dashboard .fleet-comparison-charts .fleet-chart {
+    height: 100%;
+  }
+  .fleet-comparison-charts .fleet-empty,
+  .fleet-warehouse-panel .fleet-empty {
+    min-height: 0;
+    overflow: auto;
+  }
+  .fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-list {
+    max-height: none;
+    overscroll-behavior-y: contain;
+  }
+  .fleet-dashboard .fleet-warehouse-panel .fleet-warehouse {
+    padding-block: 9px;
+  }
+}
+@container fleet-comparison (max-width:720px){
+  .fleet-dashboard .fleet-comparison-layout{grid-template-columns:minmax(0,1fr)}
+  .fleet-dashboard .fleet-warehouse-panel .fleet-warehouse-list{max-height:360px}
+}
+@container fleet-comparison (max-width:480px){
+  .fleet-comparison-charts .fleet-monthly-bars{padding:12px}
+  .fleet-dashboard .fleet-comparison-charts .fleet-panel-content{padding:10px 12px}
+  .fleet-monthly-bars-scroll .fleet-chart-month{font-size:26px}
+  .fleet-timeline .fleet-chart-month{font-size:22px}
+}
       `}
 </style>
       <header className="fleet-heading">
@@ -1801,16 +1969,16 @@ function FleetStatusByDc({
       </header>
       <section className="fleet-filter-shell" aria-label="ตัวกรองข้อมูล"><div className="fleet-filter-heading"><span className="fleet-filter-emblem" aria-hidden="true"><FleetFilterGlyph kind="sliders" /></span><h3>ตัวกรองข้อมูล</h3><span className="fleet-filter-context">{selectedYear + 543} · {monthFilter === "all" ? "ทุกเดือน" : MONTH_NAMES[Number(monthFilter) - 1]}</span></div>
         <div className="fleet-filters">
-          <label><span className="fleet-label">ปี</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="ปี" value={String(selectedYear)} onChange={value => { setSelectedYear(Number(value)); setHoveredMonth(null); }} options={yearOptions.map(year => ({ value: String(year), label: String(year) }))} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">เดือน</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="เดือน" value={monthFilter} onChange={setMonthFilter} options={[{ value: "all", label: "ทุกเดือน" }, ...MONTH_NAMES.map((month, index) => ({ value: String(index + 1).padStart(2, "0"), label: month }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">กลุ่ม DC</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><FleetSearchFilter label="กลุ่ม DC" value={dcTypeFilter} onChange={value => { setDcTypeFilter(value); setAreaFilter("all"); }} options={[{ value: "all", label: "ทุกกลุ่ม DC" }, ...dcTypeOptions.map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">พื้นที่</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><FleetSearchFilter label="พื้นที่" value={areaFilter} onChange={setAreaFilter} options={[{ value: "all", label: "ทุกพื้นที่" }, ...filterOptions.areas.map(area => ({ value: area, label: area }))]} disabled={filterOptions.areas.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
-          <label><span className="fleet-label">FBP</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><FleetSearchFilter label="FBP" value={fbpFilter} onChange={setFbpFilter} options={[{ value: "all", label: "ทุก FBP" }, ...filterOptions.fbps.map(fbp => ({ value: fbp.id, label: fbp.name }))]} disabled={filterOptions.fbps.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ปีที่ขอรถ (พ.ศ.)</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="ปีที่ขอรถ (พ.ศ.)" value={String(selectedYear)} onChange={value => { setSelectedYear(Number(value)); setHoveredMonth(null); }} options={yearOptions.map(year => ({ value: String(year), label: String(year + 543) }))} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">เดือนที่ขอรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="calendar" /></span><FleetSearchFilter label="เดือนที่ขอรถ" value={monthFilter} onChange={setMonthFilter} options={[{ value: "all", label: "ทุกเดือน" }, ...MONTH_NAMES.map((month, index) => ({ value: String(index + 1).padStart(2, "0"), label: month }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ประเภทคลัง (DC)</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><FleetSearchFilter label="ประเภทคลัง (DC)" value={dcTypeFilter} onChange={value => { setDcTypeFilter(value); setAreaFilter("all"); }} options={[{ value: "all", label: "ทุกประเภทคลัง (DC)" }, ...dcTypeOptions.map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">คลัง (DC)</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="warehouse" /></span><FleetSearchFilter label="คลัง (DC)" value={areaFilter} onChange={setAreaFilter} options={[{ value: "all", label: "ทุกคลัง" }, ...filterOptions.areas.map(area => ({ value: area, label: area }))]} disabled={filterOptions.areas.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
+          <label><span className="fleet-label">ผู้ประกอบการ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="user" /></span><FleetSearchFilter label="ผู้ประกอบการ" value={fbpFilter} onChange={setFbpFilter} options={[{ value: "all", label: "ทุกผู้ประกอบการ" }, ...filterOptions.fbps.map(fbp => ({ value: fbp.id, label: fbp.name }))]} disabled={filterOptions.fbps.length === 0} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
           <label><span className="fleet-label">ประเภทคำขอ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="filter" /></span><FleetSearchFilter label="ประเภทคำขอ" value={requestTypeFilter} onChange={setRequestTypeFilter} options={[{ value: "all", label: "ทุกประเภทคำขอ" }, ...Array.from(new Set([...(requestTypeFilter === "all" ? [] : [requestTypeFilter]), ...requestTypeOptions])).map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
           <label><span className="fleet-label">ประเภทรถ</span><span className="fleet-filter-input"><span className="fleet-filter-input-icon" aria-hidden="true"><FleetFilterGlyph kind="truck" /></span><FleetSearchFilter label="ประเภทรถ" value={truckTypeFilter} onChange={setTruckTypeFilter} options={[{ value: "all", label: "ทุกประเภทรถ" }, ...filterOptions.trucks.map(type => ({ value: type, label: type }))]} /><span className="fleet-filter-chevron" aria-hidden="true">▾</span></span></label>
           <button className="fleet-button" type="button" disabled={!hasFilters} onClick={resetFilters}><FleetFilterGlyph kind="clear" />ล้างตัวกรอง</button>
         </div>
-        <p className="fleet-filter-note">ปีและเดือนกรองตามวันที่สร้างคำขอ (request_date) · กราฟแสดง ม.ค.–ธ.ค. ของปีที่เลือก</p>
+        <p className="fleet-filter-note">เลือกปีและเดือนตามวันที่ขอรถ · กราฟแสดงข้อมูลเดือนมกราคม–ธันวาคมของปีที่เลือก</p>
         {hasFilters && (
           <p className="fleet-filter-note">
             แสดงผลตามตัวกรองที่เลือก · {dcSummary.length} คลัง
@@ -1825,7 +1993,7 @@ function FleetStatusByDc({
       )}
       <section className="fleet-api-summary" aria-label="สรุปสถานะคำขอตามตัวกรอง" aria-busy={isLoading || cardSummaryLoading}>
         <div className="fleet-api-summary-header">
-          <div className="fleet-summary-heading-line"><span className="fleet-section-mark" aria-hidden="true">02</span><div><h3 className="fleet-api-summary-heading">สรุปสถานะคำขอ</h3><p className="fleet-api-summary-subtitle">ภาพรวมการจัดรถในแต่ละขั้นตอน</p></div></div>
+          <div className="fleet-summary-heading-line"><div><h3 className="fleet-api-summary-heading">สรุปสถานะคำขอ</h3><p className="fleet-api-summary-subtitle">ภาพรวมการจัดรถในแต่ละขั้นตอน</p></div></div>
           <span className="fleet-api-summary-badge">6 กลุ่มสถานะ</span>
         </div>
         <div className="fleet-api-summary-grid">
@@ -1909,7 +2077,7 @@ function FleetStatusByDc({
               style={{ cursor: "help" }}>
               <div className="fleet-delivery-label">
                 อยู่ระหว่างดำเนินการ
-                <small>(Pending)</small>
+                <small>(Processing)</small>
               </div>
               <div
                 className="fleet-delivery-number"
@@ -1962,8 +2130,11 @@ function FleetStatusByDc({
           <p>ขั้นตอน 1–7 เฉพาะ TCAS · ขั้นตอน 8 แสดงยอดส่งมอบแล้ว</p>
         </section>
       </div>
-      <div className="fleet-panels">
-        <article className="fleet-panel fleet-timeline">
+      <div className="fleet-comparison-region">
+      <div className="fleet-comparison-layout">
+        <div className="fleet-comparison-charts">
+          <MonthlyDeliveryBars points={timeline} year={selectedYear} loading={isLoading || timelineLoading} error={activeError || timelineError || null} />
+          <article className="fleet-panel fleet-timeline">
           <div className="fleet-panel-header">
             <div>
               <h3>แผนและการส่งมอบ</h3>
@@ -1997,7 +2168,7 @@ function FleetStatusByDc({
               <div className="fleet-chart-scroll">
                 <svg
                   className="fleet-chart"
-                  viewBox="0 0 800 350"
+                  viewBox="0 0 800 218"
                   role="img"
                   aria-label={`กราฟแผนและยอดส่งมอบสะสม มกราคม ถึง ธันวาคม ปี ${activeYear}`}
                   onMouseLeave={() => setHoveredMonth(null)}
@@ -2007,17 +2178,17 @@ function FleetStatusByDc({
                       <line
                         x1="48"
                         x2="752"
-                        y1={220 - (tick / 4) * 184}
-                        y2={220 - (tick / 4) * 184}
+                        y1={chartY(tick * yStep)}
+                        y2={chartY(tick * yStep)}
                         stroke="#e8eef6"
                         strokeDasharray="3 4"
                       />
                       <text
                         x="38"
-                        y={224 - (tick / 4) * 184}
+                        y={chartY(tick * yStep) + 5}
                         textAnchor="end"
                         fill="#7c8ca2"
-                        fontSize="11"
+                        fontSize="13"
                       >
                         {formatNumber(tick * yStep)}
                       </text>
@@ -2074,19 +2245,20 @@ function FleetStatusByDc({
                         )}
                         <text
                           x={chartX(index)}
-                          y="247"
+                          y="205"
+                          className="fleet-chart-month"
                           textAnchor="middle"
                           fill="#62738a"
-                          fontSize="12"
+                          fontSize="15"
                         >
                           {MONTH_SHORT_NAMES[index] ?? point.label}
                         </text>
                         {/* พื้นที่รับเมาส์ครอบคลุมทั้งแนวของเดือน */}
                         <rect
                           x={chartX(index) - 28}
-                          y="30"
+                          y={chartTop}
                           width="56"
-                          height="194"
+                          height={chartBottom - chartTop + 4}
                           fill="transparent"
                           pointerEvents="all"
                           style={{ cursor: "pointer", outline: "none" }}
@@ -2111,7 +2283,7 @@ function FleetStatusByDc({
                   })}
                   {hoveredMonth !== null && timeline[hoveredMonth] && (() => {
                     const item = timeline[hoveredMonth];
-                    const x = Math.min(480, Math.max(50, chartX(hoveredMonth) - 140));
+                    const x = Math.min(230, Math.max(18, chartX(hoveredMonth) - 275));
                     const gap = item.actual === null ? null : item.actual - item.planned;
                     const gapLabel = gap === null ? "ส่วนต่าง: ไม่มีข้อมูล"
                       : gap < 0 ? `ต่ำกว่าแผน: ${formatNumber(-gap)} คัน`
@@ -2119,22 +2291,22 @@ function FleetStatusByDc({
                           : "ส่งมอบเท่ากับแผน";
                     return (
                       <g pointerEvents="none">
-                        <line x1={chartX(hoveredMonth)} x2={chartX(hoveredMonth)} y1="30" y2="220" stroke="#93c5fd" strokeDasharray="4 4" />
-                        <rect x={x} y="20" width="310" height="315" rx="12" fill="white" stroke="#cbd5e1" />
-                        <text x={x + 16} y="45" fill="#16243a" fontSize="14" fontWeight="700">{item.label} {activeYear}</text>
-                        <text x={x + 16} y="68" fill="#64748b" fontSize="13">แผนสะสม: {formatNumber(item.planned)} คัน</text>
-                        <text x={x + 16} y="91" fill="#2563eb" fontSize="13">ส่งมอบจริงสะสม: {item.actual === null ? "ไม่มีข้อมูล" : `${formatNumber(item.actual)} คัน`}</text>
-                        <text x={x + 16} y="114" fill={gap !== null && gap < 0 ? "#ea580c" : "#059669"} fontSize="13">{gapLabel}</text>
-                        <line x1={x + 16} x2={x + 294} y1="125" y2="125" stroke="#e4eaf2" />
-                        <text x={x + 16} y="145" fill="#16243a" fontSize="13" fontWeight="700">จำนวนรถในแต่ละสถานะ</text>
-                        <text x={x + 16} y="163" fill="#62738a" fontSize="10">สถานะปัจจุบันตามกลุ่มการ์ด</text>
+                        <line x1={chartX(hoveredMonth)} x2={chartX(hoveredMonth)} y1={chartTop} y2={chartBottom} stroke="#93c5fd" strokeDasharray="4 4" />
+                        <rect x={x} y="13" width="550" height="190" rx="12" fill="white" stroke="#cbd5e1" />
+                        <text x={x + 16} y="39" fill="#16243a" fontSize="16" fontWeight="700">{item.label} {activeYear}</text>
+                        <text x={x + 16} y="65" fill="#64748b" fontSize="15">แผนสะสม: {formatNumber(item.planned)} คัน</text>
+                        <text x={x + 16} y="90" fill="#2563eb" fontSize="15">ส่งมอบจริงสะสม: {item.actual === null ? "ไม่มีข้อมูล" : `${formatNumber(item.actual)} คัน`}</text>
+                        <text x={x + 16} y="115" fill={gap !== null && gap < 0 ? "#ea580c" : "#059669"} fontSize="15">{gapLabel}</text>
+                        <line x1={x + 242} x2={x + 242} y1="27" y2="189" stroke="#e4eaf2" />
+                        <text x={x + 257} y="36" fill="#16243a" fontSize="15" fontWeight="700">จำนวนรถในแต่ละสถานะ</text>
+                        <text x={x + 257} y="53" fill="#62738a" fontSize="12">สถานะปัจจุบันตามกลุ่มการ์ด</text>
                         {summary.map((row, index) => <g key={row.key}>
-                          <circle cx={x + 20} cy={181 + index * 18} r="3" fill={row.color} />
-                          <text x={x + 30} y={185 + index * 18} fill="#41536d" fontSize="11">{row.label}</text>
-                          <text x={x + 294} y={185 + index * 18} textAnchor="end" fill={row.color} fontSize="11" fontWeight="700">{formatNumber(row.qty)} คัน</text>
+                          <circle cx={x + 261} cy={69 + index * 18} r="3" fill={row.color} />
+                          <text x={x + 272} y={73 + index * 18} fill="#41536d" fontSize="13">{row.label}</text>
+                          <text x={x + 534} y={73 + index * 18} textAnchor="end" fill={row.color} fontSize="13" fontWeight="700">{formatNumber(row.qty)} คัน</text>
                         </g>)}
-                        <text x={x + 16} y="324" fill="#16243a" fontSize="12" fontWeight="700">รวมทั้งหมด</text>
-                        <text x={x + 294} y="324" textAnchor="end" fill="#16243a" fontSize="12" fontWeight="700">{formatNumber(statusTotal)} คัน</text>
+                        <text x={x + 257} y="188" fill="#16243a" fontSize="14" fontWeight="700">รวมทั้งหมด</text>
+                        <text x={x + 534} y="188" textAnchor="end" fill="#16243a" fontSize="14" fontWeight="700">{formatNumber(statusTotal)} คัน</text>
                       </g>
                     );
                   })()}
@@ -2144,16 +2316,17 @@ function FleetStatusByDc({
             <div className="fleet-legend">
               <span>
                 <i style={{ background: "#94a3b8" }} />
-                Planned Delivery Timeline
+                แผนส่งมอบสะสม
               </span>
               <span>
                 <i style={{ background: "#2563eb" }} />
-                Actual Delivery Curve
+                ส่งมอบแล้วสะสม
               </span>
             </div>
           </div>
         </article>
-        <article className="fleet-panel">
+        </div>
+        <article className="fleet-panel fleet-warehouse-panel">
           <div className="fleet-panel-header">
             <div>
               <h3>สถานะการส่งมอบรายคลัง</h3>
@@ -2241,6 +2414,7 @@ function FleetStatusByDc({
             </div>
           </div>
         </article>
+      </div>
       </div>
       <section className="fleet-report-block" aria-labelledby="fleet-report-title">
         <header className="fleet-report-toolbar">
@@ -2374,7 +2548,7 @@ function FleetStatusByDc({
           success
         </span>
         <span>
-          กราฟนับรายคัน · แผน: warehouse_plan_date · จริง: str_date
+          กราฟนับรายคัน · แผนการเข้าคลัง ·วันที่เข้าคลัง
           ของขั้นตอน 8 · ยอดสะสมเริ่มใหม่ทุกปี
         </span>
       </footer>

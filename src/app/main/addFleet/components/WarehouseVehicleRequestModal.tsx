@@ -23,6 +23,17 @@ truck_type?: string;
 [key: string]: any;
 }
 
+interface TruckTypeMasterItem {
+    DC?: string | number | null;
+    TYPE?: string | null;
+}
+
+const fleetTypeLabels = new Map([
+    ["4WCARGO", "4W Cargo Box"],
+    ["C-4WJ", "4WJC"],
+    ["C-4W H1.9", "4W1.9m"],
+]);
+
 interface UserInfo {
 em_id?: string;
 employee_id?: string;
@@ -149,7 +160,9 @@ useEffect(() => {
     const frame = window.requestAnimationFrame(() => confirmBackRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
 }, [showConfirmModal]);
-const [loadingTrucks, setLoadingTrucks] = useState(false);
+const [truckTypeMaster, setTruckTypeMaster] = useState<TruckTypeMasterItem[]>([]);
+const [loadingTruckTypes, setLoadingTruckTypes] = useState(true);
+const [truckTypeLoadError, setTruckTypeLoadError] = useState("");
 const [error, setError] = useState("");
 const [callyReady, setCallyReady] = useState(false);
 const [openCalendar, setOpenCalendar] = useState(false);
@@ -451,22 +464,19 @@ const matchedTrucksByDcCode = useMemo(() => {
 }, [trucks, dcCode]);
 
 const truckTypeOptions = useMemo(() => {
-    if (!dcCode) return [];
+    const currentDcCode = normalizeText(dcCode);
+    if (!currentDcCode) return [];
 
-    const set = new Set<string>();
+    const types = new Set<string>();
+    for (const item of truckTypeMaster) {
+        if (normalizeText(item?.DC) !== currentDcCode) continue;
 
-    matchedTrucksByDcCode.forEach((item) => {
-        const truckType = String(
-            getValueIgnoreCase(item, "TRUCK_TYPE") || ""
-        ).trim();
+        const type = String(item?.TYPE ?? "").trim();
+        if (type) types.add(fleetTypeLabels.get(normalizeText(type)) ?? type);
+    }
 
-        if (truckType) {
-            set.add(truckType);
-        }
-    });
-
-    return Array.from(set).sort();
-}, [matchedTrucksByDcCode, dcCode]);
+    return Array.from(types).sort((a, b) => a.localeCompare(b, "th"));
+}, [truckTypeMaster, dcCode]);
 
 const warehouseOptions = useMemo(() => {
     const map = new Map<string, WarehouseItem>();
@@ -899,8 +909,6 @@ useEffect(() => {
 
     const fetchTrucks = async () => {
         try {
-            setLoadingTrucks(true);
-
             const res = await fetch(
                 "http://192.168.158.210/api_new_truck/api/trucks.php",
                 {
@@ -926,12 +934,44 @@ useEffect(() => {
         } catch (err) {
             console.error(err);
             setError("เกิดข้อผิดพลาดในการโหลดข้อมูล Truck Type");
-        } finally {
-            setLoadingTrucks(false);
         }
     };
 
     fetchTrucks();
+}, [open]);
+
+useEffect(() => {
+    if (!open) return;
+
+    const controller = new AbortController();
+    setLoadingTruckTypes(true);
+    setTruckTypeLoadError("");
+    setTruckTypeMaster([]);
+
+    const fetchTruckTypes = async () => {
+        try {
+            const res = await fetch(
+                "http://192.168.158.210/api_new_truck/api/get_truck_names.php",
+                { cache: "no-store", signal: controller.signal }
+            );
+            const result = await res.json();
+
+            if (!res.ok || result?.status !== "success" || !Array.isArray(result.data)) {
+                throw new Error("โหลดประเภทกองรถไม่สำเร็จ");
+            }
+
+            if (!controller.signal.aborted) setTruckTypeMaster(result.data);
+        } catch (err) {
+            if (controller.signal.aborted) return;
+            console.error("โหลดประเภทกองรถไม่สำเร็จ:", err);
+            setTruckTypeLoadError("โหลดประเภทกองรถไม่สำเร็จ กรุณาเปิดฟอร์มใหม่อีกครั้ง");
+        } finally {
+            if (!controller.signal.aborted) setLoadingTruckTypes(false);
+        }
+    };
+
+    void fetchTruckTypes();
+    return () => controller.abort();
 }, [open]);
 
 useEffect(() => {
@@ -1529,9 +1569,13 @@ const handleSubmit = async (e: React.FormEvent) => {
         return;
     }
 
+    if (!truckTypeOptions.includes(formData.fleet_truck_type)) {
+        setError(truckTypeLoadError || "กรุณาเลือกประเภทกองรถของคลังนี้ก่อนบันทึกนะครับ");
+        return;
+    }
+
     if (
         !formData.fleet_type ||
-        !formData.fleet_truck_type ||
         !formData.qty ||
         !formData.usage_date ||
         (isWorkloadRequired && !formData.workload.trim()) ||
@@ -1593,6 +1637,10 @@ const closeConfirmation = () => {
 
 const handleConfirmSubmit = async () => {
     if (!showConfirmModal || saving || confirmSubmittingRef.current) return;
+    if (!truckTypeOptions.includes(formData.fleet_truck_type)) {
+        setError(truckTypeLoadError || "กรุณากลับไปเลือกประเภทกองรถของคลังนี้นะครับ");
+        return;
+    }
     if (!validateLicenseReplaceBeforeSubmit()) return;
     if (!minUsageDate || formData.usage_date < minUsageDate) {
         setError("วันที่ใช้งานไม่ตรงตามระยะเวลารอ กรุณากลับไปแก้ไข");
@@ -1928,17 +1976,17 @@ return (
                                 name="fleet_truck_type"
                                 value={formData.fleet_truck_type}
                                 onChange={handleChange}
-                                disabled={!dcCode || loadingTrucks}
+                                disabled={!dcCode || loadingTruckTypes || Boolean(truckTypeLoadError) || saving}
                                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-blue-500 disabled:bg-slate-100"
                             >
                                 <option value="">
-                                    {loadingTrucks
-                                        ? "กำลังโหลด..."
-                                        : dcCode
-                                            ? truckTypeOptions.length > 0
-                                                ? "-- เลือกประเภทรถ --"
-                                                : "ไม่พบประเภทรถของ DC นี้"
-                                            : "ไม่พบ DC Code"}
+                                    {!dcCode
+                                        ? "-- กรุณาเลือกคลังก่อน --"
+                                        : loadingTruckTypes
+                                            ? "กำลังโหลดประเภทกองรถ..."
+                                            : truckTypeLoadError || (truckTypeOptions.length > 0
+                                                ? "-- เลือกประเภทกองรถ --"
+                                                : "ไม่พบประเภทกองรถของคลังนี้")}
                                 </option>
 
                                 {truckTypeOptions.map((truckType) => (
@@ -1949,7 +1997,7 @@ return (
                             </select>
 
                             <p className="mt-1 text-[11px] text-slate-400">
-                                Match DC_CODE: {dcCode || "-"} / พบ {truckTypeOptions.length}{" "}
+                                รหัสคลัง {dcCode || "-"} / พบ {truckTypeOptions.length}{" "}
                                 ประเภท
                             </p>
                         </div>

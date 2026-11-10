@@ -707,7 +707,7 @@ export default function ExportRequestModal({
 
         const statusMap: Record<string, string> = {
             gm_pending: "GM กำลังอนุมัติ",
-            fbp_pending: "กำลังประเมินกองรถ (FBP)",
+            fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
             progress: "รอดำเนินการตามกระบวนการ (TCAS)",
             reject_by_fbp: "ส่วนกลางไม่อนุมัติ",
         };

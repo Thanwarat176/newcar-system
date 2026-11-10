@@ -801,8 +801,8 @@ export default function ExportRequestModal({
 
         const statusMap: Record<string, string> = {
             gm_pending: "GM กำลังอนุมัติ",
-            center_pending: "กำลังประเมินกองรถ (FBP)",
-            fbp_pending: "กำลังประเมินกองรถ (FBP)",
+            center_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
+            fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
             process: "รอดำเนินการตามกระบวนการ (TCAS)",
             progress: "รอดำเนินการตามกระบวนการ (TCAS)",
             confirm_request: "รอดำเนินการตามกระบวนการ (TCAS)",
@@ -1502,9 +1502,9 @@ export default function ExportRequestModal({
             "ชื่อบริษัทขนส่ง": item.approved_company_name || "",
             "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "",
             "บริษัทขนส่งที่ถูกทดแทน": item.company_name_replace || "",
-            "หมายเหตุการประเมินกองรถ": item.fbp_remark || "",
-            "สถานะการประเมินกองรถ": item.fbp_status || "",
-            "วันที่ประเมินกองรถ": exportDate(item.fbp_approved_date),
+            "หมายเหตุการสรรหาผู้ประกอบการ": item.fbp_remark || "",
+            "สถานะการสรรหาผู้ประกอบการ": item.fbp_status || "",
+            "วันที่สรรหาผู้ประกอบการ": exportDate(item.fbp_approved_date),
             "คาดการณ์วันเข้าคลัง": exportDate(field(item, "warehouse_plan_date")),
             "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
             "จัดสรรผู้ผลิต": field(item, "supplier_alloc"),

@@ -5,12 +5,13 @@ import { createPortal } from "react-dom";
 import { DateRange } from "react-date-range";
 import type { RangeKeyDict } from "react-date-range";
 import { th } from "date-fns/locale";
-import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Truck, Warehouse, X } from "lucide-react";
+import { ArrowUpDown, CalendarDays, ChevronDown, ChevronUp, CircleCheck, CircleX, ClipboardList, Clock, Download, Eraser, Eye, Filter, PencilLine, RefreshCw, Search, SlidersHorizontal, Star, Truck, Warehouse, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import FleetModalDetail from "./components/FleetModalDetail";
 import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
+import SupplierRatingModal from "./components/SupplierRatingModal";
 
 interface SelectedDC {
   DC_CODE?: string; DC_NAME?: string; DC_TYPE?: string;
@@ -278,6 +279,7 @@ export default function WaitingFleetPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openExportModal, setOpenExportModal] = useState(false);
+  const [openSupplierRatingModal, setOpenSupplierRatingModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchText, setSearchText] = useState("");
@@ -349,21 +351,25 @@ export default function WaitingFleetPage() {
   const dcTypes = useMemo(() => optionsOf(scopedRequests.map(item => item.dc_type)), [scopedRequests]);
   const dcOptions = useMemo(() => optionsOf(scopedRequests.filter(item => dcTypeFilter === "all" || code(item.dc_type) === code(dcTypeFilter)).map(item => item.dc_code)), [scopedRequests, dcTypeFilter]);
 
-  const filteredRows = useMemo(() => {
+  const currentYear = new Date().getFullYear();
+  const summaryRows = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
-    const start = dateKey(requestDateRange[0].startDate), end = dateKey(requestDateRange[0].endDate);
+    const start = hasRequestDateRange ? dateKey(requestDateRange[0].startDate) : `${currentYear}-01-01`;
+    const end = hasRequestDateRange ? dateKey(requestDateRange[0].endDate) : `${currentYear}-12-31`;
     return rows.filter(row => {
       const { item } = row;
-      // all does not exclude any API status.
-      if (statusFilter !== "all" && row.status !== statusFilter) return false;
       if (requestTypeFilter !== "all" && text(item.fleet_type) !== requestTypeFilter) return false;
       if (truckTypeFilter !== "all" && !text(item.fleet_truck_type).toLowerCase().includes(truckTypeFilter.trim().toLowerCase())) return false;
       if (dcTypeFilter !== "all" && code(item.dc_type) !== code(dcTypeFilter)) return false;
       if (dcFilter !== "all" && !code(item.dc_code).includes(code(dcFilter))) return false;
       if (keyword && !row.searchText.includes(keyword)) return false;
-      return !hasRequestDateRange || (row.requestDate !== NO_DATE && row.requestDate >= start && row.requestDate <= end);
+      return row.requestDate !== NO_DATE && row.requestDate >= start && row.requestDate <= end;
     });
-  }, [rows, statusFilter, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange]);
+  }, [rows, searchText, requestTypeFilter, truckTypeFilter, dcTypeFilter, dcFilter, hasRequestDateRange, requestDateRange, currentYear]);
+  const filteredRows = useMemo(() =>
+    statusFilter === "all" ? summaryRows : summaryRows.filter(row => row.status === statusFilter),
+    [summaryRows, statusFilter],
+  );
   const sortedRows = useMemo(() => [...filteredRows].sort((a, b) => {
     const comparison = sortConfig.key === "running_doc" ? text(a.item.running_doc).localeCompare(text(b.item.running_doc), "th", { numeric: true, sensitivity: "base" }) : sortConfig.key === "usage_date" ? timestamp(a.item.usage_date) - timestamp(b.item.usage_date) : timestamp(a.requestDate) - timestamp(b.requestDate);
     return sortConfig.direction === "asc" ? comparison : -comparison;
@@ -391,7 +397,7 @@ export default function WaitingFleetPage() {
       approved: { qty: 0, items: 0 },
     };
 
-    for (const row of rows) {
+    for (const row of summaryRows) {
       const status = row.status;
       if (
         status === "fbp_pending" ||
@@ -407,7 +413,7 @@ export default function WaitingFleetPage() {
     counts.all.qty = counts.fbp_pending.qty + counts.reject_by_fbp.qty + counts.approved.qty;
 
     return counts;
-  }, [rows]);
+  }, [summaryRows]);
 
   const clearDates = () => { setHasRequestDateRange(false); setRequestDateRange([newSelection()]); };
   const clearFilters = () => { setStatusFilter("all"); setSearchText(""); setRequestTypeFilter("all"); setTruckTypeFilter("all"); setDcTypeFilter("all"); setDcFilter("all"); setShowPicker(false); clearDates(); };
@@ -419,17 +425,17 @@ export default function WaitingFleetPage() {
     setPickerPosition({ top: Math.max(16, Math.min(rect.bottom + 8, window.innerHeight - 406)), left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) }); setShowPicker(true);
   };
   const changeDate = (ranges: RangeKeyDict) => { const selection = ranges.selection; if (!selection) return; const startDate = selection.startDate || new Date(); setRequestDateRange([{ startDate, endDate: selection.endDate || startDate, key: "selection" }]); setHasRequestDateRange(true); };
-  const dateLabel = hasRequestDateRange ? `${formatDate(dateKey(requestDateRange[0].startDate))} - ${formatDate(dateKey(requestDateRange[0].endDate))}` : "เลือกช่วงวันที่ขอ";
+  const dateLabel = hasRequestDateRange ? `${formatDate(dateKey(requestDateRange[0].startDate))} - ${formatDate(dateKey(requestDateRange[0].endDate))}` : `01/01/${currentYear} - 31/12/${currentYear}`;
   const title = statusFilter === "all" ? "รายการกองรถทั้งหมด" : `รายการ${LABELS[statusFilter]}`;
 
   return <div className="min-h-screen bg-slate-50 text-slate-800"><main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
     <header className="mb-4 flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center">
-      <div><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p><h1 className="mt-2 flex items-center gap-2 text-lg font-semibold"><Truck size={20} className="text-blue-600" />รอประเมินกองรถ</h1>
+      <div><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Fleet Management</p><h1 className="mt-2 flex items-center gap-2 text-lg font-semibold"><Truck size={20} className="text-blue-600" />รอสรรหาผู้ประกอบการ</h1>
         <div className="mt-2 flex flex-wrap gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold"><Warehouse size={12} />{dcLabel}</span><span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">{LABELS[statusFilter]}</span></div></div>
-      <div className="flex gap-2"><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
+      <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setOpenSupplierRatingModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-semibold text-blue-700 hover:bg-blue-100"><Star size={15} />ให้คะแนนผู้ประกอบการ</button><button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={15} />ดึงรายงาน</button><button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button></div>
     </header>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-600">{error}</div>}
-    <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปรายการทุกหน้าภายใต้ DC ที่มีสิทธิ์ดู</span><span>หน้า {activePage} / {totalPages}</span></div>
+    <div className="mb-2 flex justify-between text-[11px] text-slate-500"><span>สรุปรายการทุกหน้าตามตัวกรองภายใต้ DC ที่มีสิทธิ์ดู</span><span>หน้า {activePage} / {totalPages}</span></div>
     <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{CARDS.map(card => {
       const Icon = card.icon, active = statusFilter === card.key, count = statusCounts[card.key];
       return <button key={card.key} type="button" aria-pressed={active} onClick={() => setStatusFilter(card.key)} className={`relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition hover:shadow-md ${active ? card.active : card.inactive}`}>
@@ -491,6 +497,10 @@ export default function WaitingFleetPage() {
   />,
   portalTarget
 )}
+    {openSupplierRatingModal && portalTarget && createPortal(
+      <SupplierRatingModal onClose={() => setOpenSupplierRatingModal(false)} />,
+      portalTarget
+    )}
     {openExportModal && portalTarget && createPortal(scopedRequests.length > 0 ? (
       <ExportWaitingFleetModal open={true} onClose={() => setOpenExportModal(false)}
         requests={scopedRequests} dcLabel={dcLabel} />

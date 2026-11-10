@@ -53,6 +53,7 @@ interface FlowItem {
   str_date: string | null; end_date: string | null; sla: Id | null; license?: string;
   created_by?: string | null; updated_by?: string | null; created_at?: string | null; updated_at?: string | null;
   request_truck_detail_id?: Id | null;
+  remark?: string | null;
 }
 interface DisplayFlowRow extends FlowItem { process: string; detail: string | null; process_level: string; target_sla: Id | null; }
 interface FlowResponseData { request: RequestInfo; steps: StepItem[]; cars: CarItem[]; flow_data: FlowItem[]; is_initialized: boolean; }
@@ -62,9 +63,10 @@ interface ActionResponse {
   data?: { id?: Id; file_name?: string; file_url?: string | null };
 }
 interface FlowLoadResult { car: CarItem | undefined; initialized: boolean; flowCount: number; }
-interface FlowDateDraft { str_date: string; end_date: string; }
+type FlowDateField = "str_date" | "end_date";
+interface FlowDraft { str_date: string; end_date: string; remark: string; }
 interface CalendarPosition { top: number; left: number; }
-type Picker = { kind: "flow"; flowId: string; field: keyof FlowDateDraft; position: CalendarPosition } | { kind: "warehouse"; position: CalendarPosition };
+type Picker = { kind: "flow"; flowId: string; field: FlowDateField; position: CalendarPosition } | { kind: "warehouse"; position: CalendarPosition };
 const key = (value: unknown) => String(value ?? "").trim();
 const same = (a: unknown, b: unknown) => key(a) === key(b);
 const hasDate = (flow?: FlowItem | null) => Boolean(flow?.str_date || flow?.end_date);
@@ -90,6 +92,9 @@ const emptyVehicleExtraForm = Object.fromEntries([
   ...MEMO_FIELDS.flatMap(f => [[f.key, ""], [f.dateKey, ""]]),
 ]) as VehicleExtraForm;
 function dateInput(value?: string | null) { const v = key(value).split(/[ T]/)[0]; return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ""; }
+function toFlowDraft(flow: FlowItem): FlowDraft {
+  return { str_date: dateInput(flow.str_date), end_date: dateInput(flow.end_date), remark: flow.remark ?? "" };
+}
 function formatDate(value?: string | null) { const v = dateInput(value); return v ? v.split("-").reverse().join("/") : value || "-"; }
 function formatDateTime(value?: string | null) { return value ? `${formatDate(value)} ${key(value).split(/[ T]/)[1]?.slice(0, 8) || ""}`.trim() : "-"; }
 function formatNumber(value?: Id | null) { return value == null || value === "" ? "-" : Number.isFinite(Number(value)) ? Number(value).toLocaleString("en-US") : String(value); }
@@ -180,12 +185,13 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(""), [actionMessage, setActionMessage] = useState("");
   const [savingFlowId, setSavingFlowId] = useState<string | null>(null);
-  const [dateDrafts, setDateDrafts] = useState<Record<string, FlowDateDraft>>({});
+  const [dateDrafts, setDateDrafts] = useState<Record<string, FlowDraft>>({});
   const [vehicleExtraForm, setVehicleExtraForm] = useState<VehicleExtraForm>({ ...emptyVehicleExtraForm });
   const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
   const [savingMemoKey, setSavingMemoKey] = useState<MemoFileKey | null>(null);
   const [savingWarehouseInfo, setSavingWarehouseInfo] = useState(false);
   const [picker, setPicker] = useState<Picker | null>(null);
+  const [documentAction, setDocumentAction] = useState<DisplayFlowRow | null>(null);
   const busyRef = useRef(false), loadVersion = useRef(0);
   const busy = loading || savingFlowId !== null || savingMemoKey !== null || savingWarehouseInfo;
   const [companyFiles, setCompanyFiles] = useState<CompanyAttachment[]>([]);
@@ -281,7 +287,7 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
     );
     if (version !== loadVersion.current) throw new Error("รายการอ้างอิงเปลี่ยนแล้ว กรุณาโหลดข้อมูลอีกครั้ง");
     setData(normalized);
-    setDateDrafts(Object.fromEntries(normalized.flow_data.map(f => [key(f.id), { str_date: dateInput(f.str_date), end_date: dateInput(f.end_date) }])));
+    setDateDrafts(Object.fromEntries(normalized.flow_data.map(f => [key(f.id), toFlowDraft(f)])));
     setVehicleExtraForm(toExtra(normalized.cars[0]));
     return { car: normalized.cars[0], initialized: normalized.is_initialized, flowCount: normalized.flow_data.length };
   }
@@ -306,7 +312,7 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   useEffect(() => {
     if (!open) return;
     const version = ++loadVersion.current;
-    setData(emptyData); setSupplierOptions([]); setDateDrafts({}); setPicker(null);
+    setData(emptyData); setSupplierOptions([]); setDateDrafts({}); setPicker(null); setDocumentAction(null);
     setActionMessage(""); setError(""); setLoading(true);
     void (async () => {
       try { const { car } = await fetchFlowData(); if (loadVersion.current === version) await fetchVehicleWarehouseInfo(car); }
@@ -318,10 +324,10 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow; document.body.style.overflow = "hidden";
-    const escape = (e: KeyboardEvent) => { if (e.key === "Escape" && !busyRef.current) onClose(); };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape" && !documentAction && !busyRef.current) onClose(); };
     window.addEventListener("keydown", escape);
     return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); };
-  }, [open, onClose]);
+  }, [open, onClose, documentAction]);
 
   const stepMap = useMemo(() => new Map(data.steps.map(s => [key(s.id), s])), [data.steps]);
   const flowRows = useMemo<DisplayFlowRow[]>(() => data.cars.flatMap(car => {
@@ -349,11 +355,22 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
     return flowRows.some(f => (hasId(f.unit_code) && hasId(flow.unit_code) ? same(f.unit_code, flow.unit_code) : same(f.vehicle_no, flow.vehicle_no)) && [9, 10].includes(Number(f.process_level)) && hasDate(f));
   }
   function updateExtra(field: ExtraKey, value: string) { setVehicleExtraForm(p => ({ ...p, [field]: value })); }
-  function getDraft(flow: DisplayFlowRow): FlowDateDraft { return dateDrafts[key(flow.id)] || { str_date: dateInput(flow.str_date), end_date: dateInput(flow.end_date) }; }
-  function handleFlowDateChange(flow: DisplayFlowRow, field: keyof FlowDateDraft, value: string) {
-    setDateDrafts(p => ({ ...p, [key(flow.id)]: Number(flow.process_level) === 8 ? { str_date: value, end_date: value } : { ...getDraft(flow), [field]: value } }));
+  function getDraft(flow: DisplayFlowRow): FlowDraft {
+    return dateDrafts[key(flow.id)] ?? toFlowDraft(flow);
   }
-  async function runFlowAction(flow: DisplayFlowRow, rollback: boolean, dates?: FlowDateDraft) {
+  function handleFlowDateChange(flow: DisplayFlowRow, field: FlowDateField, value: string) {
+    const id = key(flow.id);
+    setDateDrafts(previous => {
+      const draft = previous[id] ?? toFlowDraft(flow);
+      const dates = Number(flow.process_level) === 8 ? { str_date: value, end_date: value } : { [field]: value };
+      return { ...previous, [id]: { ...draft, ...dates } };
+    });
+  }
+  function handleFlowRemarkChange(flow: DisplayFlowRow, remark: string) {
+    const id = key(flow.id);
+    setDateDrafts(previous => ({ ...previous, [id]: { ...(previous[id] ?? toFlowDraft(flow)), remark } }));
+  }
+  async function runFlowAction(flow: DisplayFlowRow, rollback: boolean, overrides?: Partial<FlowDraft>) {
     if (busyRef.current || busy) return;
     if ((rollback || [9, 10].includes(Number(flow.process_level))) && !canManageDocuments()) { setError("ติดต่อทีมสัญญาเพื่อแก้ไข"); return; }
     if (!canEditProcessLevel(flow.process_level)) { setError("คุณไม่มีสิทธิ์แก้ไขขั้นตอนนี้"); return; }
@@ -362,19 +379,20 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
     if (rollback && (!special || !/^\d+$/.test(key(flow.id)) || !hasDate(flow))) { setError("ไม่พบรายการระดับ 9 หรือ 10 ที่บันทึกไว้สำหรับย้อนกลับ"); return; }
     if (!rollback && documentLocked(flow)) { setError("เอกสารถูกยกเลิกหรือหมดอายุ กรุณาย้อนกลับสถานะก่อน"); return; }
     if (!rollback && flow.str_date && flow.end_date) { setError("ขั้นตอนนี้บันทึกครบแล้ว ไม่สามารถแก้ไขซ้ำได้"); return; }
-    const draft = dates || getDraft(flow);
+    const draft = { ...getDraft(flow), ...overrides };
     if (!rollback && (!draft.str_date || (draft.end_date && draft.end_date < draft.str_date))) { setError("กรุณาเลือกวันเริ่มและวันสิ้นสุดให้ถูกต้อง"); return; }
-    if ((rollback || special) && !window.confirm(rollback
-      ? `ยืนยันย้อนกลับ “${flow.process}” ของรถคันที่ ${flow.vehicle_no} หรือไม่?\nระบบจะลบขั้นตอนนี้และตรวจสอบเพื่อคืนสถานะคำขอ`
-      : `ยืนยันบันทึก “${flow.process}” ของรถคันที่ ${flow.vehicle_no} หรือไม่?`)) return;
+    if (rollback && !window.confirm(
+      `ยืนยันย้อนกลับ “${flow.process}” ของรถคันที่ ${flow.vehicle_no} หรือไม่?\nระบบจะลบขั้นตอนนี้และตรวจสอบเพื่อคืนสถานะคำขอ`
+    )) return;
     busyRef.current = true; setSavingFlowId(key(flow.id)); setError(""); setActionMessage(""); setPicker(null);
     try {
       const identity = { request_id: key(flow.request_id), process_id: key(flow.process_id), vehicle_no: key(flow.vehicle_no), unit_code: hasId(flow.unit_code) ? key(flow.unit_code) : null, user };
       const result = await postAction(rollback ? FLOW_ROLLBACK_API_URL : FLOW_UPDATE_API_URL, rollback
         ? { ...identity, flow_id: key(flow.id) }
-        : { ...identity, process_level: level, str_date: draft.str_date, end_date: draft.end_date || null, sla: draft.end_date ? calculateSla(draft.str_date, draft.end_date) : 0 });
+        : { ...identity, process_level: level, str_date: draft.str_date, end_date: draft.end_date || null, sla: draft.end_date ? calculateSla(draft.str_date, draft.end_date) : 0, remark: draft.remark.trim() || null });
       setActionMessage(result.message || (rollback ? "ย้อนกลับสถานะเรียบร้อยแล้ว" : "บันทึกขั้นตอนเรียบร้อยแล้ว"));
       try { await fetchFlowData(); } catch (e) { setError(`บันทึกสำเร็จ แต่โหลดข้อมูลล่าสุดไม่สำเร็จ: ${e instanceof Error ? e.message : "กรุณารีเฟรช"}`); }
+      return true;
     } catch (e) { setError(e instanceof Error ? e.message : "ดำเนินการไม่สำเร็จ"); }
     finally { busyRef.current = false; setSavingFlowId(null); }
   }
@@ -406,6 +424,10 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
 
   if (!open) return null;
   const request = data.request;
+  const usageEndDate = request.usage_end_date?.trim();
+  const usageDateRange = usageEndDate
+    ? formatDate(request.usage_date) + " - " + formatDate(usageEndDate)
+    : formatDate(request.usage_date);
   const activeFlow = picker?.kind === "flow" ? flowRows.find(f => same(f.id, picker.flowId)) : undefined;
   const selectedDate = picker?.kind === "warehouse" ? vehicleExtraForm.warehouse_plan_date : activeFlow && picker?.kind === "flow" ? getDraft(activeFlow)[picker.field] : "";
   function close() { if (!busy && !busyRef.current) onClose(); }
@@ -432,14 +454,12 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                   <InfoCard icon={<ClipboardList size={17} />} label="เลขที่เอกสาร" value={displayDocumentNo || "-"} subValue={`Request ID: ${request.id}`} />
                   <InfoCard icon={<Building2 size={17} />} label="DC" value={request.dc_code || "-"} subValue={request.dc_type || "-"} />
                   <InfoCard icon={<Truck size={17} />} label="ประเภทรถ" value={`${request.fleet_truck_type || "-"} | ${request.fleet_type || "-"} · ${formatNumber(request.qty)} คัน`} subValue="" />
-                  <InfoCard icon={<CalendarDays size={17} />} label="วันที่ต้องการใช้งาน" value={formatDate(request.usage_date)} subValue={remaining(request.usage_date)}>
-                    {request.usage_end_date?.trim() && (
-                      <div className="mt-3 border-t border-slate-100 pt-3">
-                        <p className="text-[10px] text-slate-500">วันที่สิ้นสุดการใช้งาน</p>
-                        <p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{formatDate(request.usage_end_date)}</p>
-                      </div>
-                    )}
-                  </InfoCard>
+                  <InfoCard
+                    icon={<CalendarDays size={17} />}
+                    label={usageEndDate ? "วันที่ต้องการใช้งาน - วันที่สิ้นสุดการใช้งาน" : "วันที่ต้องการใช้งาน"}
+                    value={usageDateRange}
+                    subValue={remaining(request.usage_date)}
+                  />
                 </div>
                 {documentMode && visibleOldLicenses.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle><ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{visibleOldLicenses.map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul><p className="mt-3 text-[10px] leading-5 text-slate-500">ใช้แบบประเมินชุดเดียว อ้างอิง {selectedCar?.unit_code || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`} การบันทึกขั้นตอนและรายละเอียดรถจะบันทึกที่รายการอ้างอิงนี้</p></section>}
                 <section
@@ -668,17 +688,47 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                 <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
                     <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-4"><h4 className="text-xs font-semibold text-slate-800">ข้อมูลเพิ่มเติมของรถ</h4><p className="mb-3 mt-1 text-[10px] text-slate-400">รถคันที่ {selectedCar?.vehicle_no || "-"} · {selectedCar?.unit_code || displayDocumentNo || "-"}</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-                      {VEHICLE_FIELDS.map(field => <div key={field.key}><label htmlFor={`vehicle-${field.key}`} className="mb-1.5 block text-[10px] text-slate-500">{field.label}</label>{field.key === "warehouse_plan_date" ? <button id={`vehicle-${field.key}`} type="button" disabled={busy} onClick={e => setPicker({ kind: "warehouse", position: calendarPosition(e.currentTarget) })} className={`${inputClass} flex items-center gap-2 text-left`}><CalendarDays size={14} className="text-blue-500" />{vehicleExtraForm.warehouse_plan_date ? formatDate(vehicleExtraForm.warehouse_plan_date) : "เลือกวันที่จะเข้าคลัง"}</button> : <><input id={`vehicle-${field.key}`} type="text" list={field.key === "car_province" ? "vehicle-provinces" : field.key === "supplier_alloc" ? "vehicle-supplier-options" : undefined} disabled={busy} value={vehicleExtraForm[field.key]} onChange={e => updateExtra(field.key, e.target.value)} placeholder={field.key === "supplier_alloc" ? "พิมพ์หรือเลือกจัดสรรผู้ผลิต" : `กรอก${field.label}`} className={inputClass} />{field.key === "supplier_alloc" && <datalist id="vehicle-supplier-options">{supplierChoices.map(value => <option key={value} value={value} />)}</datalist>}{field.key === "car_province" && <ProvinceDatalist id="vehicle-provinces" />}</>}</div>)}
+                      {VEHICLE_FIELDS.map(field => <div key={field.key}><label htmlFor={`vehicle-${field.key}`} className="mb-1.5 block text-[10px] text-slate-500">{field.label}</label>{field.key === "warehouse_plan_date" ? <DateField
+                        id="vehicle-warehouse_plan_date"
+                        value={vehicleExtraForm.warehouse_plan_date}
+                        placeholder="เลือกวันที่จะเข้าคลัง"
+                        disabled={busy}
+                        onOpen={target => setPicker({ kind: "warehouse", position: calendarPosition(target) })}
+                        onClear={() => updateExtra("warehouse_plan_date", "")}
+                      /> : <><input id={`vehicle-${field.key}`} type="text" list={field.key === "car_province" ? "vehicle-provinces" : field.key === "supplier_alloc" ? "vehicle-supplier-options" : undefined} disabled={busy} value={vehicleExtraForm[field.key]} onChange={e => updateExtra(field.key, e.target.value)} placeholder={field.key === "supplier_alloc" ? "พิมพ์หรือเลือกจัดสรรผู้ผลิต" : `กรอก${field.label}`} className={inputClass} />{field.key === "supplier_alloc" && <datalist id="vehicle-supplier-options">{supplierChoices.map(value => <option key={value} value={value} />)}</datalist>}{field.key === "car_province" && <ProvinceDatalist id="vehicle-provinces" />}</>}</div>)}
                       <div className="sm:col-span-2 lg:col-span-1 2xl:col-span-2"><label className="mb-1.5 block text-[10px] text-slate-500" htmlFor="vehicle-remark">หมายเหตุ</label><textarea id="vehicle-remark" rows={3} disabled={busy} value={vehicleExtraForm.remark} onChange={e => updateExtra("remark", e.target.value)} className={`${inputClass} h-auto py-2.5`} /></div>
                     </div><div className="mt-4 flex justify-end border-t border-slate-200 pt-4"><button type="button" disabled={busy || !selectedCar} onClick={handleSaveWarehouseInfo} className={`${buttonBase} bg-blue-700 text-white shadow-sm`}>{savingWarehouseInfo ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}บันทึกรายละเอียดรถ</button></div></section>
-                    <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-4"><h4 className="text-xs font-semibold text-slate-800">ข้อมูลเลขบันทึกเอกสาร</h4><p className="mb-3 mt-1 text-[10px] text-slate-400">กรอกเลขบันทึก และบันทึกแยกรายการ</p><div className="space-y-3">
+                    <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-2 sm:p-4"><h4 className="text-xs font-semibold text-slate-800">ข้อมูลเลขบันทึกเอกสาร</h4><p className="mb-3 mt-1 text-[10px] text-slate-400">กรอกเลขบันทึก และบันทึกแยกรายการ</p><div className="space-y-3">
                       {MEMO_FIELDS.map(field => {
                         const number = vehicleExtraForm[field.key], date = vehicleExtraForm[field.dateKey];
-                        return <div key={field.key} className="rounded-xl border border-slate-200 bg-white p-3"><div className="mb-1.5 flex justify-between gap-2"><span className="text-[10px] text-slate-500">{field.label}</span>{(number || date) && <span className="rounded-full bg-emerald-50 px-2 text-[10px] text-emerald-600">มีข้อมูลแล้ว</span>}</div>
-                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_100px] lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_140px_100px]">
-                            <input aria-label={field.label} disabled={busy} value={number} placeholder={`กรอก${field.label}`} className={inputClass} onChange={e => { const value = e.target.value; setVehicleExtraForm(p => ({ ...p, [field.key]: value, [field.dateKey]: value.trim() && !p[field.key].trim() && !p[field.dateKey] ? toDateKey(new Date()) : p[field.dateKey] })); }} />
-                            <div className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3"><CalendarDays size={14} className="text-blue-500" /><div>{date ? formatDate(date) : "รอกรอกเลขบันทึก"}{date && <p className="text-[8px] text-slate-400">วันที่เพิ่มเลขบันทึก</p>}</div></div>
-                            <button type="button" disabled={busy || !number.trim() || !date} onClick={() => handleSaveMemo(field)} className={`${buttonBase} bg-blue-700 px-3 text-white`}>{savingMemoKey === field.key ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}{savingMemoKey === field.key ? "กำลังบันทึก" : "บันทึก"}</button>
+                        return <div key={field.key} className="rounded-xl border border-slate-200 bg-white p-2 sm:p-3"><div className="mb-1.5 flex justify-between gap-2"><span className="text-[10px] text-slate-500">{field.label}</span>{(number || date) && <span className="rounded-full bg-emerald-50 px-2 text-[10px] text-emerald-600">มีข้อมูลแล้ว</span>}</div>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1fr)",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <input aria-label={field.label} disabled={busy} value={number} placeholder="กรอกเลขบันทึก" className={`${inputClass} min-w-0`} onChange={e => { const value = e.target.value; setVehicleExtraForm(p => ({ ...p, [field.key]: value, [field.dateKey]: value.trim() && !p[field.key].trim() && !p[field.dateKey] ? toDateKey(new Date()) : p[field.dateKey] })); }} />
+                            <div
+                              title={date ? "วันที่เพิ่มเลขบันทึก" : "ระบบกำหนดวันที่เมื่อกรอกเลขบันทึก"}
+                              className="flex h-10 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-slate-50 text-[10px] tabular-nums sm:text-[11px]"
+                            >
+                              <CalendarDays size={13} className="hidden shrink-0 text-blue-500 sm:block" aria-hidden="true" />
+                              <span>{date ? formatDate(date) : "รอวันที่"}</span>
+                            </div>
+                            <button
+                              type="button"
+                              aria-label={savingMemoKey === field.key ? "กำลังบันทึก" : `บันทึก ${field.label}`}
+                              title={`บันทึก ${field.label}`}
+                              disabled={busy || !number.trim() || !date}
+                              onClick={() => handleSaveMemo(field)}
+                              className="inline-flex h-10 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl bg-blue-700 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {savingMemoKey === field.key ? <LoaderCircle size={14} className="shrink-0 animate-spin" /> : <Save size={14} className="shrink-0" />}
+                              {savingMemoKey !== field.key && <span className="hidden sm:inline lg:hidden xl:inline">บันทึก</span>}
+                            </button>
                           </div></div>;
                       })}
                     </div></section>
@@ -689,7 +739,8 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                   {!data.steps.length ? <p className="py-10 text-center text-amber-600">ไม่พบขั้นตอนจาก Master Flow สำหรับคำขอนี้</p>
                     : !flowRows.length ? <p className="py-10 text-center text-slate-400">ไม่พบรถอ้างอิงสำหรับแสดงขั้นตอน</p> : flowRowsByVehicle.map(vehicle => {
                       const finals = [vehicle.cancelDocumentFlow, vehicle.expiredDocumentFlow].filter((f): f is DisplayFlowRow => f !== null);
-                      const locked = finals.some(hasDate);
+                      const savedDocumentFlows = finals.filter(hasDate);
+                      const locked = savedDocumentFlows.length > 0;
                       return <section key={key(vehicle.vehicle_no)} className="border-b border-slate-200">
                         <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-700 text-white">{vehicle.vehicle_no}</span><div><p className="font-semibold text-slate-800">{documentMode ? "แบบประเมินเอกสาร" : `รถคันที่ ${vehicle.vehicle_no}`}</p><p className="text-[10px] text-slate-400">{vehicle.license} · {vehicle.rows.length} ขั้นตอน</p></div></div><span className="text-[10px] text-slate-400">เลื่อนแนวนอน →</span></div>
                         <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-semibold text-slate-500">การดำเนินการหนังสือ</p><p className="mt-0.5 text-[10px] text-slate-400">ยกเลิกหนังสือ กำหนดหนังสือหมดอายุ หรือย้อนกลับสถานะที่บันทึกไว้</p></div>
@@ -697,14 +748,18 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                             const saved = hasDate(flow), cancel = Number(flow.process_level) === 9, Icon = cancel ? Ban : FileWarning;
                             if (locked && !saved) return null;
                             const saving = savingFlowId === key(flow.id), allowed = canManageDocuments(), hintId = `document-action-hint-${key(flow.id)}`;
-                            return <div key={key(flow.id)} className="group relative inline-flex items-center gap-2" tabIndex={!allowed ? 0 : undefined} aria-label={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined} aria-describedby={!allowed ? hintId : undefined} title={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined}>
+                            return <div key={key(flow.id)} className="group relative flex min-w-0 flex-wrap items-center gap-2" tabIndex={!allowed ? 0 : undefined} aria-label={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined} aria-describedby={!allowed ? hintId : undefined} title={!allowed ? "ติดต่อทีมสัญญาเพื่อแก้ไข" : undefined}>
                               {saved ? <><span className={`${buttonBase} ring-1 ${cancel ? "bg-rose-100 text-rose-700 ring-rose-200" : "bg-amber-100 text-amber-700 ring-amber-200"}`}><Icon size={15} />{cancel ? "ยกเลิกหนังสือแล้ว" : "หนังสือหมดอายุแล้ว"}</span><button type="button" disabled={busy || !allowed} onClick={() => void runFlowAction(flow, true)} className={`${buttonBase} border ${allowed ? "border-blue-200 bg-white text-blue-700 hover:bg-blue-50" : "pointer-events-none border-slate-200 bg-slate-100 text-slate-400"}`}>{saving ? <LoaderCircle size={14} className="animate-spin" /> : <Undo2 size={14} />}{saving ? "กำลังย้อนกลับ..." : "ย้อนกลับสถานะ"}</button></>
-                                : <button type="button" disabled={busy || !allowed} onClick={() => { const today = toDateKey(new Date()); void runFlowAction(flow, false, { str_date: today, end_date: today }); }} className={`${buttonBase} ${!allowed ? "pointer-events-none bg-slate-100 text-slate-400 ring-1 ring-slate-200" : `text-white shadow-sm ${cancel ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-500 hover:bg-amber-600"}`}`}>{saving ? <LoaderCircle size={14} className="animate-spin" /> : <Icon size={15} />}{cancel ? "ยกเลิกหนังสือ" : "หนังสือหมดอายุ"}</button>}
+                                : <button type="button" disabled={busy || !allowed} onClick={() => { setError(""); setDocumentAction(flow); }} className={`${buttonBase} ${!allowed ? "pointer-events-none bg-slate-100 text-slate-400 ring-1 ring-slate-200" : `text-white shadow-sm ${cancel ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-500 hover:bg-amber-600"}`}`}>{saving ? <LoaderCircle size={14} className="animate-spin" /> : <Icon size={15} />}{cancel ? "ยกเลิกหนังสือ" : "หนังสือหมดอายุ"}</button>}
                               {!allowed && <span id={hintId} role="tooltip" className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-max max-w-[240px] rounded-lg bg-slate-800 px-3 py-2 text-[11px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus:opacity-100 group-focus-within:opacity-100">ติดต่อทีมสัญญาเพื่อแก้ไข</span>}
                             </div>;
                           })}{!finals.length && <span className="text-[10px] text-slate-400">ไม่พบ Process ระดับ 9 หรือ 10 ใน Master Flow</span>}</div>
                         </div>
-                        <div className="overflow-x-auto px-4 py-5"><div className="flex min-w-max items-stretch">{vehicle.rows.map((flow, index) => {
+                        <div className="relative isolate">
+                          <div
+                            aria-hidden={locked || undefined}
+                            className={`px-4 py-5 ${locked ? "pointer-events-none min-h-[180px] overflow-hidden" : "overflow-x-auto"}`}
+                          ><div className="flex min-w-max items-stretch">{vehicle.rows.map((flow, index) => {
                           const draft = getDraft(flow), invalid = Boolean(draft.str_date && draft.end_date && draft.end_date < draft.str_date), startSaved = Boolean(flow.str_date && !flow.end_date), saved = Boolean(flow.str_date && flow.end_date), started = Boolean(draft.str_date), complete = Boolean(draft.str_date && draft.end_date && !invalid);
                           const allowed = canEditProcessLevel(flow.process_level), target = Math.max(0, Math.ceil(Number(stepMap.get(key(flow.process_id))?.sla ?? flow.target_sla) || 0)), due = dueDate(draft.str_date, target), actual = calculateSla(draft.str_date, draft.end_date);
                           const daysLeft = due ? dayNumber(due) - dayNumber(toDateKey(new Date())) : null, overdue = target > 0 && (complete ? actual > target : daysLeft !== null && daysLeft < 0);
@@ -712,13 +767,68 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                           return <div key={key(flow.id)} className="flex shrink-0 items-stretch"><article className={`flex h-full w-[270px] flex-col rounded-2xl border p-4 shadow-sm ${locked ? "border-slate-300 bg-slate-100" : saved ? "border-emerald-300 bg-emerald-50" : invalid ? "border-rose-300 bg-rose-50" : started ? "border-blue-200 bg-blue-50/40" : "border-slate-200 bg-white"}`}>
                             <div className="flex items-start justify-between gap-3"><span className={`flex h-8 w-8 items-center justify-center rounded-full ${locked ? "bg-slate-300 text-slate-600" : complete ? "bg-emerald-600 text-white" : started ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>{flow.process_level}</span><span className="rounded-full bg-white/70 px-2 py-1 text-[10px] text-slate-500">{locked ? "ไม่สามารถแก้ไขได้" : saved ? "บันทึกครบแล้ว" : startSaved ? "บันทึกวันเริ่มแล้ว" : complete ? "พร้อมบันทึก" : started ? "เลือกวันเริ่มแล้ว" : "รอดำเนินการ"}</span></div>
                             <div className="mt-3 min-h-[58px]"><p className="font-semibold leading-5 text-slate-800">{flow.process}</p>{flow.detail && <p className="mt-1 line-clamp-2 text-[10px] text-slate-400">{flow.detail}</p>}</div>
-                            <div className="mt-4 space-y-3">{(["str_date", "end_date"] as const).map(field => <div key={field}><span className="mb-1.5 block text-[10px] text-slate-400">{field === "str_date" ? "วันที่เริ่ม" : "วันที่สิ้นสุด"}</span><button type="button" disabled={busy || !allowed || locked || saved || (field === "str_date" ? startSaved : !draft.str_date)} title={!allowed ? "ไม่มีสิทธิ์แก้ไขขั้นตอนนี้" : undefined} onClick={e => setPicker({ kind: "flow", flowId: key(flow.id), field, position: calendarPosition(e.currentTarget) })} className={`${inputClass} flex items-center gap-2 text-left disabled:text-slate-400`}><CalendarDays size={14} className="text-blue-500" />{draft[field] ? formatDate(draft[field]) : field === "str_date" ? "เลือกวันที่เริ่ม" : "เลือกวันที่สิ้นสุด"}</button></div>)}</div>
+                            <div className="mt-4 space-y-3">
+                              {(["str_date", "end_date"] as const).map(field => {
+                                const label = field === "str_date" ? "วันที่เริ่ม" : "วันที่สิ้นสุด";
+                                const fieldId = `flow-date-${key(flow.id)}-${field}`;
+                                return (
+                                  <div key={field}>
+                                    <label htmlFor={fieldId} className="mb-1.5 block text-[10px] text-slate-400">{label}</label>
+                                    <DateField
+                                      id={fieldId}
+                                      value={draft[field]}
+                                      placeholder={`เลือก${label}`}
+                                      disabled={busy || !allowed || locked || saved || (field === "str_date" ? startSaved : !draft.str_date)}
+                                      title={!allowed ? "ไม่มีสิทธิ์แก้ไขขั้นตอนนี้" : undefined}
+                                      onOpen={target => setPicker({ kind: "flow", flowId: key(flow.id), field, position: calendarPosition(target) })}
+                                      onClear={() => handleFlowDateChange(flow, field, "")}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <label className="mt-3 block">
+                              <span className="mb-1.5 block text-[10px] text-slate-500">หมายเหตุ</span>
+                              <textarea
+                                rows={2}
+                                value={draft.remark}
+                                placeholder={saved ? "ไม่มีหมายเหตุ" : "ระบุหมายเหตุ (ถ้ามี)"}
+                                readOnly={saved || locked || !allowed}
+                                tabIndex={locked ? -1 : undefined}
+                                disabled={busy}
+                                onChange={event => handleFlowRemarkChange(flow, event.target.value)}
+                                className={`${inputClass} h-auto min-h-14 resize-y py-2`}
+                              />
+                            </label>
                             {invalid && <p className="mt-2 text-[10px] text-rose-600">วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่ม</p>}
-                            {locked && <div className="mt-3 rounded-xl border border-slate-300 bg-slate-200 p-3 text-[10px] text-slate-600">เอกสารถูกยกเลิกหรือหมดอายุ สามารถกด “ย้อนกลับสถานะ” เพื่อดำเนินการต่อ</div>}
                             <div className={`mt-4 rounded-xl p-3 ${overdue ? "bg-rose-50 ring-1 ring-rose-200" : complete ? "bg-emerald-50" : "bg-blue-50"}`}><div className="flex justify-between gap-3"><span className="text-[10px] text-slate-500">SLA กำหนด</span><span className="text-blue-700">{target > 0 ? `${target} วัน` : "ไม่ได้กำหนด"}</span></div>{draft.str_date && target > 0 && !invalid && <div className="mt-2 space-y-2 border-t border-black/5 pt-2"><div className="flex justify-between gap-3"><span className="text-[10px] text-slate-400">วันครบกำหนด</span><span>{formatDate(due)}</span></div><div className="flex justify-between gap-3"><span className="text-[10px] text-slate-400">สถานะ SLA</span><span className={`max-w-[145px] text-right text-[10px] ${overdue ? "text-rose-600" : complete ? "text-emerald-600" : "text-blue-700"}`}>{slaText}</span></div>{complete && <div className="flex justify-between"><span className="text-[10px] text-slate-400">ใช้จริง</span><span>{actual} วัน</span></div>}</div>}</div>
                             <div className="min-h-3 flex-1" /><button type="button" disabled={busy || !allowed || locked || saved || !draft.str_date || invalid} onClick={() => runFlowAction(flow, false)} className={`${buttonBase} mt-auto w-full ${saved ? "bg-emerald-100 text-emerald-700" : locked ? "bg-slate-300 text-slate-500" : "bg-blue-700 text-white"}`}>{savingFlowId === key(flow.id) ? <LoaderCircle size={14} className="animate-spin" /> : saved ? <CheckCircle2 size={14} /> : locked ? <Ban size={14} /> : <Save size={14} />}{savingFlowId === key(flow.id) ? "กำลังบันทึก..." : !allowed ? "ไม่มีสิทธิ์แก้ไข" : locked ? "ไม่สามารถแก้ไขได้" : saved ? "บันทึกครบแล้ว" : startSaved ? "บันทึกวันสิ้นสุด" : draft.end_date ? "บันทึกวันที่" : "บันทึกวันเริ่ม"}</button><p className="mt-3 truncate text-[10px] text-slate-400">{flow.updated_by || flow.created_by || "ยังไม่มีผู้แก้ไข"}</p>
                           </article>{index < vehicle.rows.length - 1 && <div className="flex w-10 shrink-0 items-center justify-center"><div className="h-0.5 w-5 bg-slate-200" /><ChevronRight size={15} className="-ml-1 text-slate-300" /></div>}</div>;
                         })}</div></div>
+                          {locked && (
+                            <div className="absolute inset-0 z-10 flex overflow-y-auto bg-slate-200/30 py-4 sm:py-6">
+                              <div className="m-auto w-full min-w-0 space-y-3 border-y border-slate-200/60 bg-slate-50/60 px-4 py-4 text-center sm:px-6">
+                                {savedDocumentFlows.map(flow => {
+                                  const isCancellation = Number(flow.process_level) === 9;
+                                  const Icon = isCancellation ? Ban : FileWarning;
+                                  const title = isCancellation ? "ยกเลิกหนังสือแล้ว" : "หนังสือหมดอายุแล้ว";
+                                  const badgeClass = isCancellation ? "border-rose-200 bg-rose-100 text-rose-800" : "border-amber-200 bg-amber-100 text-amber-900";
+                                  const remarkClass = isCancellation ? "border-rose-200/70 bg-rose-50/80 text-rose-950" : "border-amber-200/70 bg-amber-50/80 text-amber-950";
+                                  return (
+                                    <div key={key(flow.id)} className="mx-auto flex w-full max-w-2xl flex-col items-center gap-2">
+                                      <p className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ${badgeClass}`}>
+                                        <Icon size={16} aria-hidden="true" />{title}
+                                      </p>
+                                      <p className={`max-w-full whitespace-pre-wrap break-words rounded-xl border px-4 py-2 text-center text-xs leading-relaxed ${remarkClass}`}>
+                                        <span className="font-semibold">หมายเหตุ:</span>{" "}{flow.remark?.trim() || "ไม่ระบุ"}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </section>;
                     })}
                 </section>
@@ -726,14 +836,160 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
             )}
         </div>
       </section>
+      {documentAction && (
+        <DocumentActionDialog
+          key={key(documentAction.id)}
+          flow={documentAction}
+          initialRemark={getDraft(documentAction).remark}
+          error={error}
+          busy={busy}
+          onClose={() => { setError(""); setDocumentAction(null); }}
+          onConfirm={async remark => {
+            const today = toDateKey(new Date());
+            const saved = await runFlowAction(documentAction, false, { str_date: today, end_date: today, remark });
+            if (saved) setDocumentAction(null);
+          }}
+        />
+      )}
       {picker && (picker.kind === "warehouse" || activeFlow) && <div className="fixed inset-0 z-[100002]" onMouseDown={() => setPicker(null)}><div className="fixed max-h-[calc(100vh-24px)] w-[340px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-2xl border border-blue-100 bg-white shadow-2xl" style={picker.position} onMouseDown={e => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-3"><div><p className="font-semibold text-blue-700">{picker.kind === "warehouse" ? "เลือกวันที่จะเข้าคลัง" : picker.field === "str_date" ? "เลือกวันที่เริ่ม" : "เลือกวันที่สิ้นสุด"}</p><p className="mt-0.5 text-[10px] text-slate-400">{activeFlow?.process || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`}</p></div><button type="button" aria-label="ปิดปฏิทิน" onClick={() => setPicker(null)}><X size={15} /></button></div>
         <Calendar locale={th} date={parseDate(selectedDate)} minDate={picker.kind === "flow" && picker.field === "end_date" && activeFlow && getDraft(activeFlow).str_date ? parseDate(getDraft(activeFlow).str_date) : undefined} onChange={(date: Date) => { if (picker.kind === "warehouse") updateExtra("warehouse_plan_date", toDateKey(date)); else if (activeFlow) handleFlowDateChange(activeFlow, picker.field, toDateKey(date)); setPicker(null); }} showMonthAndYearPickers color="#2563eb" />
-        <div className="border-t border-slate-100 p-4"><p className="text-[10px] text-slate-400">วันที่ที่เลือก</p><p className="mt-1 text-blue-700">{selectedDate ? formatDate(selectedDate) : "ยังไม่ได้เลือกวันที่"}</p><button type="button" disabled={!selectedDate} className={`${buttonBase} mt-3 border border-rose-200 text-rose-600`} onClick={() => { if (picker.kind === "warehouse") updateExtra("warehouse_plan_date", ""); else if (activeFlow) handleFlowDateChange(activeFlow, picker.field, ""); setPicker(null); }}><X size={13} />ล้างวันที่</button></div>
       </div></div>}
     </div>
   );
 }
+function DocumentActionDialog({ flow, initialRemark, error, busy, onClose, onConfirm }: {
+  flow: DisplayFlowRow;
+  initialRemark: string;
+  error: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (remark: string) => Promise<void>;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const remarkRef = useRef<HTMLTextAreaElement>(null);
+  const [remark, setRemark] = useState(initialRemark);
+  const isCancellation = Number(flow.process_level) === 9;
+  const Icon = isCancellation ? Ban : FileWarning;
+  const title = isCancellation ? "ยืนยันยกเลิกหนังสือ" : "ยืนยันบันทึกหนังสือหมดอายุ";
+  const accent = isCancellation ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800";
+  const confirmBackground = isCancellation ? "#be123c" : "#92400e";
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const trigger = document.activeElement;
+    if (dialog && !dialog.open) dialog.showModal();
+    remarkRef.current?.focus();
+    return () => {
+      dialog?.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="flow-document-action-title"
+      aria-busy={busy}
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/55"
+      onCancel={event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) onClose();
+      }}
+      onKeyDown={event => event.stopPropagation()}
+    >
+      <form onSubmit={event => { event.preventDefault(); if (!busy) void onConfirm(remark); }}>
+        <header className="flex items-start gap-3 border-b border-slate-100 p-4 sm:p-5">
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${accent}`}><Icon size={20} aria-hidden="true" /></span>
+          <div className="min-w-0 flex-1">
+            <h3 id="flow-document-action-title" className="text-base font-semibold text-slate-900">{title}</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              รถคันที่ {flow.vehicle_no}{flow.license && flow.license !== "-" ? ` · ทะเบียน ${flow.license}` : ""}
+            </p>
+          </div>
+          <button type="button" aria-label="ปิดหน้าต่างยืนยัน" disabled={busy} onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="space-y-3 p-4 sm:p-5">
+          <label className="block text-xs font-semibold text-slate-700" htmlFor="flow-document-action-remark">
+            หมายเหตุ <span className="font-normal text-slate-500">(ถ้ามี)</span>
+          </label>
+          <textarea
+            ref={remarkRef}
+            id="flow-document-action-remark"
+            rows={3}
+            value={remark}
+            disabled={busy}
+            onChange={event => setRemark(event.target.value)}
+            placeholder={isCancellation ? "ระบุเหตุผลที่ยกเลิกหนังสือ" : "ระบุรายละเอียดเกี่ยวกับหนังสือหมดอายุ"}
+            className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
+          />
+          {error && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
+        </div>
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
+          <button type="button" disabled={busy} onClick={onClose}
+            className="h-10 rounded-xl border border-rose-300 bg-rose-50 px-4 text-xs font-semibold text-rose-700 hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-300 disabled:opacity-50">
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            style={{ backgroundColor: confirmBackground, color: "#fff" }}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-xs font-semibold shadow-sm transition hover:brightness-90 focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-75"
+          >
+            {busy ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} aria-hidden="true" />}
+            {busy ? "กำลังบันทึก…" : isCancellation ? "ยืนยันยกเลิกหนังสือ" : "ยืนยันหนังสือหมดอายุ"}
+          </button>
+        </footer>
+      </form>
+    </dialog>
+  );
+}
+
+function DateField({ id, value, placeholder, disabled, title, onOpen, onClear }: {
+  id: string;
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  title?: string;
+  onOpen: (target: HTMLButtonElement) => void;
+  onClear: () => void;
+}) {
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
+  return (
+    <div className={`flex h-10 min-w-0 items-center rounded-xl border border-slate-200 text-[11px] font-semibold text-slate-700 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 ${disabled ? "bg-slate-100 text-slate-500" : "bg-white"}`}>
+      <button
+        ref={dateButtonRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        title={title}
+        onClick={event => onOpen(event.currentTarget)}
+        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-l-xl px-3 text-left disabled:cursor-not-allowed"
+      >
+        <CalendarDays size={14} className="shrink-0 text-blue-500" aria-hidden="true" />
+        <span className="truncate tabular-nums">{value ? formatDate(value) : placeholder}</span>
+      </button>
+      {value && !disabled && (
+        <button
+          type="button"
+          aria-label={`ล้างวันที่ในช่อง ${placeholder}`}
+          className="h-full shrink-0 rounded-r-xl border-l border-slate-100 px-3 text-rose-600 hover:bg-rose-50"
+          onClick={() => {
+            onClear();
+            dateButtonRef.current?.focus();
+          }}
+        >
+          ล้าง
+        </button>
+      )}
+    </div>
+  );
+}
+
 function SectionTitle({ children }: { children: ReactNode }) { return <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2.5 text-xs font-semibold text-slate-800 before:h-4 before:w-1 before:rounded-full before:bg-blue-600 before:content-['']">{children}</h3>; }
-function InfoCard({ icon, label, value, subValue, children }: { icon: ReactNode; label: string; value: string; subValue: string; children?: ReactNode }) { return <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm"><div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white text-blue-600">{icon}</span><div className="min-w-0"><p className="text-[10px] text-slate-500">{label}</p><p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{value}</p>{subValue && <p className="mt-1 break-words text-[10px] text-slate-400">{subValue}</p>}{children}</div></div></div>; }
+function InfoCard({ icon, label, value, subValue }: { icon: ReactNode; label: string; value: string; subValue: string }) { return <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-blue-50/40 p-4 shadow-sm"><div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white text-blue-600">{icon}</span><div className="min-w-0"><p className="text-[10px] text-slate-500">{label}</p><p className="mt-1 break-words text-xs font-semibold leading-5 text-slate-800">{value}</p>{subValue && <p className="mt-1 break-words text-[10px] text-slate-400">{subValue}</p>}</div></div></div>; }
 function DetailItem({ label, value }: { label: string; value?: string | null }) { return <div><p className="text-[10px] text-slate-400">{label}</p><p className="mt-1 break-words font-semibold text-slate-700">{value || "-"}</p></div>; }

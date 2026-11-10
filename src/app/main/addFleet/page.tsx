@@ -1028,7 +1028,6 @@ function AddFleetContent() {
 
       const allRequestIds = new Set([
         ...requestMap.keys(),
-        ...flowSummaryMap.keys(),
       ]);
 
       const mergedList: RequestItem[] = Array.from(allRequestIds).map(
@@ -1067,10 +1066,9 @@ function AddFleetContent() {
               flowSummaryItem?.dc_code ??
               "",
 
-            date:
-              flowSummaryItem?.date ||
-              requestItem?.date ||
-              "",
+            date: requestItem?.date || "",
+            request_date: requestItem?.request_date,
+            created_at: requestItem?.created_at,
 
             fleet_type:
               flowSummaryItem?.fleet_type ||
@@ -1132,10 +1130,8 @@ function AddFleetContent() {
               requestItem?.truckturn ??
               0,
 
-            status:
-              flowSummaryItem?.status ||
-              requestItem?.status ||
-              "",
+            // Request status is authoritative; Flow only supplies process details.
+            status: requestItem?.status || "",
 
             request_by:
               flowSummaryItem?.request_by ||
@@ -1166,8 +1162,6 @@ function AddFleetContent() {
       );
 
       const classifiedList: RequestItem[] = mergedList.map((item) => {
-        const backendStatus = String(item.status || "").trim().toLowerCase();
-        const fleetType = String(item.fleet_type || "").trim();
         const statusDetails = String(item.status_details || "").trim();
 
         const levelFromStatusDetails = Number(
@@ -1187,24 +1181,11 @@ function AddFleetContent() {
           statusDetails.replace(/^\d+\s*[.:]\s*/, "").trim() ||
           "ยังไม่เริ่มดำเนินการ";
 
-        let nextStatus = item.status;
-
-        if (currentLevel >= 1 && currentLevel <= 7) {
-          nextStatus = "process";
-        } else if (currentLevel === 8) {
-          nextStatus = "completed";
-        } else if (currentLevel === 9 || currentLevel === 10) {
-          nextStatus = "rejected";
-        }
-
-        // รถเสริมถือว่าเสร็จสิ้นทันที เมื่อ Backend ส่งสถานะ progress
-        if (backendStatus === "progress" && fleetType === "รถเสริม") {
-          nextStatus = "completed";
-        }
-
+        // Keep request_truck.status for both cards and table filtering.
+        // Flow levels describe progress without changing the request category.
         return {
           ...item,
-          status: nextStatus,
+          status: item.status,
           current_step: currentLevel,
           total_steps: 8,
           current_process: currentProcess,
@@ -1352,7 +1333,10 @@ function AddFleetContent() {
   };
 
   const formatThaiDateRange = () => {
-    if (!hasRequestDateRange) return "เลือกช่วงวันที่ขอ";
+    if (!hasRequestDateRange) {
+      const year = new Date().getFullYear();
+      return `01/01/${year} - 31/12/${year}`;
+    }
 
     const startDate = requestDateRange[0].startDate;
     const endDate = requestDateRange[0].endDate;
@@ -1410,7 +1394,7 @@ function AddFleetContent() {
     if (
       value === "fbp_pending" ||
       value === "partial_approved" ||
-      value === "กำลังประเมินกองรถ (fbp)"
+      value === "กำลังสรรหาผู้ประกอบการ (fbp)"
     ) {
       return "fbp_pending";
     }
@@ -1475,7 +1459,7 @@ function AddFleetContent() {
       case "gm_pending":
         return "รอ GM อนุมัติ";
       case "fbp_pending":
-        return "กำลังประเมินกองรถ (FBP)";
+        return "กำลังสรรหาผู้ประกอบการ (FBP)";
       case "process":
         return "ดำเนินการตามกระบวนการ (TCAS)";
       case "completed":
@@ -1758,15 +1742,11 @@ function AddFleetContent() {
     );
   }, [warehouseFilteredRequests]);
 
-  const filteredRequests = useMemo(() => {
+  const currentYear = new Date().getFullYear();
+  const summaryRequests = useMemo(() => {
     const sourceRequests = warehouseFilteredAllRows;
 
     return sourceRequests.filter((item) => {
-      const normalizedItemStatus = normalizeStatus(item.status);
-
-      const matchStatus =
-        statusFilter === "all" || normalizedItemStatus === statusFilter;
-
       const matchCurrentProcess =
         currentProcessFilter === "all" ||
         (item.vehicle_no !== null &&
@@ -1806,13 +1786,17 @@ function AddFleetContent() {
           .includes(truckTypeKeyword);
 
       const itemRequestDateKey = getRequestDateKey(item);
-      const startDateKey = formatDateToKey(requestDateRange[0].startDate);
-      const endDateKey = formatDateToKey(requestDateRange[0].endDate);
+      const startDateKey = hasRequestDateRange
+        ? formatDateToKey(requestDateRange[0].startDate)
+        : `${currentYear}-01-01`;
+      const endDateKey = hasRequestDateRange
+        ? formatDateToKey(requestDateRange[0].endDate)
+        : `${currentYear}-12-31`;
 
       const matchRequestDate =
-        !hasRequestDateRange ||
-        (itemRequestDateKey >= startDateKey &&
-          itemRequestDateKey <= endDateKey);
+        itemRequestDateKey !== "ไม่ระบุวันที่" &&
+        itemRequestDateKey >= startDateKey &&
+        itemRequestDateKey <= endDateKey;
 
       const licenseText = getReplacementTruckRows(item).map((detail) => detail.license).join(" ");
       const keyword = searchText.trim().toLowerCase();
@@ -1837,7 +1821,6 @@ function AddFleetContent() {
           .includes(keyword);
 
       return (
-        matchStatus &&
         matchCurrentProcess &&
         matchFleetType &&
         matchTruckTypeFilter &&
@@ -1850,7 +1833,6 @@ function AddFleetContent() {
     });
   }, [
     warehouseFilteredAllRows,
-    statusFilter,
     currentProcessFilter,
     fleetTypeFilter,
     truckTypeFilter,
@@ -1859,8 +1841,16 @@ function AddFleetContent() {
     dcFilter,
     requestDateRange,
     hasRequestDateRange,
+    currentYear,
     searchText,
   ]);
+
+  const filteredRequests = useMemo(() =>
+    statusFilter === "all"
+      ? summaryRequests
+      : summaryRequests.filter(item => normalizeStatus(item.status) === statusFilter),
+    [summaryRequests, statusFilter],
+  );
 
   const sortedRequests = useMemo(() => {
     if (!sortConfig) return filteredRequests;
@@ -1989,38 +1979,13 @@ function AddFleetContent() {
     });
   }, [groupedFilteredByRequestDate, sortConfig]);
 
+  // Cards count requested vehicles (SUM(request_truck.qty)), not approved_qty.
   const getRequestVehicleQty = (item: RequestItem) => {
-    const status = normalizeStatus(item.status);
-
-    const requestQty = Number(item.qty || 0);
-    const rawApprovedQty = Number(item.approved_qty || 0);
-    const approvedQty = (rawApprovedQty > 0 && rawApprovedQty <= 100) ? rawApprovedQty : 0;
-
-    if (status === "process") {
-      // ใช้ approved_qty เมื่อมีค่ามากกว่า 0 และไม่เกิน 100 (ไม่ใช่รหัสผู้ขาย/ผู้อนุมัติ)
-      // ถ้ายังเป็น 0 หรือเป็นรหัส ให้ใช้ qty ของคำขอแทน
-      const quantity = approvedQty > 0 ? approvedQty : requestQty;
-
-      return Number.isFinite(quantity) ? Math.max(Math.floor(quantity), 0) : 0;
-    }
-
-    return Number.isFinite(requestQty)
-      ? Math.max(Math.floor(requestQty), 0)
-      : 0;
+    const quantity = Number(item.qty ?? 0);
+    return Number.isFinite(quantity) ? quantity : 0;
   };
 
-  const getVisibleVehicleQty = (item: RequestItem) => {
-    if (
-      item.vehicle_no !== null &&
-      item.vehicle_no !== undefined &&
-      item.vehicle_no !== ""
-    ) {
-      return 1;
-    }
-
-    return getRequestVehicleQty(item);
-  };
-
+  const getVisibleVehicleQty = (item: RequestItem) => getRequestVehicleQty(item);
 
   const statusCounts = useMemo(() => {
     const result = {
@@ -2041,7 +2006,7 @@ function AddFleetContent() {
       rejected: new Set<string>(),
     };
 
-    warehouseFilteredAllRows.forEach((item, index) => {
+    summaryRequests.forEach((item, index) => {
       const status = normalizeStatus(item.status);
       const vehicleQty = getVisibleVehicleQty(item);
 
@@ -2095,7 +2060,7 @@ function AddFleetContent() {
     result.rejected.items = requestKeys.rejected.size;
 
     return result;
-  }, [warehouseFilteredAllRows]);
+  }, [summaryRequests]);
 
   const filteredVehicleCount = useMemo(() => {
     return filteredRequests.reduce(
@@ -2155,7 +2120,7 @@ function AddFleetContent() {
 
     const textMap: Record<string, string> = {
       gm_pending: "รอการอนุมัติจาก GM",
-      fbp_pending: "กำลังประเมินกองรถ (FBP)",
+      fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
 
       process: "อยู่ระหว่างดำเนินการ",
 
@@ -2241,7 +2206,7 @@ function AddFleetContent() {
                   : statusFilter === "gm_pending"
                     ? "รอ GM อนุมัติ"
                     : statusFilter === "fbp_pending"
-                      ? "กำลังประเมินกองรถ (FBP)"
+                      ? "กำลังสรรหาผู้ประกอบการ (FBP)"
                       : statusFilter === "process"
                         ? "ดำเนินการตามกระบวนการ (TCAS)"
                         : statusFilter === "completed"

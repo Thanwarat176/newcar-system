@@ -67,9 +67,9 @@ export default function ImportPage() {
     ประเภทรถที่ถูกทดแทน: "replaced_truck_type",
     บริษัทขนส่งที่ถูกทดแทน: "replaced_company",
 
-    หมายเหตุการประเมินกองรถ: "fleet_remark",
-    สถานะการประเมินกองรถ: "fleet_status",
-    วันที่ประเมินกองรถ: "fleet_assessment_date",
+    หมายเหตุการสรรหาผู้ประกอบการ: "fleet_remark",
+    สถานะการสรรหาผู้ประกอบการ: "fleet_status",
+    วันที่สรรหาผู้ประกอบการ: "fleet_assessment_date",
 
     คาดการณ์วันเข้าคลัง: "expected_delivery_date",
 

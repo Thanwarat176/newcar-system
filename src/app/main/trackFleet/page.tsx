@@ -12,7 +12,7 @@ import { th } from "date-fns/locale";
 import {
   AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CalendarDays,
   CircleCheck, CircleX, ClipboardList, Download, Eraser, Filter,
-  RefreshCw, Search, SlidersHorizontal, Truck, Warehouse, X,
+  RefreshCw, Search, SlidersHorizontal, Truck, Upload, Warehouse, X,
 } from "lucide-react";
 import FlowAssessmentModal from "./component/FlowAssessmentModal";
 import ExportTrackFleet from "./component/ExportTrackFleet";
@@ -25,6 +25,12 @@ import ExportTrackFleet from "./component/ExportTrackFleet";
  * รวมทะเบียนเก่าทุกคัน เลือกรถอ้างอิงที่มีจริง และแสดงแบบประเมินชุดเดียว
  * ใช้ร่วมกับ component/FlowAssessmentModal.tsx ที่แนบในชุดนี้
  */
+interface RequestDateOptions {
+  years: number[];
+  first_date: string | null;
+  last_date: string | null;
+}
+
 interface SelectedDC {
   DC_CODE?: string; DC_NAME?: string; DC_TYPE?: string;
   dc_code?: string; dc_name?: string; dc_type?: string;
@@ -96,8 +102,401 @@ const EMPTY_SUMMARY: Summary = {
   all: { qty: 0, items: 0 }, progress: { qty: 0, items: 0 },
   cancel: { qty: 0, items: 0 }, success: { qty: 0, items: 0 },
 };
-const normalizeStatus = (value?: string) => String(value || "").trim().toLowerCase();
+const normalizeStatus = (value?: string) => {
+  const status = String(value || "").trim().toLowerCase();
+  return ["reject_by_gm", "reject_by_fbp"].includes(status) ? "cancel" : status;
+};
 const textValue = (value: unknown) => String(value ?? "").trim();
+const EXCEL_FIELDS = [
+  "warehouse_plan_date", "car_model", "car_brand", "supplier_alloc", "car_chassis",
+  "car_engine", "car_license", "car_province", "remark",
+] as const;
+const EXCEL_MEMOS = [
+  ["fbp", "เลขบันทึก FBP", "วันที่เข้ามากรอกเลขบันทึก FBP"],
+  ["tis", "เลขบันทึกแจ้ง TIS", "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS"],
+  ["til", "เลขบันทึกแจ้ง TIL", "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL"],
+  ["ask", "เลขบันทึกแจ้ง ASK", "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK"],
+  ["kleasing", "เลขบันทึกแจ้ง Kleasing", "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing"],
+  ["ttb", "เลขบันทึกแจ้ง TTB2", "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2"],
+  ["thaiolix", "เลขบันทึกแจ้ง THAIOLIX", "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX"],
+] as const;
+const EXCEL_FLOW_NAMES = [
+  "รอจัดสรรตามโควต้า", "รอลงนามหนังสือจัดสรร", "รอไฟแนนซ์อนุมัติ", "รอส่งรถเข้าอู่",
+  "ประกอบตู้/เครื่องทำความเย็น", "รอจดทะเบียนรถ", "ส่งมอบคลังแล้ว",
+];
+const EXCEL_REPORT_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ["sequence", "ลำดับ"],
+  ["request_date", "วันที่สร้างคำขอ"],
+  ["fleet_type", "ประเภทคำขอ"],
+  ["status", "สถานะปัจจุบัน"],
+  ["running_doc", "เลขที่เอกสาร"],
+  ["dc_type", "ประเภทคลัง"],
+  ["dc_name", "ชื่อคลัง"],
+  ["fleet_truck_type", "ประเภทรถ"],
+  ["qty", "จำนวนรถที่ขอ (คัน) *"],
+  ["replaced_old_licenses", "ทะเบียนทดแทน1(ระบุทะเบียน)"],
+  ["usage_date", "วันที่ใช้งาน"],
+  ["approved_truck_type", "ประเภทรถที่อนุมัติ"],
+  ["approved_qty", "จำนวนรถที่อนุมัติ"],
+  ["vendor_short_name", "ชื่อบริษัทขนส่ง (ย่อ)2"],
+  ["new_vendor_id", "VENDOR CODE"],
+  ["new_vendor_name", "ชื่อบริษัทขนส่ง"],
+  ["replaced_truck_types", "ประเภทรถที่ถูกทดแทน"],
+  ["replaced_companies", "บริษัทขนส่งที่ถูกทดแทน"],
+  ["assessment_remark", "หมายเหตุการประเมินกองรถ"],
+  ["assessment_status", "สถานะการประเมินกองรถ"],
+  ["assessment_date", "วันที่ประเมินกองรถ"],
+  ["warehouse_plan_date", "คาดการณ์วันเข้าคลัง"],
+  ["car_brand", "จัดสรรยี่ห้อรถ"],
+  ["supplier_alloc", "จัดสรรผู้ผลิต"],
+  ["car_model", "จัดสรรรุ่นรถ"],
+  ["car_engine", "เลขเครื่อง"],
+  ["car_chassis", "เลข Chassis"],
+  ["car_license", "ทะเบียน"],
+  ...EXCEL_MEMOS.flatMap(([key, number, date]): Array<[string, string]> => [
+    [`number_${key}`, number], [`date_number_${key}`, date],
+  ]),
+  ...EXCEL_FLOW_NAMES.flatMap((name, index): Array<[string, string]> => [
+    [`flow_start_${index}`, `วันที่เริ่ม${name}`], [`flow_end_${index}`, `วันที่สิ้นสุด${name}`],
+  ]),
+  ["document_expired_date", "วันที่สิ้นสุดหนังสือหมดอายุ"],
+  ["document_cancelled_date", "วันที่ยกเลิกหนังสือ"],
+  ["remark", "Remark"],
+  ["unit_code", "unit_code"],
+];
+const EXCEL_FILE_EDITABLE_FIELDS = ["usage_date", "approved_truck_type", "approved_qty"] as const;
+const EXCEL_MAX_ROWS = 500;
+type ExcelField = typeof EXCEL_FIELDS[number];
+type WarehouseRecord = Record<string, unknown> & { id?: unknown; unit_code?: unknown };
+type ExcelVehicle = Partial<Omit<RequestItem, "warehouse_info" | "vehicle_info">> & {
+  warehouse_info?: WarehouseRecord | null;
+  vehicle_info?: WarehouseRecord | null;
+  dc_name?: string;
+  vendor_short_name?: string;
+  assessment_remark?: string;
+  assessment_status?: string;
+  assessment_date?: string;
+};
+
+function excelMessage(error: unknown) {
+  return error instanceof Error ? error.message : "กรุณาลองใหม่อีกครั้ง";
+}
+
+async function excelApi<T extends { status?: string; message?: string }>(url: string): Promise<T> {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => {
+    throw new Error("โหลดรายการรถเพื่อส่งออกไม่ได้ กรุณาตรวจสอบการเชื่อมต่อ track_fleet_get.php");
+  });
+  let result: T;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(`API ไม่ได้ส่งข้อมูลที่อ่านได้ (${response.status})`);
+  }
+  if (!response.ok || result?.status !== "success") {
+    throw new Error(result?.message || `ดำเนินการไม่สำเร็จ (${response.status})`);
+  }
+  return result;
+}
+
+async function getExcelVehicles(url: URL) {
+  const vehicles: ExcelVehicle[] = [];
+  url.searchParams.set("group_mode", "incoming");
+  url.searchParams.set("limit", "100");
+  for (let page = 1; ; page += 1) {
+    url.searchParams.set("page", String(page));
+    const result = await excelApi<{ status?: string; message?: string; data?: ExcelVehicle[]; pagination?: { total_pages?: number; page?: number } }>(url.toString());
+    if (!Array.isArray(result.data)) throw new Error("API ไม่ได้ส่งรายการรถ");
+    if (Number(result.pagination?.page ?? page) !== page) throw new Error("รายการรถเปลี่ยนระหว่างโหลด กรุณาลองอีกครั้ง");
+    vehicles.push(...result.data);
+    if (vehicles.length > EXCEL_MAX_ROWS) throw new Error("กรุณาเพิ่มตัวกรองให้เหลือไม่เกิน 500 คันก่อนส่งออก");
+    if (page >= Number(result.pagination?.total_pages || 1)) return vehicles;
+  }
+}
+
+function exactWarehouse(vehicle: ExcelVehicle) {
+  const code = textValue(vehicle.unit_code);
+  const warehouse = vehicle.warehouse_info;
+  return code && textValue(vehicle.request_id) && warehouse && textValue(warehouse.id)
+    && textValue(warehouse.unit_code) === code ? warehouse : null;
+}
+
+function indexExcelVehicles(vehicles: ExcelVehicle[]) {
+  const index = new Map<string, ExcelVehicle | null>();
+  for (const vehicle of vehicles) {
+    const code = textValue(vehicle.unit_code);
+    const lookup = code.toUpperCase();
+    if (code) index.set(lookup, index.has(lookup) ? null : vehicle);
+  }
+  return index;
+}
+
+function warehouseValue(field: ExcelField, value: unknown) {
+  const text = String(value ?? "");
+  return field === "warehouse_plan_date" ? text.split(/[T ]/)[0] : text;
+}
+
+function excelReportValues(vehicle: ExcelVehicle, warehouse: WarehouseRecord | null, sequence: number) {
+  const dateOnly = (value: unknown) => textValue(value).split(/[T ]/)[0];
+  const oldLicenses = vehicle.replaced_old_licenses ?? vehicle.license_replace;
+  const status = textValue(vehicle.status);
+  const values: Record<string, unknown> = {
+    sequence,
+    request_date: dateOnly(vehicle.request_date || vehicle.date),
+    fleet_type: vehicle.fleet_type,
+    status: status === "progress" ? "คำขอรอพิจารณา (TCAS)" : status,
+    running_doc: vehicle.running_doc,
+    dc_type: vehicle.dc_type,
+    dc_name: vehicle.dc_name || vehicle.dc_code,
+    fleet_truck_type: vehicle.fleet_truck_type,
+    qty: vehicle.qty,
+    replaced_old_licenses: Array.isArray(oldLicenses) ? oldLicenses.join(", ") : oldLicenses,
+    vendor_short_name: vehicle.vendor_short_name,
+    new_vendor_id: vehicle.new_vendor_id,
+    new_vendor_name: vehicle.new_vendor_name,
+    replaced_truck_types: Array.from(new Set(vehicle.details?.map(detail => detail.truck_type_replace).filter(Boolean))).join(", "),
+    replaced_companies: Array.from(new Set(vehicle.details?.map(detail => detail.company_name_replace).filter(Boolean))).join(", "),
+    assessment_remark: vehicle.assessment_remark,
+    assessment_status: vehicle.assessment_status,
+    assessment_date: dateOnly(vehicle.assessment_date),
+    unit_code: textValue(vehicle.unit_code),
+  };
+
+  for (const field of EXCEL_FIELDS) {
+    const reportedValue = field === "remark" ? undefined : vehicle[field as keyof ExcelVehicle];
+    values[field] = warehouseValue(field, warehouse?.[field] ?? vehicle.vehicle_info?.[field] ?? reportedValue);
+  }
+  for (const [key] of EXCEL_MEMOS) {
+    const storedKey = key === "fbp" ? "feb" : key;
+    values[`number_${key}`] = warehouse?.[`number_${key}`] ?? warehouse?.[`number_${storedKey}`];
+    values[`date_number_${key}`] = dateOnly(warehouse?.[`date_number_${key}`] ?? warehouse?.[`date_number_${storedKey}`]);
+  }
+  const process = textValue(vehicle.latest_process_name);
+  const index = EXCEL_FLOW_NAMES.indexOf(process);
+  const start = dateOnly(vehicle.latest_process_str_date);
+  const end = dateOnly(vehicle.latest_process_end_date);
+  if (index !== -1) {
+    values[`flow_start_${index}`] = start;
+    values[`flow_end_${index}`] = end;
+  }
+  const level = Number(vehicle.latest_process_level);
+  if (level === 9) values.document_cancelled_date = end || start;
+  if (level === 10) values.document_expired_date = end;
+  return values;
+}
+
+type TcasExcelField = typeof EXCEL_FILE_EDITABLE_FIELDS[number];
+type TcasExcelValue = string | number | null;
+type TcasExcelValues = Record<TcasExcelField, TcasExcelValue>;
+type TcasExcelChange = { unit_code: string; changes: Partial<Record<TcasExcelField, { before: TcasExcelValue; after: string | number }>> };
+type TcasExcelReply = {
+  status?: string;
+  message?: string;
+  issues?: string[];
+  data?: { unit_code: string; values: TcasExcelValues }[];
+  updated?: number;
+};
+const TCAS_EXCEL_BASELINE = "_tcas_excel_original_v1";
+const TCAS_EXCEL_API = "/api/tcas-excel";
+
+class TcasExcelApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+async function tcasExcelApi(fleetGroup: FleetGroup, warehouse: string, action: "read" | "save", rows: ({ unit_code: string } | TcasExcelChange)[]) {
+  const result = await fetch(TCAS_EXCEL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, fleet_group: fleetGroup, warehouse, rows }),
+  }).catch(() => {
+    throw new TcasExcelApiError("หน้าเว็บติดต่อเซิร์ฟเวอร์ Excel ไม่ได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่", 0);
+  });
+  if (result.status === 404) {
+    throw new TcasExcelApiError("ไม่พบ API ของหน้าเว็บ กรุณาตรวจสอบเส้นทาง /api/tcas-excel", 404);
+  }
+  const payload: TcasExcelReply = await result.json().catch(() => ({}));
+  if (!result.ok || payload.status !== "success") {
+    const reason = payload.message || `เชื่อมต่อ API สำหรับ Excel ไม่สำเร็จ (${result.status})`;
+    throw new TcasExcelApiError([reason, ...(payload.issues || [])].join("\n"), result.status);
+  }
+  return payload;
+}
+
+function tcasExcelValue(value: import("exceljs").CellValue, field: TcasExcelField): TcasExcelValue {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  if (field === "approved_qty") {
+    const qty = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(qty) || qty < 0 || qty > 2147483647) throw new Error("จำนวนรถที่อนุมัติต้องเป็นจำนวนเต็มตั้งแต่ 0");
+    return qty;
+  }
+  if (field === "usage_date") {
+    let dateText = value instanceof Date && Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10)
+      : typeof value === "string" ? value.trim() : "";
+    const local = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(dateText);
+    if (local) {
+      const year = Number(local[3]);
+      dateText = `${year >= 2400 ? year - 543 : year}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}`;
+    }
+    const date = new Date(`${dateText}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== dateText) {
+      throw new Error("กรุณากรอกวันที่ใช้งานเป็นวันที่จริง เช่น 2026-11-09");
+    }
+    return dateText;
+  }
+  if (typeof value !== "string" || value.trim().length > 100 || /[\x00-\x1F\x7F]/.test(value.trim())) {
+    throw new Error("กรุณากรอกประเภทรถที่อนุมัติเป็นข้อความไม่เกิน 100 ตัวอักษร");
+  }
+  return value.trim();
+}
+
+type TcasExportRequest = {
+  id?: number | string;
+  dc_code?: string;
+  status?: string;
+  usage_date?: string | null;
+  approved_truck_type?: string | null;
+  approved_qty?: number | string | null;
+};
+
+async function readTcasExportRequests(vehicles: ExcelVehicle[]) {
+  const requestIds = Array.from(new Set(vehicles.map(vehicle => textValue(vehicle.request_id))));
+  if (requestIds.some(id => !/^[1-9]\d*$/.test(id))) {
+    throw new Error("ไม่พบรหัสคำขอของรถบางคัน กรุณารีเฟรชหน้า TCAS แล้วลองใหม่");
+  }
+  const requests = new Map<string, TcasExportRequest>();
+  for (let i = 0; i < requestIds.length; i += 6) {
+    await Promise.all(requestIds.slice(i, i + 6).map(async id => {
+      const url = new URL("request_get_export.php", API_BASE);
+      url.searchParams.set("id", id);
+      const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15000) }).catch(() => {
+        throw new Error("ติดต่อ request_get_export.php เพื่อดาวน์โหลดข้อมูลไม่ได้");
+      });
+      const payload: { status?: string; message?: string; data?: TcasExportRequest } =
+        await response.json().catch(() => ({}));
+      const request = payload.data;
+      if (!response.ok || payload.status !== "success" || !request || textValue(request.id) !== id) {
+        throw new Error(payload.message || `อ่านข้อมูลคำขอ ${id} จาก request_get_export.php ไม่สำเร็จ (${response.status})`);
+      }
+      requests.set(id, request);
+    }));
+  }
+
+  const originals = new Map<string, TcasExcelValues>();
+  const issues: string[] = [];
+  for (const vehicle of vehicles) {
+    const code = textValue(vehicle.unit_code);
+    const request = requests.get(textValue(vehicle.request_id));
+    if (!request || textValue(request.status).toLowerCase() !== "progress"
+      || textValue(request.dc_code).toUpperCase() !== textValue(vehicle.dc_code).toUpperCase()) {
+      issues.push(`${code}: สถานะหรือคลังเปลี่ยนแล้ว กรุณารีเฟรชหน้า TCAS`);
+      continue;
+    }
+    originals.set(code, {
+      usage_date: tcasExcelValue(textValue(request.usage_date).split(/[T ]/)[0], "usage_date"),
+      approved_truck_type: tcasExcelValue(request.approved_truck_type, "approved_truck_type"),
+      approved_qty: tcasExcelValue(request.approved_qty, "approved_qty"),
+    });
+  }
+  return { originals, issues };
+}
+
+async function readTcasExcel(buffer: ArrayBuffer) {
+  const { Workbook } = await import("exceljs");
+  const workbook = new Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.getWorksheet("ข้อมูลปัจจุบัน");
+  const baseline = workbook.getWorksheet(TCAS_EXCEL_BASELINE);
+  if (!sheet || !baseline) throw new Error("กรุณาดาวน์โหลด Excel จากหน้า TCAS อีกครั้ง แล้วใช้ไฟล์นั้นกรอกข้อมูล");
+  if (sheet.actualRowCount > EXCEL_MAX_ROWS + 1 || baseline.actualRowCount > EXCEL_MAX_ROWS + 1) {
+    throw new Error("รองรับไฟล์ไม่เกิน 500 แถว");
+  }
+  const allowed = new Map<string, string>(EXCEL_REPORT_COLUMNS.filter(([key]) =>
+    key === "unit_code" || EXCEL_FILE_EDITABLE_FIELDS.some(field => field === key),
+  ).map(([key, title]) => [title, key]));
+  const columns = new Map<string, number>();
+  sheet.getRow(1).eachCell((cell, index) => {
+    const field = allowed.get(textValue(cell.value));
+    if (!field) return;
+    if (columns.has(field)) throw new Error("พบหัวคอลัมน์ซ้ำในไฟล์");
+    columns.set(field, index);
+  });
+  if (columns.size !== 4) throw new Error("หัวคอลัมน์ไม่ครบ กรุณาดาวน์โหลดไฟล์ใหม่");
+  const originals = new Map<string, TcasExcelValues>();
+  baseline.eachRow((row, index) => {
+    if (index === 1) return;
+    const code = row.getCell(1).value;
+    if (typeof code !== "string" || !code || originals.has(code)) throw new Error("ข้อมูลอ้างอิงในไฟล์ไม่ถูกต้อง");
+    originals.set(code, {
+      usage_date: tcasExcelValue(row.getCell(2).value, "usage_date"),
+      approved_truck_type: tcasExcelValue(row.getCell(3).value, "approved_truck_type"),
+      approved_qty: tcasExcelValue(row.getCell(4).value, "approved_qty"),
+    });
+  });
+  const seen = new Set<string>();
+  const changes: TcasExcelChange[] = [];
+  sheet.eachRow((row, index) => {
+    if (index === 1) return;
+    try {
+      const code = row.getCell(columns.get("unit_code")!).value;
+      const original = typeof code === "string" ? originals.get(code) : undefined;
+      if (typeof code !== "string" || !original || seen.has(code)) throw new Error("unit_code ไม่ตรงกับไฟล์ต้นฉบับหรือซ้ำกัน");
+      seen.add(code);
+      const change: TcasExcelChange = { unit_code: code, changes: {} };
+      for (const field of EXCEL_FILE_EDITABLE_FIELDS) {
+        const after = tcasExcelValue(row.getCell(columns.get(field)!).value, field);
+        if (after !== null && after !== original[field]) change.changes[field] = { before: original[field], after };
+      }
+      if (Object.keys(change.changes).length) changes.push(change);
+    } catch (error) {
+      throw new Error(`แถว ${index} · ${excelMessage(error)}`);
+    }
+  });
+  return changes;
+}
+
+async function makeExcelWorkbook(vehicles: ExcelVehicle[], originals: Map<string, TcasExcelValues>) {
+  const { Workbook } = await import("exceljs");
+  const workbook = new Workbook();
+  const sheet = workbook.addWorksheet("ข้อมูลปัจจุบัน");
+  const baseline = workbook.addWorksheet(TCAS_EXCEL_BASELINE);
+  baseline.state = "veryHidden";
+  baseline.addRow(["unit_code", ...EXCEL_FILE_EDITABLE_FIELDS]);
+  sheet.columns = EXCEL_REPORT_COLUMNS.map(([field, header]) => ({
+    header, key: field, width: field === "sequence" ? 9 : Math.min(36, Math.max(18, header.length)),
+    style: { numFmt: "@" },
+  }));
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.getRow(1).height = 34;
+  sheet.getRow(1).alignment = { wrapText: true, vertical: "middle" };
+  sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } };
+  for (const field of EXCEL_FILE_EDITABLE_FIELDS) {
+    sheet.getRow(1).getCell(field).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF047857" } };
+  }
+
+  let included = 0;
+  for (const vehicle of indexExcelVehicles(vehicles).values()) {
+    if (!vehicle) continue;
+    const code = textValue(vehicle.unit_code);
+    const original = originals.get(code);
+    if (!original) continue;
+    const row = sheet.addRow({ ...excelReportValues(vehicle, exactWarehouse(vehicle), included + 1), ...original });
+    baseline.addRow([code, ...EXCEL_FILE_EDITABLE_FIELDS.map(field => original[field])]);
+    for (const field of EXCEL_FILE_EDITABLE_FIELDS) {
+      row.getCell(field).protection = { locked: false };
+    }
+    included += 1;
+  }
+  if (!included) throw new Error(vehicles.length
+    ? "ไม่มีรถ TCAS ที่ส่งออกเพื่อแก้ไขได้ กรุณาตรวจสอบรหัสรถและสิทธิ์ของคลัง"
+    : "ไม่มีรถตรงกับตัวกรองที่เลือกสำหรับส่งออก");
+
+  const password = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+  await sheet.protect(password, { selectLockedCells: true, selectUnlockedCells: true });
+  return { workbook, included };
+}
+
 const formatNumber = (value: number | string | null | undefined) => {
   if (value == null || value === "") return "-";
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("th-TH") : String(value);
@@ -301,12 +700,17 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
   const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
   const [openExportModal, setOpenExportModal] = useState(false);
   const [exportApiUrl, setExportApiUrl] = useState("");
+  const [excelBusy, setExcelBusy] = useState<"export" | "import" | null>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
+  const [excelResult, setExcelResult] = useState<{ summary: string; issues: string[] } | null>(null);
+  const excelBusyRef = useRef(false);
   const [showSystemUpdateModal, setShowSystemUpdateModal] = useState(true);
   const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ fleet_types: [], truck_types: [], dc_types: [], dc_codes: [], process_options: [] });
   const [pagination, setPagination] = useState<Pagination>({ total_vehicles: 0, total_records: 0, total_documents: null, page: 1, limit: 20, total_pages: 1 });
   const [requestDateRange, setRequestDateRange] = useState([{ startDate: new Date(), endDate: new Date(), key: "selection" }]);
   const [hasRequestDateRange, setHasRequestDateRange] = useState(false);
+  const [requestDateOptions, setRequestDateOptions] = useState<RequestDateOptions | null>(null);
   const [showRequestDatePicker, setShowRequestDatePicker] = useState(false);
   const [requestDatePickerPosition, setRequestDatePickerPosition] = useState({ top: 0, left: 0 });
   const requestDateButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -325,6 +729,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
         const saved = localStorage.getItem("selected_dc");
         setSelectedDC(saved ? JSON.parse(saved) : null);
       } catch { setSelectedDC(null); }
+      setRequestDateOptions(null);
+      setHasRequestDateRange(false);
       setCurrentPage(1);
     };
     loadSelectedDC();
@@ -375,6 +781,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       if (hasRequestDateRange) {
         params.set("start_date", dateKey(requestDateRange[0].startDate));
         params.set("end_date", dateKey(requestDateRange[0].endDate));
+      } else {
+        params.set("request_date_scope", "all");
       }
       const url = `${API_BASE}?${params}`;
       const response = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
@@ -382,6 +790,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       const json = await response.json();
       if (sequence !== sequenceRef.current || controller.signal.aborted) return;
       if (json.status !== "success") throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูล");
+      setRequestDateOptions(json.request_date_options ?? null);
       const data = Array.isArray(json.data) ? json.data : [];
       // รับได้ทั้ง API ใหม่แบบเอกสารและ API เดิมแบบรายคัน
       const vehicles: RequestItem[] = data.flatMap((item: RequestItem | { vehicles: RequestItem[] }) =>
@@ -414,6 +823,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       if (controller.signal.aborted && !timedOut) return;
       setError(timedOut ? "ใช้เวลาโหลดข้อมูลนานเกินไป กรุณาลองรีเฟรชอีกครั้ง" : err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการดึงข้อมูล");
       setRequests([]);
+      setExportApiUrl("");
+      setSummary(EMPTY_SUMMARY);
     } finally {
       clearTimeout(timeout);
       if (sequence === sequenceRef.current) setLoading(false);
@@ -483,7 +894,9 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     return statusFilter === "all" || (statusFilter === "success" ? step === 8 : statusFilter === "cancel" ? step === 9 || step === 10 : step >= 0 && step < 8);
   }), [filterOptions.process_options, statusFilter]);
   const pageTitle = `รายการติดตามกอง${fleetGroupLabel}${dcFilter !== "all" ? ` ของ ${dcFilter}` : activeWarehouse && !isCenterUser ? ` ของ ${activeWarehouse}` : ""}`;
-  const rangeLabel = hasRequestDateRange ? `${formatThaiDate(dateKey(requestDateRange[0].startDate))} - ${formatThaiDate(dateKey(requestDateRange[0].endDate))}` : "เลือกช่วงวันที่ขอ";
+  const rangeLabel = hasRequestDateRange ? `${formatThaiDate(dateKey(requestDateRange[0].startDate))} - ${formatThaiDate(dateKey(requestDateRange[0].endDate))}` : "ทุกวันที่ขอ";
+  const firstRequestDate = requestDateOptions?.first_date ? new Date(`${requestDateOptions.first_date}T00:00:00`) : null;
+  const lastRequestDate = requestDateOptions?.last_date ? new Date(`${requestDateOptions.last_date}T00:00:00`) : null;
   const handleOpenDocument = (document: DocumentGroup) => {
     const requestIds = Array.from(new Set(
       document.vehicles
@@ -565,6 +978,78 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
   };
 
 
+  const showExcelTools = statusFilter === "progress";
+  const canExportFleetExcel = showExcelTools && Boolean(activeWarehouse) && !loading && Boolean(
+    exportApiUrl && new URL(exportApiUrl).searchParams.get("status") === statusFilter,
+  );
+
+  async function exportFleetExcel() {
+    if (!canExportFleetExcel || excelBusyRef.current) return;
+    excelBusyRef.current = true;
+    setExcelBusy("export");
+    setExcelResult(null);
+    try {
+      const vehicles = await getExcelVehicles(new URL(exportApiUrl));
+      if (!vehicles.length) throw new Error("ไม่มีรถตรงกับตัวกรองที่เลือกสำหรับส่งออก");
+      const eligible = Array.from(indexExcelVehicles(vehicles).values()).filter(vehicle => vehicle !== null);
+      if (!eligible.length) throw new Error("ไม่พบ unit_code ที่ไม่ซ้ำสำหรับส่งออก");
+      let originals: Map<string, TcasExcelValues>;
+      const issues: string[] = [];
+      try {
+        const codes = eligible.map(vehicle => ({ unit_code: textValue(vehicle.unit_code) }));
+        const result = await tcasExcelApi(fleetGroup, activeWarehouse, "read", codes);
+        originals = new Map((result.data || []).map(row => [row.unit_code, row.values]));
+        issues.push(...(result.issues || []));
+      } catch (error) {
+        if (!(error instanceof TcasExcelApiError) || ![0, 404, 502, 503, 504].includes(error.status)) throw error;
+        const report = await readTcasExportRequests(eligible);
+        originals = report.originals;
+        issues.push(...report.issues);
+        issues.push("ดาวน์โหลดจาก API รายงานเดิม การอัปโหลดกลับยังต้องเชื่อมต่อ API บันทึกของ TCAS");
+      }
+      const { workbook, included } = await makeExcelWorkbook(vehicles, originals);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([new Uint8Array(buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `track-fleet-${fleetGroup}-${dateKey(new Date())}.xlsx`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (vehicles.length > eligible.length) issues.push(`ข้าม ${vehicles.length - eligible.length} คันที่ไม่มี unit_code หรือรหัสซ้ำ`);
+      setExcelResult({ summary: `ส่งออก Excel แล้ว ${included} คัน`, issues });
+    } catch (error) {
+      setExcelResult({ summary: "ส่งออก Excel ไม่สำเร็จ", issues: [excelMessage(error)] });
+    } finally {
+      excelBusyRef.current = false;
+      setExcelBusy(null);
+    }
+  }
+
+  async function importFleetExcel(file: File) {
+    if (!showExcelTools || !activeWarehouse || excelBusyRef.current) return;
+    excelBusyRef.current = true;
+    setExcelBusy("import");
+    setExcelResult(null);
+    try {
+      if (!/\.xlsx$/i.test(file.name) || file.size > 5 * 1024 * 1024) throw new Error("กรุณาเลือกไฟล์ .xlsx ขนาดไม่เกิน 5 MB");
+      const rows = await readTcasExcel(await file.arrayBuffer());
+      if (!rows.length) {
+        setExcelResult({ summary: "ไม่มีค่าที่เปลี่ยนในสามคอลัมน์สีเขียว", issues: [] });
+        return;
+      }
+      if (!window.confirm(`พบการแก้ไข ${rows.length} แถว ต้องการบันทึกข้อมูลจาก Excel หรือไม่?`)) return;
+      const result = await tcasExcelApi(fleetGroup, activeWarehouse, "save", rows);
+      setExcelResult({ summary: `บันทึกแล้ว ${result.updated ?? 0} คำขอ`, issues: [] });
+      void fetchRequests();
+    } catch (error) {
+      setExcelResult({ summary: "นำเข้า Excel ไม่สำเร็จ", issues: excelMessage(error).split("\n") });
+    } finally {
+      excelBusyRef.current = false;
+      setExcelBusy(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <main className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-4 lg:px-5">
@@ -574,7 +1059,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
             <h1 className="mt-2 flex items-center gap-2 text-base font-semibold text-slate-900 sm:text-lg"><Truck size={22} className="text-blue-600" />ติดตามกอง{fleetGroupLabel}</h1>
             <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600"><Warehouse size={12} />{selectedDcLabel}</span>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={16} />ดึงรายงาน</button>
             <button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button>
           </div>
@@ -741,7 +1226,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                         : "bg-white/80 text-slate-400 shadow-sm"
                         }`}
                     >
-                      {formatNumber(itemCount)} รายการ
+                      {formatNumber(itemCount)} เอกสาร
                     </span> */}
                   </div>
                 </button>
@@ -837,8 +1322,29 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
             <div><h2 className="text-xs font-semibold">{pageTitle}</h2><p className="mt-1 text-[11px] text-slate-400">แสดง {groupedDocuments.length} เอกสาร จากข้อมูลรถ {visibleRequests.length} คันในหน้านี้</p></div>
-            <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] text-blue-600">เลขเอกสารเดียวกันรวมในแถวเดียว · ค่าที่เหมือนกันแสดงครั้งเดียว · ประเมินตามเอกสาร</span>
+            {showExcelTools && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-800">รายงาน Excel</h3>
+                <p className="mt-1 text-[11px] text-slate-600">แก้เฉพาะสามคอลัมน์หัวสีเขียว แล้วอัปโหลดกลับเพื่อบันทึก</p>
+              </div>
+              <input ref={excelInputRef} type="file" accept=".xlsx" className="hidden" onChange={event => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void importFleetExcel(file);
+              }} />
+              {/* <button type="button" disabled={Boolean(excelBusy) || !canExportFleetExcel} onClick={() => void exportFleetExcel()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Download size={16} />{excelBusy === "export" ? "กำลังเตรียมไฟล์…" : "1. ดาวน์โหลด Excel"}</button>
+              <button type="button" disabled={Boolean(excelBusy) || !activeWarehouse} onClick={() => excelInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Upload size={16} />{excelBusy === "import" ? "กำลังบันทึก…" : "2. อัปโหลดไฟล์ที่แก้แล้ว"}</button> */}
+            </div>}
           </div>
+          {showExcelTools && excelResult && <section aria-label="ผลการทำงาน Excel" className="border-b border-slate-100 bg-white px-4 py-3 text-xs">
+            <div className="flex items-start justify-between gap-3">
+              <p role="status" className="font-semibold text-slate-800">{excelResult.summary}</p>
+              <button type="button" aria-label="ปิดผลการทำงาน Excel" onClick={() => setExcelResult(null)}><X size={16} /></button>
+            </div>
+            {excelResult.issues.length > 0 && <ul className="mt-2 max-h-40 list-inside list-disc space-y-1 overflow-auto text-amber-800">
+              {excelResult.issues.map((issue, index) => <li key={index}>{issue}</li>)}
+            </ul>}
+          </section>}
           {pagination.total_documents == null && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-[11px] leading-5 text-amber-800">API ปัจจุบันแบ่งหน้าตามรถ จึงรวมเอกสารเฉพาะรถที่อยู่ในหน้านี้ หากต้องการให้รถของเอกสารเดียวกันอยู่ด้วยกันครบทุกคัน ต้องปรับ API ให้แบ่งหน้าตามเลขเอกสาร</p>}
           {visibleRequests.some((vehicle) => vehicle.matches_filters === false) && <p className="border-b border-blue-100 bg-blue-50 px-4 py-2 text-[11px] leading-5 text-blue-700">แสดงรถครบทุกคันของเอกสารที่ตรงเงื่อนไข จึงอาจมีรถบางคันที่ไม่ตรงตัวกรองอยู่ในเอกสารเดียวกัน</p>}
           <div className="bg-blue-50 px-3 py-1.5 text-[11px] text-blue-500 sm:hidden">เลื่อนซ้าย–ขวาเพื่อดูข้อมูลทั้งหมด →</div>
@@ -922,7 +1428,56 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
 
       {portalTarget && showRequestDatePicker && createPortal(<div ref={requestDatePickerRef} className="fixed z-[100001] max-h-[calc(100dvh-32px)] w-[calc(100vw-2rem)] max-w-[330px] overflow-auto rounded-2xl border border-blue-100 bg-white shadow-2xl [&_.rdrCalendarWrapper]:w-full [&_.rdrMonth]:w-full [&_.rdrMonth]:px-2" style={requestDatePickerPosition}>
         <div className="flex items-center justify-between bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700"><span>เลือกช่วงวันที่ขอ</span><button type="button" onClick={clearDates}>ล้าง</button></div>
-        <DateRange locale={th} editableDateInputs={false} moveRangeOnFirstSelection={false} ranges={requestDateRange} onChange={(item: RangeKeyDict) => { const selection = item.selection; if (!selection) return; setRequestDateRange([{ startDate: selection.startDate || new Date(), endDate: selection.endDate || selection.startDate || new Date(), key: "selection" }]); if (selection.startDate && selection.endDate) { setHasRequestDateRange(true); setCurrentPage(1); } }} showDateDisplay={false} showPreview={false} maxDate={new Date()} rangeColors={["#2563eb"]} />
+        {firstRequestDate && lastRequestDate && requestDateOptions?.years.length ? (
+          <DateRange
+            locale={th}
+            editableDateInputs={false}
+            moveRangeOnFirstSelection={false}
+            ranges={hasRequestDateRange ? requestDateRange : [{ key: "selection" }]}
+            shownDate={lastRequestDate}
+            minDate={firstRequestDate}
+            maxDate={lastRequestDate}
+            navigatorRenderer={(focusedDate, changeShownDate) => {
+              const year = focusedDate.getFullYear();
+              const month = focusedDate.getMonth();
+              const firstMonth = year === firstRequestDate.getFullYear() ? firstRequestDate.getMonth() : 0;
+              const lastMonth = year === lastRequestDate.getFullYear() ? lastRequestDate.getMonth() : 11;
+              return (
+                <div className="flex justify-center gap-2 px-3 py-2 text-xs">
+                  <select aria-label="เลือกเดือน" className="rounded-lg border border-slate-200 px-2 py-1"
+                    value={month} onChange={(event) => changeShownDate(Number(event.target.value) - month, "monthOffset")}>
+                    {Array.from({ length: lastMonth - firstMonth + 1 }, (_, offset) => {
+                      const value = firstMonth + offset;
+                      return <option key={value} value={value}>{new Date(year, value, 1).toLocaleString("th-TH", { month: "long" })}</option>;
+                    })}
+                  </select>
+                  <select aria-label="เลือกปี" className="rounded-lg border border-slate-200 px-2 py-1"
+                    value={year} onChange={(event) => {
+                      const nextYear = Number(event.target.value);
+                      const minMonth = nextYear === firstRequestDate.getFullYear() ? firstRequestDate.getMonth() : 0;
+                      const maxMonth = nextYear === lastRequestDate.getFullYear() ? lastRequestDate.getMonth() : 11;
+                      const nextMonth = Math.min(maxMonth, Math.max(minMonth, month));
+                      changeShownDate((nextYear - year) * 12 + nextMonth - month, "monthOffset");
+                    }}>
+                    {requestDateOptions.years.map((value) => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </div>
+              );
+            }}
+            onChange={(item: RangeKeyDict) => {
+              const { startDate, endDate } = item.selection || {};
+              if (!startDate || !endDate) return;
+              setRequestDateRange([{ startDate, endDate, key: "selection" }]);
+              setHasRequestDateRange(true);
+              setCurrentPage(1);
+            }}
+            showDateDisplay={false}
+            showPreview={false}
+            rangeColors={["#2563eb"]}
+          />
+        ) : (
+          <p className="px-4 py-3 text-xs text-slate-500">{loading ? "กำลังโหลดช่วงวันที่…" : requestDateOptions ? "ไม่มีข้อมูลวันที่ขอในกลุ่มนี้" : "โหลดช่วงวันที่ไม่ได้ กรุณารีเฟรช"}</p>
+        )}
         <div className="flex items-center justify-between gap-2 px-4 py-3"><span className="text-[10px] text-blue-600">{rangeLabel}</span><button type="button" onClick={() => setShowRequestDatePicker(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] text-white">เสร็จสิ้น</button></div>
       </div>, portalTarget)}
 
