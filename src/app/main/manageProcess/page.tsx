@@ -1021,8 +1021,21 @@ export default function FleetFlowPage() {
     return (
         <main className="fleet-flow-page min-h-screen w-full min-w-0 max-w-full bg-slate-50 text-[11px] text-slate-800">
             <style>{`
+                .fleet-flow-page .flow-layout {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr);
+                }
                 @media (min-width: 1024px) {
+                    .fleet-flow-page .flow-layout {
+                        grid-template-columns: 200px minmax(0, 1fr);
+                        grid-template-areas: "filter content";
+                    }
+                    .fleet-flow-page .flow-content {
+                        grid-area: content;
+                    }
                     .fleet-flow-page .flow-type-filter {
+                        grid-area: filter;
+                        position: sticky;
                         display: flex;
                         flex-direction: column;
                         max-height: calc(100dvh - ${stickyHeaderHeight + 24}px);
@@ -1126,8 +1139,8 @@ export default function FleetFlowPage() {
                     </div>
                 </header>
 
-                <div className="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-                    <aside className="flow-type-filter min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_-10px_rgba(15,23,42,0.16)] lg:sticky  lg:col-start-2 lg:row-start-1" style={{ top: stickyHeaderHeight + 12 }}>
+                <div className="flow-layout min-w-0 items-start gap-4">
+                    <aside className="flow-type-filter min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_-10px_rgba(15,23,42,0.16)]" style={{ top: stickyHeaderHeight + 12 }}>
                         <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3.5">
                             <h2 className="text-[11px] font-semibold text-slate-600">
                                 กรองข้อมูลตามประเภทรถ
@@ -1193,7 +1206,7 @@ export default function FleetFlowPage() {
                         </p>
                     </aside>
 
-                    <div className="w-full min-w-0 max-w-full space-y-4 lg:col-start-1 lg:row-start-1">
+                    <div className="flow-content w-full min-w-0 max-w-full space-y-4">
                         <div className="sticky z-20 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-3 text-[11px] shadow-[0_2px_10px_-6px_rgba(15,23,42,0.12)]" style={{ top: stickyHeaderHeight + 12 }}>
                             <p className="min-w-0 text-slate-500 [overflow-wrap:anywhere]">
                                 ประเภทที่แสดง{" "}
