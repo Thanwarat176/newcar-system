@@ -561,74 +561,74 @@ type HistorySupplier = { id: string; code: string; name: string };
 type HistoryRow = { history_id: string | number; rating: string; updated_at: string; update_by: string | null };
 
 function RatingHistoryModal({ supplier, onClose }: { supplier: HistorySupplier; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const [rows, setRows] = useState<HistoryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
+    const dialogRef = useRef<HTMLDialogElement>(null);
+    const [rows, setRows] = useState<HistoryRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [retry, setRetry] = useState(0);
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    const dialog = dialogRef.current;
-    dialog?.showModal();
-    return () => {
-      dialog?.close();
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-    };
-  }, []);
+    useEffect(() => {
+        const previous = document.activeElement;
+        const dialog = dialogRef.current;
+        dialog?.showModal();
+        return () => {
+            dialog?.close();
+            if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+        };
+    }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true); setError(""); setRows([]);
-    void (async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE}/rate_supplier.php?id=${encodeURIComponent(supplier.id)}&history=1`,
-          { cache: "no-store", signal: controller.signal }
-        );
-        const result = await response.json();
-        if (!response.ok || result?.success !== true) throw new Error(result?.message || "โหลดประวัติไม่สำเร็จ");
-        if (!Array.isArray(result.data)) throw new Error("API ยังไม่รองรับประวัติ กรุณาอัปเดต rate_supplier.php");
-        const valid = result.data.every((row: unknown) =>
-          row !== null && typeof row === "object" &&
-          "history_id" in row && "rating" in row && "updated_at" in row
-        );
-        if (!valid) throw new Error("รูปแบบข้อมูลประวัติไม่ถูกต้อง");
-        if (!controller.signal.aborted) setRows(result.data);
-      } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "โหลดประวัติไม่สำเร็จ");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, [supplier.id, retry]);
+    useEffect(() => {
+        const controller = new AbortController();
+        setLoading(true); setError(""); setRows([]);
+        void (async () => {
+            try {
+                const response = await fetch(
+                    `${API_BASE}/rate_supplier.php?id=${encodeURIComponent(supplier.id)}&history=1`,
+                    { cache: "no-store", signal: controller.signal }
+                );
+                const result = await response.json();
+                if (!response.ok || result?.success !== true) throw new Error(result?.message || "โหลดประวัติไม่สำเร็จ");
+                if (!Array.isArray(result.data)) throw new Error("API ยังไม่รองรับประวัติ กรุณาอัปเดต rate_supplier.php");
+                const valid = result.data.every((row: unknown) =>
+                    row !== null && typeof row === "object" &&
+                    "history_id" in row && "rating" in row && "updated_at" in row
+                );
+                if (!valid) throw new Error("รูปแบบข้อมูลประวัติไม่ถูกต้อง");
+                if (!controller.signal.aborted) setRows(result.data);
+            } catch (e) {
+                if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "โหลดประวัติไม่สำเร็จ");
+            } finally {
+                if (!controller.signal.aborted) setLoading(false);
+            }
+        })();
+        return () => controller.abort();
+    }, [supplier.id, retry]);
 
-  return (
-    <dialog ref={dialogRef} aria-labelledby="supplier-history-title"
-      onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
-      onKeyDown={event => event.stopPropagation()}
-      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
-      className="m-auto max-h-[85vh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/60">
-      <header className="flex items-start justify-between gap-3 border-b border-blue-100 bg-blue-50 p-5">
-        <div><h3 id="supplier-history-title" className="flex items-center gap-2 text-base font-bold"><History size={18} />ประวัติเกรดผู้ประกอบการ</h3>
-          <p className="mt-2 text-sm">{supplier.name}</p><p className="mt-1 text-xs text-slate-500">รหัสซับ: {supplier.code} · เรียงล่าสุดก่อน</p></div>
-        <button type="button" autoFocus onClick={onClose} aria-label="ปิดประวัติ" className="rounded-lg p-2 hover:bg-blue-100"><X size={20} /></button>
-      </header>
-      <div className="p-5">
-        {loading ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังโหลดประวัติ...</p> :
-          error ? <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}<button type="button" onClick={() => setRetry(value => value + 1)} className="ml-3 font-semibold underline">ลองอีกครั้ง</button></div> :
-          rows.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีประวัติการบันทึกเกรด</p> :
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">เกรด</th><th className="p-3">วันที่บันทึก</th><th className="p-3">ผู้บันทึก</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{rows.map((row, index) => {
-              const match = String(row.updated_at ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/);
-              const date = match ? `${match[3]}/${match[2]}/${match[1]} ${match[4] || ""}` : row.updated_at;
-              return <tr key={row.history_id}><td className="p-3"><span className="font-bold text-blue-700">{row.rating}</span>{index === 0 && <span className="ml-2 text-[10px] text-emerald-600">ล่าสุด</span>}</td><td className="whitespace-nowrap p-3 text-xs">{date || "ไม่ระบุ"}</td><td className="break-words p-3 text-xs">{row.update_by || "ไม่ระบุ"}</td></tr>;
-            })}</tbody></table></div>}
-      </div>
-      <footer className="flex justify-end border-t border-slate-100 p-4"><button type="button" onClick={onClose} className="rounded-xl bg-blue-700 px-5 py-2 text-sm font-semibold text-white">ปิดประวัติ</button></footer>
-    </dialog>
-  );
+    return (
+        <dialog ref={dialogRef} aria-labelledby="supplier-history-title"
+            onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}
+            onKeyDown={event => event.stopPropagation()}
+            onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+            className="m-auto max-h-[85vh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-950/60">
+            <header className="flex items-start justify-between gap-3 border-b border-blue-100 bg-blue-50 p-5">
+                <div><h3 id="supplier-history-title" className="flex items-center gap-2 text-base font-bold"><History size={18} />ประวัติเกรดผู้ประกอบการ</h3>
+                    <p className="mt-2 text-sm">{supplier.name}</p><p className="mt-1 text-xs text-slate-500">รหัสซับ: {supplier.code} · เรียงล่าสุดก่อน</p></div>
+                <button type="button" autoFocus onClick={onClose} aria-label="ปิดประวัติ" className="rounded-lg p-2 hover:bg-blue-100"><X size={20} /></button>
+            </header>
+            <div className="p-5">
+                {loading ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังโหลดประวัติ...</p> :
+                    error ? <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}<button type="button" onClick={() => setRetry(value => value + 1)} className="ml-3 font-semibold underline">ลองอีกครั้ง</button></div> :
+                        rows.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีประวัติการบันทึกเกรด</p> :
+                            <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">เกรด</th><th className="p-3">วันที่บันทึก</th><th className="p-3">ผู้บันทึก</th></tr></thead>
+                                <tbody className="divide-y divide-slate-100">{rows.map((row, index) => {
+                                    const match = String(row.updated_at ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/);
+                                    const date = match ? `${match[3]}/${match[2]}/${match[1]} ${match[4] || ""}` : row.updated_at;
+                                    return <tr key={row.history_id}><td className="p-3"><span className="font-bold text-blue-700">{row.rating}</span>{index === 0 && <span className="ml-2 text-[10px] text-emerald-600">ล่าสุด</span>}</td><td className="whitespace-nowrap p-3 text-xs">{date || "ไม่ระบุ"}</td><td className="break-words p-3 text-xs">{row.update_by || "ไม่ระบุ"}</td></tr>;
+                                })}</tbody></table></div>}
+            </div>
+            <footer className="flex justify-end border-t border-slate-100 p-4"><button type="button" onClick={onClose} className="rounded-xl bg-blue-700 px-5 py-2 text-sm font-semibold text-white">ปิดประวัติ</button></footer>
+        </dialog>
+    );
 }
 
 export default function FleetModalDetail({
@@ -1576,11 +1576,16 @@ export default function FleetModalDetail({
             0
         );
 
-    const savedApprovedQty = Math.max(
-        Number(data.approved_qty || 0), savedRowQty, allocationBalance?.approved ?? 0
-    );
-    const gmApprovedQty = allocationBalance?.gm ?? Number(data.approve_qty_gm ?? 0);
-    const savedRejectedQty = allocationBalance?.rejected ?? Number(data.not_approved_qty ?? 0);
+    const savedApprovedQty = isStandardReplacementType
+        ? savedRowQty
+        : allocationBalance?.approved ?? 0;
+
+    const gmApprovedQty =
+        allocationBalance?.gm ?? Number(data.approve_qty_gm ?? 0);
+
+    const savedRejectedQty = isStandardReplacementType
+        ? Number(data.not_approved_qty ?? 0)
+        : allocationBalance?.rejected ?? 0;
     const notApprovedQty = isStandardReplacementType ? 0 : batchRejectedQty;
     const remainingAllocationQty = gmApprovedQty - savedApprovedQty - savedRejectedQty - totalDraftQty - notApprovedQty;
     const activeDraftRows = draftRows.filter(row =>
@@ -2432,7 +2437,14 @@ export default function FleetModalDetail({
                                                 </span>
                                             </div>
                                             <span className="shrink-0 whitespace-nowrap text-lg font-bold tabular-nums text-black">
-                                                {formatNumber(item.value)}
+                                                {!isStandardReplacementType &&
+                                                    loadingBalance &&
+                                                    [
+                                                        "จำนวนที่ FBP สรรหาผู้ประกอบการและอนุมัติ",
+                                                        "จำนวนที่ FBP ไม่อนุมัติ",
+                                                    ].includes(item.label)
+                                                    ? "..."
+                                                    : formatNumber(item.value)}
                                                 <span className="ml-1 text-[11px] font-normal">
                                                     คัน
                                                 </span>
@@ -2971,8 +2983,8 @@ export default function FleetModalDetail({
                                                                             <label
                                                                                 key={license}
                                                                                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-2.5 ${selected
-                                                                                        ? "border-blue-200 bg-blue-50"
-                                                                                        : "border-transparent bg-white"
+                                                                                    ? "border-blue-200 bg-blue-50"
+                                                                                    : "border-transparent bg-white"
                                                                                     } ${usedByOther ||
                                                                                         rejected
                                                                                         ? "opacity-40"
@@ -3494,8 +3506,8 @@ export default function FleetModalDetail({
                                                         <label
                                                             key={`reject-${license}`}
                                                             className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${selected
-                                                                    ? "border-rose-200 bg-rose-50"
-                                                                    : "border-slate-200 bg-white"
+                                                                ? "border-rose-200 bg-rose-50"
+                                                                : "border-slate-200 bg-white"
                                                                 } ${approved
                                                                     ? "opacity-40"
                                                                     : "cursor-pointer"
@@ -3649,8 +3661,8 @@ export default function FleetModalDetail({
                     <div className="p-6">
                         <div
                             className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${message.type === "success"
-                                    ? "bg-emerald-50 text-emerald-600"
-                                    : "bg-rose-50 text-rose-600"
+                                ? "bg-emerald-50 text-emerald-600"
+                                : "bg-rose-50 text-rose-600"
                                 }`}
                         >
                             {message.type === "success" ? "✓" : "!"}
@@ -3741,8 +3753,8 @@ export default function FleetModalDetail({
                                     }
                                 }}
                                 className={`h-10 rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${confirmDecision === "approve"
-                                        ? "bg-blue-700"
-                                        : "bg-rose-600"
+                                    ? "bg-blue-700"
+                                    : "bg-rose-600"
                                     }`}
                             >
                                 {saving ? "กำลังบันทึก..." : "ยืนยัน"}

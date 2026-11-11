@@ -20,10 +20,13 @@ import XLSX from "xlsx-js-style";
 import { th } from "date-fns/locale";
 
 import {
+    AlertCircle,
     CalendarDays,
     CalendarRange,
     Download,
     FileSpreadsheet,
+    LoaderCircle,
+    Search,
     X,
 } from "lucide-react";
 
@@ -46,17 +49,28 @@ interface FlowDates {
     document_cancel_date?: string | null;
 }
 
+type RequestDateValue = string | { date?: string | null } | null;
+
+type TrackProcess = {
+    level?: string | number | null;
+    name?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+};
+
 interface ExportRequestItem extends FlowDates {
     supplier_alloc?: string | null;
     id?: string | number | null;
 
     running_doc?: string;
     running_doc_vehicle_no?: string;
+    unit_code?: string | null;
 
     vehicle_no?: string | number;
     vehicle_license?: string;
     vehicle_info?: FlowDates & {
         vehicle_no?: string | number | null;
+        unit_code?: string | null;
         car_chassis?: string | null;
         car_model?: string | null;
         car_brand?: string | null;
@@ -71,13 +85,14 @@ interface ExportRequestItem extends FlowDates {
     current_process?: string;
     current_step?: number;
     total_steps?: number;
+    trackProcess?: TrackProcess;
 
     dc_type?: string;
     dc_code?: string;
 
-    date?: string;
-    request_date?: string;
-    created_at?: string;
+    date?: RequestDateValue;
+    request_date?: RequestDateValue;
+    created_at?: RequestDateValue;
 
     fleet_type?: string;
     fleet_truck_type?: string;
@@ -118,7 +133,6 @@ interface ExportRequestItem extends FlowDates {
     export_license?: string;
     export_qty?: number | string;
     export_row_index?: number;
-    export_running_doc?: string;
 
     details?: ExportRequestDetail[];
     history?: RequestStatusHistoryItem[];
@@ -127,6 +141,7 @@ interface ExportRequestItem extends FlowDates {
     flow_data?: Array<{
         vehicle_no?: string | number | null;
         process_level?: string | number | null;
+        process_name?: string | null;
         str_date?: string | null;
         end_date?: string | null;
     }>;
@@ -134,6 +149,8 @@ interface ExportRequestItem extends FlowDates {
 
 interface ExportRequestDetail extends FlowDates {
     vehicle_no?: string | number;
+    unit_code?: string | null;
+    running_doc_vehicle_no?: string;
     warehouse_info?: ExportRequestItem["vehicle_info"];
     id?: string | number;
     request_id?: string | number;
@@ -194,6 +211,234 @@ interface ExportRequestModalProps {
     exportApiUrl?: string;
 }
 
+function formatRunningDoc(item: ExportRequestItem): string {
+    const code = [item.unit_code, item.running_doc_vehicle_no, item.vehicle_info?.unit_code]
+        .map((value) => String(value ?? "").trim())
+        .find((value) => /-(?:N\d+|\d+)$/i.test(value));
+
+    // ใช้กติกาเดียวกับคอลัมน์เลขที่เอกสารใน Track Fleet
+    return (code ?? item.running_doc?.trim() ?? "").replace(/-N\d+$/i, "");
+}
+
+const TRACK_FILTER_LABELS = {
+    search: "คำค้นหา",
+    chassis: "เลขตัวถัง",
+    old_license: "ทะเบียนเก่า",
+    vehicle_search: "ข้อมูลรถ",
+    fleet_group: "กลุ่มรถ",
+    fleet_type: "ประเภทคำขอ",
+    truck_type: "ประเภทรถ",
+    warehouse: "คลังที่เลือก",
+    dc_type: "ประเภทคลัง",
+    dc_code: "รหัสคลัง",
+    status: "กลุ่มสถานะ",
+    process: "ขั้นตอนปัจจุบัน",
+} as const;
+
+function getTrackFilterSummary(exportApiUrl?: string) {
+    if (!exportApiUrl) return [];
+
+    const path = exportApiUrl.split("#", 1)[0];
+    const queryStart = path.indexOf("?");
+    if (queryStart === -1) return [];
+    const params = new URLSearchParams(path.slice(queryStart + 1));
+    const filters: { key: string; label: string; value: string }[] = [];
+    const fleetGroups = new Map([
+        ["new-replacement", "รถออกใหม่/ทดแทน"],
+        ["supplement", "รถเสริม"],
+    ]);
+    const statuses = new Map([
+        ["progress", "คำขอรอพิจารณา (TCAS)"],
+        ["cancel", "ไม่ผ่านกระบวนการ"],
+        ["success", "เสร็จสิ้นกระบวนการ"],
+    ]);
+
+    for (const [key, label] of Object.entries(TRACK_FILTER_LABELS)) {
+        let value = params.get(key)?.trim();
+        if (!value || (value === "all" && !["search", "chassis", "old_license", "vehicle_search"].includes(key))) continue;
+
+        if (key === "fleet_group") value = fleetGroups.get(value) ?? value;
+        if (key === "status") value = statuses.get(value) ?? value;
+        if (key === "process") value = value.replace(/^(\d+)\|(.+)$/, "$1. $2");
+        if (key === "old_license" || key === "vehicle_search") {
+            value = value.split(",").map((entry) => entry.trim()).filter(Boolean).join(", ");
+        }
+        if (value) filters.push({ key, label, value });
+    }
+
+    const start = params.get("start_date");
+    const end = params.get("end_date");
+    const processDateLabel = params.get("process_date_field") === "end_date"
+        ? "วันที่สิ้นสุดขั้นตอน" : "วันที่เริ่มขั้นตอน";
+    const ranges = [
+        ["request-date", "วันที่ขอ", start, end],
+        ["process-date", processDateLabel, params.get("process_date_from"), params.get("process_date_to")],
+    ] as const;
+    for (const [key, label, from, to] of ranges) {
+        if (!from && !to) continue;
+        if (key === "request-date" && from === "1753-01-01" && to === "9999-12-30") continue;
+        const value = from && to ? `${from} ถึง ${to}` : from ? `ตั้งแต่ ${from}` : `ถึง ${to}`;
+        filters.push({ key, label, value });
+    }
+
+    return filters;
+}
+
+function formatCurrentProcess(item: ExportRequestItem): string {
+    const flow = item.flow_data?.[0];
+    const process = item.trackProcess ?? { level: flow?.process_level, name: flow?.process_name };
+    const level = String(process.level ?? "").trim();
+    const name = process.name?.trim();
+
+    if (level) return `${level}. ${name || "ยังไม่พบชื่อขั้นตอน"}`;
+    return name || "ยังไม่พบข้อมูลขั้นตอน";
+}
+
+const TRACK_PROCESS_DATE_FIELDS: Partial<Record<number, readonly [keyof FlowDates, keyof FlowDates]>> = {
+    1: ["quota_wait_start_date", "quota_wait_end_date"],
+    2: ["allocation_sign_start_date", "allocation_sign_end_date"],
+    3: ["finance_approval_start_date", "finance_approval_end_date"],
+    4: ["garage_delivery_start_date", "garage_delivery_end_date"],
+    5: ["body_installation_start_date", "body_installation_end_date"],
+    6: ["registration_wait_start_date", "registration_wait_end_date"],
+    8: ["warehouse_delivery_start_date", "warehouse_delivery_end_date"],
+};
+
+function getTrackProcessDate(process: TrackProcess | undefined, field: keyof FlowDates): string | null | undefined {
+    if (!process || (!process.startDate && !process.endDate)) return undefined;
+    const level = Number(process.level);
+    const fields = TRACK_PROCESS_DATE_FIELDS[level];
+    if (field === fields?.[0]) return process.startDate ?? null;
+    if (field === fields?.[1]) return process.endDate ?? null;
+    if (level === 9 && field === "document_cancel_date") return process.endDate || process.startDate || null;
+    if (level === 10 && field === "document_expiry_end_date") return process.endDate || null;
+    return undefined;
+}
+
+type TrackSearchVehicle = Pick<ExportRequestItem,
+    "id" | "running_doc" | "running_doc_vehicle_no" | "unit_code" | "vehicle_no" | "vehicle_info"
+> & {
+    request_id?: string | number;
+    incoming_truck_id?: string | number;
+    warehouse_vehicle_no?: string | number;
+    latest_process_level?: string | number | null;
+    latest_process_name?: string | null;
+    latest_process_str_date?: string | null;
+    latest_process_end_date?: string | null;
+};
+
+type PagePayload<T> = { data: T[]; pagination?: { total_pages?: number; page?: number } };
+
+async function fetchExportPayload<T extends { status?: string; message?: string }>(url: URL, signal: AbortSignal): Promise<T> {
+    const response = await fetch(url.toString(), { signal, cache: "no-store" });
+    const payload: T = await response.json();
+    if (!response.ok || payload?.status !== "success") {
+        throw new Error(payload?.message || `โหลดข้อมูลรายงานไม่สำเร็จ (HTTP ${response.status})`);
+    }
+    return payload;
+}
+
+async function loadExportPages<T>(url: URL, signal: AbortSignal): Promise<T[]> {
+    const getPage = async (page: number) => {
+        const pageUrl = new URL(url);
+        pageUrl.searchParams.set("page", String(page));
+        pageUrl.searchParams.set("limit", "100");
+        const payload = await fetchExportPayload<PagePayload<T> & { status?: string }>(pageUrl, signal);
+        if (!Array.isArray(payload.data) || Number(payload.pagination?.page ?? page) !== page) {
+            throw new Error("รายการรถเปลี่ยนระหว่างโหลด กรุณาลองอีกครั้ง");
+        }
+        return payload;
+    };
+    const first = await getPage(1);
+    const totalPages = Number(first.pagination?.total_pages);
+    if (!Number.isInteger(totalPages) || totalPages < 0) {
+        throw new Error("API ยังไม่ได้ส่งข้อมูลจำนวนหน้าของรายงาน");
+    }
+    const rows = [...first.data];
+    for (let page = 2; page <= totalPages; page += 5) {
+        const batch = await Promise.all(Array.from({ length: Math.min(5, totalPages - page + 1) },
+            (_, offset) => getPage(page + offset)));
+        batch.forEach(({ data }) => rows.push(...data));
+    }
+    return rows;
+}
+
+function verifyFlowDates(request: ExportRequestItem) {
+    if (!Object.prototype.hasOwnProperty.call(request, "flow_dates_by_vehicle")) {
+        throw new Error("API ยังไม่ได้ส่งวันที่ขั้นตอน กรุณาวาง request_get_export.php เวอร์ชันล่าสุดบนเซิร์ฟเวอร์");
+    }
+}
+
+type ReportProgress = { loaded: number; total: number };
+
+async function loadTrackSearchExport(
+    trackUrl: URL, reportUrl: URL, signal: AbortSignal, onProgress: (progress: ReportProgress) => void,
+): Promise<ExportRequestItem[]> {
+    // ใช้โหมดเดียวกับตารางหลักเพื่อให้ได้รถครบทุกคันในเอกสารที่ตรงตัวกรอง
+    trackUrl.searchParams.set("group_mode", "document");
+    const documents = await loadExportPages<TrackSearchVehicle | { vehicles: TrackSearchVehicle[] }>(trackUrl, signal);
+    const vehiclesByRequest = new Map<string, Map<string, TrackSearchVehicle>>();
+    for (const document of documents) {
+        for (const vehicle of "vehicles" in document ? document.vehicles : [document]) {
+            const requestId = String(vehicle.request_id ?? "").trim();
+            const vehicleId = String(vehicle.incoming_truck_id ?? vehicle.id ?? "").trim();
+            if (!/^[1-9]\d*$/.test(requestId) || !vehicleId) {
+                throw new Error("Track Fleet ไม่ได้ส่งรหัสคำขอหรือรหัสรถสำหรับทำรายงาน");
+            }
+            const vehicles = vehiclesByRequest.get(requestId) ?? new Map<string, TrackSearchVehicle>();
+            vehicles.set(vehicleId, vehicle);
+            vehiclesByRequest.set(requestId, vehicles);
+        }
+    }
+
+    // รายละเอียดรายงานใช้รหัสคำขอที่พบแล้ว แยกจากเงื่อนไขการค้นหาของหน้า Track Fleet
+    const detailUrl = new URL(reportUrl.origin + reportUrl.pathname);
+    for (const key of ["warehouse", "user_type"]) {
+        const value = reportUrl.searchParams.get(key);
+        if (value) detailUrl.searchParams.set(key, value);
+    }
+    detailUrl.searchParams.set("lite", "0");
+    const requests = [...vehiclesByRequest];
+    if (requests.length) onProgress({ loaded: 0, total: requests.length });
+    const rows: ExportRequestItem[] = [];
+    for (let start = 0; start < requests.length; start += 6) {
+        const batch = await Promise.all(requests.slice(start, start + 6).map(async ([requestId, vehicles]) => {
+            const url = new URL(detailUrl);
+            url.searchParams.set("id", requestId);
+            const { data } = await fetchExportPayload<{ data: ExportRequestItem; status?: string }>(url, signal);
+            if (String(data?.id ?? "") !== requestId) {
+                throw new Error(`ข้อมูลรายงานของคำขอ ${requestId} ไม่ตรงกับผลค้นหา กรุณาลองอีกครั้ง`);
+            }
+            verifyFlowDates(data);
+            const incomingById = new Map((data.incoming_trucks ?? []).map((vehicle) => [String(vehicle.id ?? ""), vehicle]));
+            return [...vehicles].map(([vehicleId, vehicle]): ExportRequestItem => {
+                const detail = incomingById.get(vehicleId);
+                const vehicleNo = detail?.vehicle_no ?? vehicle.warehouse_vehicle_no ?? vehicle.vehicle_no;
+                if (vehicleNo == null || String(vehicleNo).trim() === "") {
+                    throw new Error(`ไม่พบลำดับรถในคำขอ ${requestId} กรุณาลองอีกครั้ง`);
+                }
+                return {
+                    ...data,
+                    running_doc: vehicle.running_doc || data.running_doc,
+                    unit_code: vehicle.unit_code || detail?.unit_code,
+                    running_doc_vehicle_no: vehicle.running_doc_vehicle_no || detail?.running_doc_vehicle_no,
+                    vehicle_no: vehicleNo,
+                    vehicle_info: detail?.warehouse_info ?? vehicle.vehicle_info,
+                    trackProcess: {
+                        level: vehicle.latest_process_level,
+                        name: vehicle.latest_process_name,
+                        startDate: vehicle.latest_process_str_date,
+                        endDate: vehicle.latest_process_end_date,
+                    },
+                };
+            });
+        }));
+        batch.forEach((vehicles) => rows.push(...vehicles));
+        onProgress({ loaded: start + batch.length, total: requests.length });
+    }
+    return rows;
+}
+
 export default function ExportRequestModal({
     open,
     onClose,
@@ -202,69 +447,54 @@ export default function ExportRequestModal({
 }: ExportRequestModalProps) {
     const [trackRows, setTrackRows] = useState<ExportRequestItem[]>([]);
     const [loadingTrackRows, setLoadingTrackRows] = useState(true);
-    const [loadError, setLoadError] = useState("");
+    const [trackError, setTrackError] = useState("");
+    const [fbpError, setFbpError] = useState("");
+    const [reportProgress, setReportProgress] = useState<ReportProgress | null>(null);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [loadingFbp, setLoadingFbp] = useState(true);
+    const isLoading = loadingTrackRows || loadingFbp;
+    const loadError = trackError || fbpError;
     const datesInitialized = useRef(false);
     const requestApiUrl = exportApiUrl ||
         "http://192.168.158.210/api_new_truck/api/request_get_export.php";
+
+    const trackFilters = useMemo(() => getTrackFilterSummary(exportApiUrl), [exportApiUrl]);
+    const usesTrackFleetSearch = /(?:^|\/)track_fleet_get\.php$/.test(requestApiUrl.split(/[?#]/, 1)[0]);
+    const [hasLocalDateRange, setHasLocalDateRange] = useState(false);
 
     // Load all request pages from the combined export API.
     useEffect(() => {
         if (!open) return;
         const controller = new AbortController();
         datesInitialized.current = false;
-        setLoadError("");
+        setHasLocalDateRange(false);
+        setTrackError("");
+        setReportProgress(null);
         setTrackRows([]);
         setLoadingTrackRows(true);
 
         const loadAllVehicles = async () => {
             try {
-                const getPage = async (page: number) => {
-                    const url = new URL(requestApiUrl, window.location.href);
-                    // Convert the previous request endpoint while preserving its query parameters.
-                    url.pathname = url.pathname.replace(/(?:request_get|track_fleet_get)\.php$/, "request_get_export.php");
-                    if (!url.pathname.endsWith("/request_get_export.php")) {
-                        throw new Error("Export ต้องใช้ request_get_export.php กรุณาตรวจสอบ exportApiUrl");
-                    }
-                    url.searchParams.delete("group_mode");
-                    url.searchParams.set("lite", "0");
-                    url.searchParams.set("page", String(page));
-                    url.searchParams.set("limit", "100");
-                    const response = await fetch(url.toString(), {
-                        signal: controller.signal,
-                        cache: "no-store",
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    const payload = await response.json();
-                    if (payload.status !== "success" || !Array.isArray(payload.data)) {
-                        throw new Error(payload.message || "โหลดรายการรถไม่สำเร็จ");
-                    }
-                    if (payload.data.some((row: ExportRequestItem) =>
-                        !Object.prototype.hasOwnProperty.call(row, "flow_dates_by_vehicle")
-                    )) {
-                        throw new Error("API ยังไม่ได้ส่งวันที่ขั้นตอน กรุณาวาง request_get_export.php เวอร์ชันล่าสุดบนเซิร์ฟเวอร์");
-                    }
-                    return payload;
-                };
+                const sourceUrl = new URL(requestApiUrl, window.location.href);
+                const reportUrl = new URL(sourceUrl);
+                reportUrl.pathname = reportUrl.pathname.replace(/(?:request_get|track_fleet_get)\.php$/, "request_get_export.php");
+                if (!reportUrl.pathname.endsWith("/request_get_export.php")) {
+                    throw new Error("Export ต้องใช้ request_get_export.php กรุณาตรวจสอบ exportApiUrl");
+                }
+                reportUrl.searchParams.delete("group_mode");
+                reportUrl.searchParams.set("lite", "0");
 
-                const first = await getPage(1);
-                const totalPages = Number(first.pagination?.total_pages);
-                if (!Number.isInteger(totalPages) || totalPages < 0) {
-                    throw new Error("API ต้องส่ง pagination.total_pages กรุณาใช้ request_get_export.php");
-                }
-                const rows: ExportRequestItem[] = [...first.data];
-                for (let page = 2; page <= totalPages; page += 5) {
-                    const batch = await Promise.all(
-                        Array.from({ length: Math.min(5, totalPages - page + 1) },
-                            (_, index) => getPage(page + index))
-                    );
-                    batch.forEach((payload) => rows.push(...payload.data));
-                }
+                const rows = usesTrackFleetSearch
+                    ? await loadTrackSearchExport(sourceUrl, reportUrl, controller.signal, (progress) => {
+                        if (!controller.signal.aborted) setReportProgress(progress);
+                    })
+                    : await loadExportPages<ExportRequestItem>(reportUrl, controller.signal);
+                if (!usesTrackFleetSearch) rows.forEach(verifyFlowDates);
                 if (!controller.signal.aborted) setTrackRows(rows);
             } catch (error) {
                 if (!controller.signal.aborted) {
                     console.error("โหลดข้อมูล Export ไม่สำเร็จ:", error);
-                    setLoadError(error instanceof Error ? error.message : "โหลดข้อมูล Export ไม่สำเร็จ");
+                    setTrackError(error instanceof Error ? error.message : "โหลดข้อมูล Export ไม่สำเร็จ");
                     setTrackRows([]);
                 }
             } finally {
@@ -273,7 +503,7 @@ export default function ExportRequestModal({
         };
         void loadAllVehicles();
         return () => controller.abort();
-    }, [open, requestApiUrl]);
+    }, [open, requestApiUrl, usesTrackFleetSearch, loadAttempt]);
 
     const [fbpRows, setFbpRows] = useState<FbpItem[]>([]);
     const [fbpApprovalByRequest, setFbpApprovalByRequest] = useState<
@@ -289,6 +519,7 @@ export default function ExportRequestModal({
 
         const loadFbpData = async () => {
             setLoadingFbp(true);
+            setFbpError("");
             setFbpRows([]);
             try {
                 const response = await fetch(
@@ -316,10 +547,10 @@ export default function ExportRequestModal({
                         : [];
 
                 if (!controller.signal.aborted) setFbpRows(rows);
-            } catch (error) {
-                if ((error as Error).name !== "AbortError") {
+            } catch {
+                if (!controller.signal.aborted) {
                     setFbpRows([]);
-                    setLoadError("โหลดข้อมูลบริษัท FBP ไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่");
+                    setFbpError("โหลดข้อมูลบริษัท FBP ไม่สำเร็จ");
                 }
             } finally {
                 if (!controller.signal.aborted) setLoadingFbp(false);
@@ -331,7 +562,7 @@ export default function ExportRequestModal({
         return () => {
             controller.abort();
         };
-    }, [open]);
+    }, [open, loadAttempt]);
 
     const safeRequests = useMemo<ExportRequestItem[]>(() => {
         const sourceRequests = trackRows;
@@ -634,16 +865,18 @@ export default function ExportRequestModal({
         return "";
     };
 
-    // อ่านวันที่ขอ
-    const getRequestDateKey = (
-        item: ExportRequestItem
-    ) => {
-        return normalizeDateKey(
-            item.request_date ||
-            item.date ||
-            item.created_at ||
-            ""
-        );
+    // ใช้วันที่สร้างคำขอ และรองรับรูปแบบวันที่แบบ object จาก PHP
+    const getRequestDateKey = (item: ExportRequestItem): string => {
+        for (const value of [item.request_date, item.date, item.created_at]) {
+            const key = normalizeDateKey(typeof value === "string" ? value : value?.date ?? undefined);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+
+            const date = new Date(`${key}T00:00:00Z`);
+            if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key) {
+                return key;
+            }
+        }
+        return "";
     };
 
     // แปลง Date เป็น YYYY-MM-DD
@@ -744,107 +977,6 @@ export default function ExportRequestModal({
             item.vehicle_no !== undefined &&
             item.vehicle_no !== null &&
             String(item.vehicle_no).trim() !== ""
-        );
-    };
-
-    // เลขที่เอกสาร:
-    // ถ้าเป็นรถรายคันใน TCAS ให้บังคับเป็น running_doc_vehicle_no แบบ
-    // ${running_doc}_${vehicle_no} เช่น REQ001_1
-    const formatRunningDoc = (
-        item: ExportRequestItem
-    ) => {
-        const exportRunningDoc = String(
-            item.export_running_doc || ""
-        ).trim();
-
-        if (exportRunningDoc) {
-            return exportRunningDoc;
-        }
-
-        const hasVehicleNo =
-            item.vehicle_no !== undefined &&
-            item.vehicle_no !== null &&
-            String(item.vehicle_no).trim() !== "";
-
-        if (hasVehicleNo) {
-            const runningDoc =
-                String(item.running_doc || "").trim();
-
-            const vehicleNo =
-                String(item.vehicle_no).trim();
-
-            if (runningDoc) {
-                return `${runningDoc}_${vehicleNo}`;
-            }
-        }
-
-        return (
-            String(item.running_doc || "").trim() ||
-            String(item.running_doc_vehicle_no || "").trim() ||
-            ""
-        );
-    };
-
-    const formatStatus = (
-        value?: string | null,
-        statusDetails?: string | null
-    ) => {
-        const status = String(value || "")
-            .trim()
-            .toLowerCase();
-
-        const details = String(statusDetails || "").trim();
-
-        if (status === "progress" && details) {
-            return details;
-        }
-
-        const statusMap: Record<string, string> = {
-            gm_pending: "GM กำลังอนุมัติ",
-            center_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
-            fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
-            process: "รอดำเนินการตามกระบวนการ (TCAS)",
-            progress: "รอดำเนินการตามกระบวนการ (TCAS)",
-            confirm_request: "รอดำเนินการตามกระบวนการ (TCAS)",
-            "confirm request": "รอดำเนินการตามกระบวนการ (TCAS)",
-            in_progress: "รอดำเนินการตามกระบวนการ (TCAS)",
-            reject_gm: "GM ไม่อนุมัติ",
-            reject_by_gm: "GM ไม่อนุมัติ",
-            rejected_by_gm: "GM ไม่อนุมัติ",
-            gm_rejected: "GM ไม่อนุมัติ",
-            reject_center: "ส่วนกลางไม่อนุมัติ",
-            reject_by_center: "ส่วนกลางไม่อนุมัติ",
-            rejected_by_center: "ส่วนกลางไม่อนุมัติ",
-            center_rejected: "ส่วนกลางไม่อนุมัติ",
-            fbp_rejected: "ส่วนกลางไม่อนุมัติ",
-            rejected: "ไม่อนุมัติ",
-            approved: "อนุมัติแล้ว",
-            completed: "ดำเนินการเสร็จสิ้น",
-        };
-
-        if (statusMap[status]) {
-            return statusMap[status];
-        }
-
-        if (/^reject_[0-9]+$/.test(status)) {
-            return "ไม่อนุมัติในขั้นตอนดำเนินการ";
-        }
-
-        return (
-            String(value || "")
-                .replace(/_/g, " ")
-                .replace(/-/g, " ")
-                .replace(/\s+/g, " ")
-                .trim() || "-"
-        );
-    };
-
-    const formatCurrentProcess = (
-        item: ExportRequestItem
-    ) => {
-        return formatStatus(
-            item.status,
-            item.status_details
         );
     };
 
@@ -1070,15 +1202,8 @@ export default function ExportRequestModal({
 
         datesInitialized.current = true;
         const dates =
-            safeRequests
-                .map(
-                    (
-                        item
-                    ) =>
-                        getRequestDateKey(
-                            item
-                        )
-                )
+            trackRows
+                .map(getRequestDateKey)
                 .filter(
                     Boolean
                 )
@@ -1091,18 +1216,8 @@ export default function ExportRequestModal({
             const today =
                 new Date();
 
-            const todayKey =
-                formatDateToKey(
-                    today
-                );
-
-            setStartDate(
-                todayKey
-            );
-
-            setEndDate(
-                todayKey
-            );
+            setStartDate("");
+            setEndDate("");
 
             setCalendarRange([
                 {
@@ -1159,7 +1274,7 @@ export default function ExportRequestModal({
         );
     }, [
         open,
-        safeRequests,
+        trackRows,
         loadingTrackRows,
     ]);
 
@@ -1230,12 +1345,8 @@ export default function ExportRequestModal({
     // กรองข้อมูลตาม วันที่ + ประเภทคำขอ + สถานะ + คลัง + ประเภทรถ
     const exportRows =
         useMemo(() => {
-            if (
-                !startDate ||
-                !endDate
-            ) {
-                return [];
-            }
+            const applyDateRange = !usesTrackFleetSearch || hasLocalDateRange;
+            if (applyDateRange && (!startDate || !endDate)) return [];
 
             const from =
                 startDate <=
@@ -1259,15 +1370,7 @@ export default function ExportRequestModal({
                                 item
                             );
 
-                        if (
-                            !date
-                        ) {
-                            return false;
-                        }
-
-                        const matchDate =
-                            date >= from &&
-                            date <= to;
+                        const matchDate = !applyDateRange || (date >= from && date <= to);
 
                         const matchFleetType =
                             fleetTypeFilter === "all" ||
@@ -1336,9 +1439,10 @@ export default function ExportRequestModal({
                                 ...item,
                                 vehicle_no: number,
                                 vehicle_info: info,
+                                unit_code: vehicle.unit_code,
+                                running_doc_vehicle_no: vehicle.running_doc_vehicle_no,
                                 export_qty: 1,
                                 export_row_index: index,
-                                export_running_doc: "",
                             };
                         });
                     }
@@ -1357,11 +1461,12 @@ export default function ExportRequestModal({
                         vehicle_info: item.vehicle_warehouse_info?.find((entry) => String(entry?.vehicle_no) === number) ?? null,
                         export_qty: 1,
                         export_row_index: index,
-                        export_running_doc: "",
                     }));
                 });
         }, [
             safeRequests,
+            usesTrackFleetSearch,
+            hasLocalDateRange,
             startDate,
             endDate,
             fleetTypeFilter,
@@ -1455,6 +1560,9 @@ export default function ExportRequestModal({
             return "";
         };
         const dateField = (item: ExportRequestItem, name: keyof FlowDates) => {
+            const currentDate = getTrackProcessDate(item.trackProcess, name);
+            if (currentDate !== undefined) return currentDate ? formatThaiDate(currentDate) : "";
+
             const key = String(item.vehicle_no ?? "").trim();
             const dates = item.flow_dates_by_vehicle?.[key];
             const matchingVehicle = item.vehicle_warehouse_info?.find(
@@ -1479,7 +1587,7 @@ export default function ExportRequestModal({
             value ? formatThaiDate(String(value)) : "";
         const toExportRow = (item: ExportRequestItem, index: number) => ({
             "ลำดับ": index + 1,
-            "วันที่สร้างคำขอ": exportDate(item.request_date || item.date || item.created_at),
+            "วันที่สร้างคำขอ": exportDate(getRequestDateKey(item)),
             "ประเภทคำขอ": item.fleet_type || "",
             "สถานะปัจจุบัน": formatCurrentProcess(item),
             "เลขที่เอกสาร": formatRunningDoc(item),
@@ -1682,7 +1790,7 @@ export default function ExportRequestModal({
 
         XLSX.writeFile(
             workbook,
-            `Truck_Request_${from}_to_${to}.xlsx`
+            from && to ? `Truck_Request_${from}_to_${to}.xlsx` : "Truck_Request.xlsx"
         );
     };
 
@@ -1690,17 +1798,29 @@ export default function ExportRequestModal({
         return null;
     }
 
+    const ready = !isLoading && !loadError && exportRows.length > 0;
+    const loadingTitle = loadingTrackRows
+        ? reportProgress ? "กำลังดึงรายละเอียดรายงาน" : usesTrackFleetSearch ? "กำลังค้นหารายการรถจาก Track Fleet" : "กำลังโหลดรายการคำขอรถ"
+        : "กำลังโหลดข้อมูลบริษัทขนส่ง";
+    const missingDates = safeRequests.length > 0 && !safeRequests.some(getRequestDateKey);
+    const emptyDescription = missingDates
+        ? "ไม่มีวันที่สร้างคำขอที่ใช้กรองได้ในข้อมูลที่โหลด"
+        : safeRequests.length > 0
+            ? "ลองปรับตัวกรองเพิ่มเติมหรือช่วงวันที่ในหน้าต่างนี้"
+            : "ลองเปลี่ยนคำค้นหาหรือตัวกรองบนหน้า Track Fleet แล้วเปิดรายงานอีกครั้ง";
+
     return (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-6 backdrop-blur-sm sm:p-5">
-            <div className="flex h-[96vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-3xl border border-white/70 bg-white shadow-[0_30px_100px_rgba(15,23,42,0.40)]">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm sm:p-5">
+            <div role="dialog" aria-modal="true" aria-labelledby="export-track-fleet-title"
+                className="flex h-full max-h-[960px] w-full max-w-[1400px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl sm:rounded-3xl">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50 to-slate-50 px-5 py-4">
                     <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/20">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
                             <FileSpreadsheet size={20} />
                         </div>
                         <div className="min-w-0">
-                            <h2 className="text-base font-black text-slate-900">
-                                Export รายงานคำขอรถ
+                            <h2 id="export-track-fleet-title" className="text-base font-bold text-slate-900">
+                                ส่งออกรายงานคำขอรถ
                             </h2>
                             <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
                                 {dcLabel || "ข้อมูลคำขอทั้งหมดที่สามารถเข้าถึงได้"}
@@ -1711,37 +1831,43 @@ export default function ExportRequestModal({
                     <button
                         type="button"
                         onClick={onClose}
+                        aria-label="ปิดหน้าต่างส่งออกรายงาน"
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                     >
                         <X size={17} />
                     </button>
                 </div>
 
-                <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-4">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                    <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                            <div className="mb-4 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <p className="text-xs font-black text-slate-700">
-                                        แยกข้อมูลตาม
-                                    </p>
-                                </div>
-
-                                {/* <div className="flex items-center gap-2">
-                                    <div className="flex h-9 min-w-[120px] items-center justify-center rounded-xl bg-slate-900 px-4 text-[11px] font-black text-white shadow-sm">
-                                        {exportRows.length.toLocaleString("en-US")} รายการ
-                                    </div>
-                                </div> */}
+                            {trackFilters.length > 0 && (
+                                <section aria-label="ตัวกรองจากหน้าหลัก" className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+                                    <p className="mb-1.5 text-[11px] font-semibold text-blue-800">ตัวกรองที่ส่งมาจากหน้าหลัก</p>
+                                    <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
+                                        {trackFilters.map(({ key, label, value }) => (
+                                            <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
+                                                <dt className="mr-1.5 inline font-medium text-slate-500">{label}</dt>
+                                                <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
+                                            </div>
+                                        ))}
+                                    </dl>
+                                </section>
+                            )}
+                            <div className="mb-3">
+                                <h3 className="text-sm font-semibold text-slate-800">ตัวกรองเพิ่มเติม</h3>
+                                <p className="mt-0.5 text-xs text-slate-500">เลือกเงื่อนไขเพื่อจำกัดรายการที่จะส่งออก</p>
                             </div>
 
-                            <div className="grid grid-cols-[minmax(260px,2fr)_repeat(5,minmax(0,1fr))_max-content] items-end gap-3">
+                            <fieldset disabled={isLoading || !!loadError}
+                                className="grid min-w-0 grid-cols-2 items-end gap-3 disabled:opacity-60 sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.5fr)_repeat(5,minmax(0,1fr))_max-content]">
                                 {/* 1. วันที่สร้างคำขอ */}
                                 <div className="relative min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-date" className="mb-1 block text-xs font-semibold text-slate-600">
                                         วันที่สร้างคำขอ
                                     </label>
 
-                                    <button
+                                    <button id="track-export-date"
                                         type="button"
                                         onClick={() =>
                                             setShowDatePicker((current) => !current)
@@ -1769,7 +1895,7 @@ export default function ExportRequestModal({
                                     </button>
 
                                     {showDatePicker && (
-                                        <div className="absolute left-0 top-full z-[99999] mt-2 w-[340px] max-w-[calc(100vw-3rem)] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/5">
+                                        <div className="absolute left-0 top-full z-[99999] mt-2 w-[340px] max-w-[calc(100vw-4rem)] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/5">
                                             <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50 px-4 py-3">
                                                 <div>
                                                     <p className="text-xs font-black text-blue-700">
@@ -1790,7 +1916,7 @@ export default function ExportRequestModal({
                                                 </button>
                                             </div>
 
-                                            <div className="flex justify-center overflow-auto bg-white">
+                                            <div className="flex justify-center overflow-auto bg-white [&_.rdrCalendarWrapper]:w-full [&_.rdrMonth]:w-full">
                                                 <DateRange
                                                     locale={th}
                                                     editableDateInputs={false}
@@ -1805,6 +1931,7 @@ export default function ExportRequestModal({
                                                         const selectedEnd =
                                                             selection.endDate || selectedStart;
 
+                                                        setHasLocalDateRange(true);
                                                         setCalendarRange([
                                                             {
                                                                 startDate: selectedStart,
@@ -1854,11 +1981,11 @@ export default function ExportRequestModal({
 
                                 {/* 2. ประเภทคำขอ */}
                                 <div className="min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-fleet-type" className="mb-1 block text-xs font-semibold text-slate-600">
                                         ประเภทคำขอ
                                     </label>
 
-                                    <select
+                                    <select id="track-export-fleet-type"
                                         value={fleetTypeFilter}
                                         onChange={(e) =>
                                             setFleetTypeFilter(e.target.value)
@@ -1877,11 +2004,11 @@ export default function ExportRequestModal({
 
                                 {/* 3. สถานะปัจจุบัน */}
                                 <div className="min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-status" className="mb-1 block text-xs font-semibold text-slate-600">
                                         สถานะปัจจุบัน
                                     </label>
 
-                                    <select
+                                    <select id="track-export-status"
                                         value={currentStatusFilter}
                                         onChange={(e) =>
                                             setCurrentStatusFilter(e.target.value)
@@ -1900,11 +2027,11 @@ export default function ExportRequestModal({
 
                                 {/* 4. ประเภทคลัง */}
                                 <div className="min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-dc-type" className="mb-1 block text-xs font-semibold text-slate-600">
                                         ประเภทคลัง
                                     </label>
 
-                                    <select
+                                    <select id="track-export-dc-type"
                                         value={dcTypeFilter}
                                         onChange={(e) => {
                                             setDcTypeFilter(e.target.value);
@@ -1924,11 +2051,11 @@ export default function ExportRequestModal({
 
                                 {/* 5. ชื่อคลัง */}
                                 <div className="min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-dc-code" className="mb-1 block text-xs font-semibold text-slate-600">
                                         ชื่อคลัง
                                     </label>
 
-                                    <select
+                                    <select id="track-export-dc-code"
                                         value={dcCodeFilter}
                                         onChange={(e) =>
                                             setDcCodeFilter(e.target.value)
@@ -1947,11 +2074,11 @@ export default function ExportRequestModal({
 
                                 {/* 6. ประเภทรถ */}
                                 <div className="min-w-0">
-                                    <label className="mb-1 block text-[10px] font-black text-slate-400">
+                                    <label htmlFor="track-export-truck-type" className="mb-1 block text-xs font-semibold text-slate-600">
                                         ประเภทรถ
                                     </label>
 
-                                    <select
+                                    <select id="track-export-truck-type"
                                         value={truckTypeFilter}
                                         onChange={(e) =>
                                             setTruckTypeFilter(e.target.value)
@@ -1985,92 +2112,106 @@ export default function ExportRequestModal({
                                         }}
                                         className="flex h-10 w-fit items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-[9px] font-black text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                                     >
-                                        ล้างตัวกรอง
+                                        ล้างตัวกรองเพิ่มเติม
                                     </button>
                                 </div>
-                            </div>
+                            </fieldset>
                         </div>
                     </div>
 
-                    <div className="flex min-h-0 flex-1 flex-col bg-slate-50/60 p-4">
-                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                            <div className="flex shrink-0 flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-h-[260px] flex-1 flex-col bg-slate-50 px-3 py-3 sm:px-5">
+                        <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}
+                            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
                                 <div>
-                                    <p className="text-xs font-black text-slate-800">
-                                        ข้อมูลที่จะ
-                                        Export
-                                    </p>
-
-                                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
-                                        รายการคำขอตามช่วงวันที่ที่เลือก
-                                    </p>
+                                    <h3 id="export-preview-title" className="text-sm font-semibold text-slate-900">ตัวอย่างรายงาน</h3>
+                                    {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
                                 </div>
-
-                                <div className="flex items-center gap-2">
-                                    <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">
-                                        {exportRows.length.toLocaleString(
-                                            "en-US"
-                                        )}{" "}
-                                        รายการ
-                                    </span>
-
-                                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-100">
-                                        {totalQty.toLocaleString(
-                                            "en-US"
-                                        )}{" "}
-                                        คัน
-                                    </span>
-                                </div>
+                                {ready && (
+                                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                                        <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{exportRows.length.toLocaleString("th-TH")} รายการ</span>
+                                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{totalQty.toLocaleString("th-TH")} คัน</span>
+                                    </div>
+                                )}
                             </div>
 
-                            <div
-                                className="min-h-0 w-full flex-1 overflow-auto overscroll-contain"
-                                style={{
-                                    scrollbarGutter: "stable both-edges",
-                                    WebkitOverflowScrolling: "touch",
-                                    touchAction: "pan-x pan-y",
-                                }}
-                            >
-                                <table className="w-max min-w-full table-fixed border-collapse text-left">
-                                    <thead className="sticky top-0 z-10 bg-blue-800 text-[10px] font-black text-white">
-                                        <tr>
-                                            {previewColumns.map((column) => (
-                                                <th key={column} className={`border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                    {column}
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {exportRows.length === 0 ? (
+                            {loadError ? (
+                                <div role="alert" className="m-4 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
+                                    <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
+                                    <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
+                                    <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
+                                    <button type="button" onClick={() => {
+                                        setTrackError("");
+                                        setFbpError("");
+                                        setReportProgress(null);
+                                        setLoadingTrackRows(true);
+                                        setLoadingFbp(true);
+                                        setLoadAttempt((attempt) => attempt + 1);
+                                    }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
+                                        ลองโหลดอีกครั้ง
+                                    </button>
+                                </div>
+                            ) : isLoading ? (
+                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                    <LoaderCircle aria-hidden="true" size={26} className="mb-1 text-blue-600 motion-safe:animate-spin" />
+                                    <p className="text-sm font-semibold text-slate-900">{loadingTitle}</p>
+                                    {loadingTrackRows && reportProgress ? (
+                                        <>
+                                            <progress aria-label="จำนวนคำขอที่โหลดรายละเอียดแล้ว" max={reportProgress.total} value={reportProgress.loaded}
+                                                className="h-2 w-52 max-w-full accent-blue-600" />
+                                            <p className="text-xs tabular-nums text-slate-600">โหลดแล้ว {reportProgress.loaded.toLocaleString("th-TH")} จาก {reportProgress.total.toLocaleString("th-TH")} คำขอ</p>
+                                        </>
+                                    ) : (
+                                        <p className="text-xs text-slate-600">ตัวอย่างรายงานจะแสดงเมื่อโหลดเสร็จ</p>
+                                    )}
+                                </div>
+                            ) : !ready ? (
+                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                    <Search aria-hidden="true" size={25} className="mb-1 text-slate-400" />
+                                    <p className="text-sm font-semibold text-slate-900">ไม่พบรายการที่จะส่งออก</p>
+                                    <p className="max-w-md text-xs text-slate-600">{emptyDescription}</p>
+                                </div>
+                            ) : (
+                                <>
+                                <div
+                                    className="min-h-0 w-full flex-1 overflow-auto overscroll-contain"
+                                    style={{
+                                        scrollbarGutter: "stable both-edges",
+                                        WebkitOverflowScrolling: "touch",
+                                        touchAction: "pan-x pan-y",
+                                    }}
+                                >
+                                    <table className="w-max min-w-full table-fixed border-collapse text-left">
+                                        <thead className="sticky top-0 z-10 bg-blue-800 text-[11px] font-semibold text-white">
                                             <tr>
-                                                <td colSpan={previewColumns.length} className="py-20 text-center text-slate-400">
-                                                    {loadError || (loadingTrackRows || loadingFbp
-                                                        ? "กำลังโหลดข้อมูล Export…"
-                                                        : "ไม่พบรายการตามเงื่อนไขที่เลือก")}
-                                                </td>
+                                                {previewColumns.map((column) => (
+                                                    <th key={column} className={`border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                        {column}
+                                                    </th>
+                                                ))}
                                             </tr>
-                                        ) : paginatedRows.map((item, index) => {
-                                            const row = toExportRow(
-                                                item,
-                                                (currentPage - 1) * ROWS_PER_PAGE + index
-                                            );
-                                            return (
-                                                <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
-                                                    className="border-b border-slate-100 text-[11px] hover:bg-blue-50/50">
-                                                    {previewColumns.map((column) => (
-                                                        <td key={column} className={`border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                            {row[column as keyof typeof row] ?? "-"}
-                                                        </td>
-                                                    ))}
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
+                                        </thead>
+                                        <tbody>
+                                            {paginatedRows.map((item, index) => {
+                                                const row = toExportRow(
+                                                    item,
+                                                    (currentPage - 1) * ROWS_PER_PAGE + index
+                                                );
+                                                return (
+                                                    <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
+                                                        className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
+                                                        {previewColumns.map((column) => (
+                                                            <td key={column} className={`border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                                {row[column as keyof typeof row] ?? "-"}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
 
-                            {exportRows.length > 0 && (
                                 <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                                     <p className="text-[11px] font-bold text-slate-500">
                                         แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
@@ -2110,26 +2251,26 @@ export default function ExportRequestModal({
                                         </button>
                                     </div>
                                 </div>
+                                </>
                             )}
-                        </div>
+                        </section>
                     </div>
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <p className="text-[10px] font-bold text-slate-400">
-                            ช่วงข้อมูลที่จะ Export
+                        <p className="text-xs font-semibold text-slate-600">สถานะรายงาน</p>
+                        <p role="status" className="mt-0.5 text-xs font-medium text-slate-800">
+                            {loadError ? "โหลดข้อมูลไม่สำเร็จ" : isLoading ? loadingTitle : ready
+                                ? `พร้อมส่งออก ${exportRows.length.toLocaleString("th-TH")} รายการ`
+                                : "ไม่มีรายการให้ส่งออก"}
                         </p>
-                        <p className="mt-0.5 text-[11px] font-black text-slate-600">
-                            {formatShortDate(startDate)} - {formatShortDate(endDate)} ·{" "}
-                            {exportRows.length.toLocaleString("en-US")} รายการ ·{" "}
-                            {totalQty.toLocaleString("en-US")} คัน
-                        </p>
+                        {ready && startDate && endDate && (
+                            <p className="mt-0.5 text-xs text-slate-500">{formatShortDate(startDate)} ถึง {formatShortDate(endDate)}</p>
+                        )}
                     </div>
 
                     <div className="flex items-center justify-end gap-2">
-                        {loadError && <p role="alert" className="text-xs text-rose-600">{loadError}</p>}
-                        {!loadError && (loadingTrackRows || loadingFbp) && <p className="text-xs text-slate-500">กำลังโหลดข้อมูล…</p>}
                         <button
                             type="button"
                             onClick={onClose}
@@ -2140,11 +2281,13 @@ export default function ExportRequestModal({
                         <button
                             type="button"
                             onClick={handleExport}
-                            disabled={loadingTrackRows || loadingFbp || !!loadError || exportRows.length === 0}
+                            disabled={!ready}
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                         >
-                            <Download size={15} />
-                            Export Excel
+                            {isLoading && !loadError
+                                ? <LoaderCircle aria-hidden="true" size={15} className="motion-safe:animate-spin" />
+                                : <Download aria-hidden="true" size={15} />}
+                            ดาวน์โหลด Excel
                         </button>
                     </div>
                 </div>

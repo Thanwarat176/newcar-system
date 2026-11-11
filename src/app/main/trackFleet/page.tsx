@@ -25,10 +25,18 @@ import ExportTrackFleet from "./component/ExportTrackFleet";
  * รวมทะเบียนเก่าทุกคัน เลือกรถอ้างอิงที่มีจริง และแสดงแบบประเมินชุดเดียว
  * ใช้ร่วมกับ component/FlowAssessmentModal.tsx ที่แนบในชุดนี้
  */
+const EMPTY_REQUEST_DATE_RANGE = [{ key: "selection" }];
+
 interface RequestDateOptions {
   years: number[];
   first_date: string | null;
   last_date: string | null;
+}
+
+function setLegacyAllDates(params: URLSearchParams) {
+  // Explicit SQL Server datetime bounds bypass the legacy API's current-year default.
+  params.set("start_date", "1753-01-01");
+  params.set("end_date", "9999-12-30");
 }
 
 interface SelectedDC {
@@ -515,6 +523,25 @@ const normalizeDateKey = (value?: string) => {
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? onlyDate : dateKey(parsed);
 };
+function getRequestDateOptions(dates: Iterable<string>): RequestDateOptions {
+  const keys = [...new Set(dates)].filter(key => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+    return dateKey(new Date(`${key}T00:00:00`)) === key;
+  }).sort();
+  return {
+    years: [...new Set(keys.map(key => Number(key.slice(0, 4))))],
+    first_date: keys[0] ?? null,
+    last_date: keys[keys.length - 1] ?? null,
+  };
+}
+
+function getFleetVehicles(data: unknown): RequestItem[] {
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((item: RequestItem | { vehicles: RequestItem[] }) =>
+    "vehicles" in item && Array.isArray(item.vehicles) ? item.vehicles : [item as RequestItem],
+  );
+}
+
 const formatThaiDate = (value?: string) => {
   const key = normalizeDateKey(value);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
@@ -711,8 +738,10 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
   const [requestDateRange, setRequestDateRange] = useState([{ startDate: new Date(), endDate: new Date(), key: "selection" }]);
   const [hasRequestDateRange, setHasRequestDateRange] = useState(false);
   const [requestDateOptions, setRequestDateOptions] = useState<RequestDateOptions | null>(null);
+  const [dateOptionsError, setDateOptionsError] = useState(false);
+  const legacyDateApiRef = useRef(false);
   const [showRequestDatePicker, setShowRequestDatePicker] = useState(false);
-  const [requestDatePickerPosition, setRequestDatePickerPosition] = useState({ top: 0, left: 0 });
+  const [requestCalendarToday, setRequestCalendarToday] = useState(() => new Date());
   const requestDateButtonRef = useRef<HTMLButtonElement | null>(null);
   const requestDatePickerRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -781,23 +810,34 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       if (hasRequestDateRange) {
         params.set("start_date", dateKey(requestDateRange[0].startDate));
         params.set("end_date", dateKey(requestDateRange[0].endDate));
+      } else if (legacyDateApiRef.current) {
+        setLegacyAllDates(params);
       } else {
         params.set("request_date_scope", "all");
       }
-      const url = `${API_BASE}?${params}`;
-      const response = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error(`ไม่สามารถดึงข้อมูลได้ (${response.status})`);
-      const json = await response.json();
+
+      const load = async () => {
+        const response = await fetch(`${API_BASE}?${params}`, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(`ไม่สามารถดึงข้อมูลได้ (${response.status})`);
+        const json = await response.json();
+        if (json.status !== "success") throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูล");
+        return json;
+      };
+      let json = await load();
       if (sequence !== sequenceRef.current || controller.signal.aborted) return;
-      if (json.status !== "success") throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูล");
-      setRequestDateOptions(json.request_date_options ?? null);
-      const data = Array.isArray(json.data) ? json.data : [];
-      // รับได้ทั้ง API ใหม่แบบเอกสารและ API เดิมแบบรายคัน
-      const vehicles: RequestItem[] = data.flatMap((item: RequestItem | { vehicles: RequestItem[] }) =>
-        "vehicles" in item && Array.isArray(item.vehicles) ? item.vehicles : [item as RequestItem],
-      );
-      setRequests(vehicles);
-      const exportUrl = new URL(url);
+      if (!json.request_date_options && params.has("request_date_scope")) {
+        legacyDateApiRef.current = true;
+        params.delete("request_date_scope");
+        setLegacyAllDates(params);
+        json = await load();
+        if (sequence !== sequenceRef.current || controller.signal.aborted) return;
+      }
+      if (json.request_date_options) {
+        legacyDateApiRef.current = false;
+        setRequestDateOptions(json.request_date_options);
+      }
+      setRequests(getFleetVehicles(json.data));
+      const exportUrl = new URL(`${API_BASE}?${params}`);
       exportUrl.searchParams.set("group_mode", "incoming");
       setExportApiUrl(exportUrl.toString());
       const readSummary = (value: { qty?: unknown; items?: unknown } | undefined) => ({ qty: Number(value?.qty || 0), items: Number(value?.items || 0) });
@@ -845,6 +885,45 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [showRequestDatePicker]);
+
+  useEffect(() => {
+    if (!contextReady || !showRequestDatePicker || requestDateOptions || loading) return;
+
+    const controller = new AbortController();
+    const loadDateOptions = async () => {
+      setDateOptionsError(false);
+      const params = new URLSearchParams({ fleet_group: fleetGroup, group_mode: "incoming", limit: "100" });
+      if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
+      const userType = textValue(userInfo?.team || userInfo?.TEAM);
+      if (userType) params.set("user_type", userType);
+      setLegacyAllDates(params);
+      const dates = new Set<string>();
+      try {
+        for (let page = 1; ; page += 1) {
+          params.set("page", String(page));
+          const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]);
+          const response = await fetch(`${API_BASE}?${params}`, { cache: "no-store", signal });
+          if (!response.ok) throw new Error("โหลดวันที่ขอไม่สำเร็จ");
+          const json = await response.json();
+          if (controller.signal.aborted) return;
+          if (json.status !== "success" || !Array.isArray(json.data) || Number(json.pagination?.page ?? page) !== page) {
+            throw new Error("โหลดวันที่ขอไม่สำเร็จ");
+          }
+          for (const vehicle of getFleetVehicles(json.data)) {
+            if (!activeWarehouse || activeWarehouse === "CENTER" || textValue(vehicle.dc_code).toUpperCase() === activeWarehouse) {
+              dates.add(normalizeDateKey(vehicle.request_date || vehicle.date));
+            }
+          }
+          if (page >= Number(json.pagination?.total_pages || 1)) break;
+        }
+        setRequestDateOptions(getRequestDateOptions(dates));
+      } catch {
+        if (!controller.signal.aborted) setDateOptionsError(true);
+      }
+    };
+    void loadDateOptions();
+    return () => controller.abort();
+  }, [contextReady, showRequestDatePicker, requestDateOptions, loading, fleetGroup, activeWarehouse, userInfo?.team, userInfo?.TEAM]);
 
   // กรอง warehouse ที่ใช้แสดงและส่งออกให้ตรงกัน; backend ยังต้องตรวจสิทธิ์เอง
   const visibleRequests = useMemo(() => {
@@ -895,8 +974,19 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
   }), [filterOptions.process_options, statusFilter]);
   const pageTitle = `รายการติดตามกอง${fleetGroupLabel}${dcFilter !== "all" ? ` ของ ${dcFilter}` : activeWarehouse && !isCenterUser ? ` ของ ${activeWarehouse}` : ""}`;
   const rangeLabel = hasRequestDateRange ? `${formatThaiDate(dateKey(requestDateRange[0].startDate))} - ${formatThaiDate(dateKey(requestDateRange[0].endDate))}` : "ทุกวันที่ขอ";
-  const firstRequestDate = requestDateOptions?.first_date ? new Date(`${requestDateOptions.first_date}T00:00:00`) : null;
-  const lastRequestDate = requestDateOptions?.last_date ? new Date(`${requestDateOptions.last_date}T00:00:00`) : null;
+  const visibleDateOptions = useMemo(
+    () => getRequestDateOptions(visibleRequests.map(vehicle => normalizeDateKey(vehicle.request_date || vehicle.date))),
+    [visibleRequests],
+  );
+  const calendarOptions = requestDateOptions ?? (dateOptionsError ? visibleDateOptions : null);
+  const firstRequestDate = calendarOptions?.first_date ? new Date(`${calendarOptions.first_date}T00:00:00`) : null;
+  const lastRequestDate = calendarOptions?.last_date ? new Date(`${calendarOptions.last_date}T00:00:00`) : null;
+  const currentMonthStart = new Date(requestCalendarToday.getFullYear(), requestCalendarToday.getMonth(), 1);
+  const currentMonthEnd = new Date(requestCalendarToday.getFullYear(), requestCalendarToday.getMonth() + 1, 0);
+  const calendarMin = firstRequestDate && firstRequestDate < currentMonthStart ? firstRequestDate : currentMonthStart;
+  const calendarMax = lastRequestDate && lastRequestDate > currentMonthEnd ? lastRequestDate : currentMonthEnd;
+  const calendarYears = Array.from(new Set([...(calendarOptions?.years ?? []), requestCalendarToday.getFullYear()]))
+    .sort((a, b) => a - b);
   const handleOpenDocument = (document: DocumentGroup) => {
     const requestIds = Array.from(new Set(
       document.vehicles
@@ -962,12 +1052,11 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     }
   };
   const toggleDatePicker = () => {
-    const rect = requestDateButtonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const width = Math.min(330, window.innerWidth - 32);
-    const top = window.innerHeight - rect.bottom < 390 && rect.top > 390 ? rect.top - 390 : rect.bottom + 8;
-    setRequestDatePickerPosition({ top: Math.max(16, top), left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) });
-    setShowRequestDatePicker((open) => !open);
+    if (!showRequestDatePicker) {
+      setRequestCalendarToday(new Date());
+      setActiveProcessCalendar(null);
+    }
+    setShowRequestDatePicker(!showRequestDatePicker);
   };
   const clearDates = () => { setHasRequestDateRange(false); setCurrentPage(1); setRequestDateRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }]); };
   const clearFilters = () => {
@@ -1271,7 +1360,75 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
             <Field label="ประเภทรถ"><input className={inputClass} list="truck-type-filter-options" placeholder="พิมพ์ค้นหาประเภทรถ" value={truckTypeFilter === "all" ? "" : truckTypeFilter} onChange={(event) => { setTruckTypeFilter(event.target.value || "all"); setCurrentPage(1); }} /><datalist id="truck-type-filter-options">{filterOptions.truck_types.map((value) => <option key={value} value={value} />)}</datalist></Field>
             <Field label="DC Type"><select className={inputClass} value={dcTypeFilter} onChange={(event) => { setDcTypeFilter(event.target.value); setDcFilter("all"); setCurrentPage(1); }}><option value="all">ทุก DC Type</option>{filterOptions.dc_types.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
             <Field label="DC"><input className={inputClass} list="dc-filter-options" placeholder="พิมพ์ค้นหา DC" value={dcFilter === "all" ? "" : dcFilter} onChange={(event) => { setDcFilter(event.target.value || "all"); setCurrentPage(1); }} /><datalist id="dc-filter-options">{filterOptions.dc_codes.map((value) => <option key={value} value={value} />)}</datalist></Field>
-            <Field label="วันที่ขอ"><div className="flex gap-1"><button ref={requestDateButtonRef} type="button" onClick={toggleDatePicker} className={`${inputClass} flex items-center gap-2 text-left`}><CalendarDays size={14} className="shrink-0 text-blue-500" /><span className="truncate">{rangeLabel}</span></button>{hasRequestDateRange && <button type="button" aria-label="ล้างช่วงวันที่" onClick={clearDates} className="rounded-xl border border-slate-200 px-2 text-slate-400"><X size={14} /></button>}</div></Field>
+            <Field label="วันที่ขอ">
+              <div className="flex gap-1">
+                <div className="relative min-w-0 flex-1">
+                  <button ref={requestDateButtonRef} type="button" onClick={toggleDatePicker}
+                    aria-expanded={showRequestDatePicker} aria-controls={showRequestDatePicker ? "request-date-picker" : undefined}
+                    className={`${inputClass} flex items-center gap-2 text-left`}>
+                    <CalendarDays size={14} className="shrink-0 text-blue-500" />
+                    <span className="truncate">{rangeLabel}</span>
+                  </button>
+                  {showRequestDatePicker && <div ref={requestDatePickerRef} id="request-date-picker" className="absolute left-0 top-full z-50 mt-2 max-h-[calc(100dvh-32px)] w-[calc(100vw-2rem)] max-w-[330px] overflow-auto rounded-2xl border border-blue-100 bg-white shadow-2xl md:left-auto md:right-0 [&_.rdrCalendarWrapper]:w-full [&_.rdrMonth]:w-full [&_.rdrMonth]:px-2">
+                    <div className="flex items-center justify-between bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700"><span>เลือกช่วงวันที่ขอ</span><button type="button" onClick={clearDates}>ล้าง</button></div>
+                    {dateOptionsError && <p className="px-4 py-2 text-xs text-amber-700">โหลดวันที่ขอทั้งหมดไม่สำเร็จ จึงใช้วันที่จากรายการที่แสดง</p>}
+                    {firstRequestDate && lastRequestDate && calendarOptions?.years.length ? (
+                      <DateRange
+                        locale={th}
+                        editableDateInputs={false}
+                        moveRangeOnFirstSelection={false}
+                        ranges={hasRequestDateRange ? requestDateRange : EMPTY_REQUEST_DATE_RANGE}
+                        shownDate={requestCalendarToday}
+                        minDate={calendarMin}
+                        maxDate={calendarMax}
+                        disabledDay={(date) => date < firstRequestDate || date > lastRequestDate}
+                        navigatorRenderer={(focusedDate, changeShownDate) => {
+                          const year = focusedDate.getFullYear();
+                          const month = focusedDate.getMonth();
+                          const firstMonth = year === calendarMin.getFullYear() ? calendarMin.getMonth() : 0;
+                          const lastMonth = year === calendarMax.getFullYear() ? calendarMax.getMonth() : 11;
+                          return (
+                            <div className="flex justify-center gap-2 px-3 py-2 text-xs">
+                              <select aria-label="เลือกเดือน" className="rounded-lg border border-slate-200 px-2 py-1"
+                                value={month} onChange={(event) => changeShownDate(Number(event.target.value) - month, "monthOffset")}>
+                                {Array.from({ length: lastMonth - firstMonth + 1 }, (_, offset) => {
+                                  const value = firstMonth + offset;
+                                  return <option key={value} value={value}>{new Date(year, value, 1).toLocaleString("th-TH", { month: "long" })}</option>;
+                                })}
+                              </select>
+                              <select aria-label="เลือกปี" className="rounded-lg border border-slate-200 px-2 py-1"
+                                value={year} onChange={(event) => {
+                                  const nextYear = Number(event.target.value);
+                                  const minMonth = nextYear === calendarMin.getFullYear() ? calendarMin.getMonth() : 0;
+                                  const maxMonth = nextYear === calendarMax.getFullYear() ? calendarMax.getMonth() : 11;
+                                  const nextMonth = Math.min(maxMonth, Math.max(minMonth, month));
+                                  changeShownDate((nextYear - year) * 12 + nextMonth - month, "monthOffset");
+                                }}>
+                                {calendarYears.map((value) => <option key={value} value={value}>{value}</option>)}
+                              </select>
+                            </div>
+                          );
+                        }}
+                        onChange={(item: RangeKeyDict) => {
+                          const { startDate, endDate } = item.selection || {};
+                          if (!startDate || !endDate) return;
+                          setRequestDateRange([{ startDate, endDate, key: "selection" }]);
+                          setHasRequestDateRange(true);
+                          setCurrentPage(1);
+                        }}
+                        showDateDisplay={false}
+                        showPreview={false}
+                        rangeColors={["#2563eb"]}
+                      />
+                    ) : (
+                      <p className="px-4 py-3 text-xs text-slate-500">{calendarOptions ? "ไม่มีข้อมูลวันที่ขอในกลุ่มนี้" : "กำลังโหลดวันที่ขอ…"}</p>
+                    )}
+                    <div className="flex items-center justify-between gap-2 px-4 py-3"><span className="text-[10px] text-blue-600">{rangeLabel}</span><button type="button" onClick={() => setShowRequestDatePicker(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] text-white">เสร็จสิ้น</button></div>
+                  </div>}
+                </div>
+                {hasRequestDateRange && <button type="button" aria-label="ล้างช่วงวันที่" onClick={clearDates} className="rounded-xl border border-slate-200 px-2 text-slate-400"><X size={14} /></button>}
+              </div>
+            </Field>
             <div className="min-w-0 md:col-span-2 xl:col-span-4">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span id="process-date-group-label" className="text-[11px] font-bold text-slate-400">ขั้นตอนและวันที่</span>
@@ -1332,8 +1489,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                 event.currentTarget.value = "";
                 if (file) void importFleetExcel(file);
               }} />
-              {/* <button type="button" disabled={Boolean(excelBusy) || !canExportFleetExcel} onClick={() => void exportFleetExcel()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Download size={16} />{excelBusy === "export" ? "กำลังเตรียมไฟล์…" : "1. ดาวน์โหลด Excel"}</button>
-              <button type="button" disabled={Boolean(excelBusy) || !activeWarehouse} onClick={() => excelInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Upload size={16} />{excelBusy === "import" ? "กำลังบันทึก…" : "2. อัปโหลดไฟล์ที่แก้แล้ว"}</button> */}
+              <button type="button" disabled={Boolean(excelBusy) || !canExportFleetExcel} onClick={() => void exportFleetExcel()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Download size={16} />{excelBusy === "export" ? "กำลังเตรียมไฟล์…" : "1. ดาวน์โหลด Excel"}</button>
+              <button type="button" disabled={Boolean(excelBusy) || !activeWarehouse} onClick={() => excelInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Upload size={16} />{excelBusy === "import" ? "กำลังบันทึก…" : "2. อัปโหลดไฟล์ที่แก้แล้ว"}</button>
             </div>}
           </div>
           {showExcelTools && excelResult && <section aria-label="ผลการทำงาน Excel" className="border-b border-slate-100 bg-white px-4 py-3 text-xs">
@@ -1425,61 +1582,6 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
             <div className="border-t border-slate-100 px-4 py-2 text-right"><button type="button" className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100" onClick={() => { if (activeProcessCalendar === "from") setProcessDateFrom(""); else setProcessDateTo(""); setCurrentPage(1); setActiveProcessCalendar(null); }}>ล้างวันที่</button></div>
           </section>
         </div>, portalTarget)}
-
-      {portalTarget && showRequestDatePicker && createPortal(<div ref={requestDatePickerRef} className="fixed z-[100001] max-h-[calc(100dvh-32px)] w-[calc(100vw-2rem)] max-w-[330px] overflow-auto rounded-2xl border border-blue-100 bg-white shadow-2xl [&_.rdrCalendarWrapper]:w-full [&_.rdrMonth]:w-full [&_.rdrMonth]:px-2" style={requestDatePickerPosition}>
-        <div className="flex items-center justify-between bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700"><span>เลือกช่วงวันที่ขอ</span><button type="button" onClick={clearDates}>ล้าง</button></div>
-        {firstRequestDate && lastRequestDate && requestDateOptions?.years.length ? (
-          <DateRange
-            locale={th}
-            editableDateInputs={false}
-            moveRangeOnFirstSelection={false}
-            ranges={hasRequestDateRange ? requestDateRange : [{ key: "selection" }]}
-            shownDate={lastRequestDate}
-            minDate={firstRequestDate}
-            maxDate={lastRequestDate}
-            navigatorRenderer={(focusedDate, changeShownDate) => {
-              const year = focusedDate.getFullYear();
-              const month = focusedDate.getMonth();
-              const firstMonth = year === firstRequestDate.getFullYear() ? firstRequestDate.getMonth() : 0;
-              const lastMonth = year === lastRequestDate.getFullYear() ? lastRequestDate.getMonth() : 11;
-              return (
-                <div className="flex justify-center gap-2 px-3 py-2 text-xs">
-                  <select aria-label="เลือกเดือน" className="rounded-lg border border-slate-200 px-2 py-1"
-                    value={month} onChange={(event) => changeShownDate(Number(event.target.value) - month, "monthOffset")}>
-                    {Array.from({ length: lastMonth - firstMonth + 1 }, (_, offset) => {
-                      const value = firstMonth + offset;
-                      return <option key={value} value={value}>{new Date(year, value, 1).toLocaleString("th-TH", { month: "long" })}</option>;
-                    })}
-                  </select>
-                  <select aria-label="เลือกปี" className="rounded-lg border border-slate-200 px-2 py-1"
-                    value={year} onChange={(event) => {
-                      const nextYear = Number(event.target.value);
-                      const minMonth = nextYear === firstRequestDate.getFullYear() ? firstRequestDate.getMonth() : 0;
-                      const maxMonth = nextYear === lastRequestDate.getFullYear() ? lastRequestDate.getMonth() : 11;
-                      const nextMonth = Math.min(maxMonth, Math.max(minMonth, month));
-                      changeShownDate((nextYear - year) * 12 + nextMonth - month, "monthOffset");
-                    }}>
-                    {requestDateOptions.years.map((value) => <option key={value} value={value}>{value}</option>)}
-                  </select>
-                </div>
-              );
-            }}
-            onChange={(item: RangeKeyDict) => {
-              const { startDate, endDate } = item.selection || {};
-              if (!startDate || !endDate) return;
-              setRequestDateRange([{ startDate, endDate, key: "selection" }]);
-              setHasRequestDateRange(true);
-              setCurrentPage(1);
-            }}
-            showDateDisplay={false}
-            showPreview={false}
-            rangeColors={["#2563eb"]}
-          />
-        ) : (
-          <p className="px-4 py-3 text-xs text-slate-500">{loading ? "กำลังโหลดช่วงวันที่…" : requestDateOptions ? "ไม่มีข้อมูลวันที่ขอในกลุ่มนี้" : "โหลดช่วงวันที่ไม่ได้ กรุณารีเฟรช"}</p>
-        )}
-        <div className="flex items-center justify-between gap-2 px-4 py-3"><span className="text-[10px] text-blue-600">{rangeLabel}</span><button type="button" onClick={() => setShowRequestDatePicker(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] text-white">เสร็จสิ้น</button></div>
-      </div>, portalTarget)}
 
       {portalTarget && createPortal(<div style={{ position: "relative", zIndex: 100000 }}>
         <ExportTrackFleet open={openExportModal} onClose={() => setOpenExportModal(false)} requests={visibleRequests.map((item) => ({ ...item, id: item.id == null || item.id === "" ? null : Number.isSafeInteger(Number(item.id)) ? Number(item.id) : null }))} dcLabel={selectedDcLabel} exportApiUrl={exportApiUrl} />

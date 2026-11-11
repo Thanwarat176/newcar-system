@@ -4,8 +4,116 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
+  type ReactNode,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+
+type ChartPointer = { x: number; y: number };
+
+/** Convert viewport coordinates to SVG units, including zoom and horizontal scroll. */
+function nearestChartIndex(
+  svg: SVGSVGElement, clientX: number, clientY: number,
+  count: number, left: number, right: number, top: number, bottom: number,
+): number | null {
+  const matrix = svg.getScreenCTM();
+  if (!matrix || count < 1) return null;
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  const local = point.matrixTransform(matrix.inverse());
+  if (local.x < left || local.x > right || local.y < top || local.y > bottom) return null;
+  if (count === 1) return 0;
+  return Math.max(0, Math.min(count - 1, Math.round((local.x - left) / (right - left) * (count - 1))));
+}
+
+function ChartTooltip({ pointer, children }: {
+  pointer: ChartPointer;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 380, height: 220 });
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => {
+      const box = element.getBoundingClientRect();
+      setSize(current => current.width === box.width && current.height === box.height
+        ? current : { width: box.width, height: box.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // The tooltip only mounts after a pointer/focus event, never during SSR.
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const left = Math.max(12, Math.min(
+    pointer.x + 18 + size.width <= viewportWidth - 12 ? pointer.x + 18 : pointer.x - size.width - 18,
+    viewportWidth - size.width - 12,
+  ));
+  const top = Math.max(12, Math.min(
+    pointer.y + 18 + size.height <= viewportHeight - 12 ? pointer.y + 18 : pointer.y - size.height - 18,
+    viewportHeight - size.height - 12,
+  ));
+  return createPortal(
+    <div ref={ref} role="tooltip" style={{
+      position: "fixed", left, top, zIndex: 100100, pointerEvents: "none",
+      width: "min(420px, calc(100vw - 24px))", maxHeight: "calc(100dvh - 24px)",
+      overflow: "hidden", border: "1px solid #d6e3f1", borderRadius: 14,
+      background: "rgba(255,255,255,.98)", boxShadow: "0 12px 36px #1e36562b",
+      padding: "14px 16px", fontFamily: "inherit", fontSize: 13, lineHeight: 1.5,
+      color: "#344d70", fontVariantNumeric: "tabular-nums",
+    }}>{children}</div>, document.body,
+  );
+}
+
+const CHECK_DC_STYLES = `
+.check-dc-app{--dc-ink:#243b5a;--dc-muted:#73869e;--dc-blue:#2864b9;--dc-line:#dde6f0;font-family:inherit;color:var(--dc-ink);font-size:14px;line-height:1.6;background:#f2f6fb;border:1px solid var(--dc-line);border-radius:22px;box-shadow:0 8px 30px #233e6410;overflow:hidden}
+.check-dc-app *{box-sizing:border-box}
+.check-dc-app :is(button,input,select){font-family:inherit}
+.check-dc-app :is(button,input,select):focus-visible{outline:3px solid #93c5fd;outline-offset:3px}
+.check-dc-app button{cursor:pointer}
+.check-dc-app button:disabled{cursor:wait;opacity:.6}
+.check-dc-app :is(h2,h3,h4,p){overflow-wrap:anywhere}
+.check-dc-app .dc-page-header{padding:25px 28px;background:linear-gradient(115deg,#1e3656,#2a527f);border:0}
+.check-dc-app .dc-page-header h2{font-size:25px;letter-spacing:-.4px}
+.check-dc-app .dc-page-header p{font-size:13px}
+.check-dc-app .dc-page-header span{font-size:12px}
+.check-dc-app .dc-tabbar{padding:10px 22px 0;background:#fff;border-bottom:1px solid var(--dc-line)}
+.check-dc-app .dc-tabbar button{height:49px;padding:0 23px;font-size:14px;border-radius:12px 12px 0 0}
+.check-dc-app .dc-page-content{padding:24px}
+.check-dc-app .dc-page-content>div{gap:20px}
+.check-dc-app .dc-page-content section{border-color:var(--dc-line);border-radius:17px;box-shadow:0 3px 13px #233e6405}
+.check-dc-app .dc-page-content section>div:first-child[class*="border-b"]{padding:17px 20px;background:#f8fafd;border-color:var(--dc-line)}
+.check-dc-app .dc-page-content :is(h3,h4){font-size:18px;line-height:1.5;color:#28476e}
+.check-dc-app .dc-page-content .text-sm{font-size:15px}
+.check-dc-app .dc-page-content .text-xs{font-size:14px}
+.check-dc-app .dc-page-content [class*="text-[8px]"],.check-dc-app .dc-page-content [class*="text-[9px]"],.check-dc-app .dc-page-content [class*="text-[10px]"],.check-dc-app .dc-page-content [class*="text-[11px]"]{font-size:12px;line-height:1.55}
+.check-dc-app .dc-page-content .font-black{font-weight:700}
+.check-dc-app .dc-page-content [class*="min-h-[92px]"]{min-height:116px;padding:19px}
+.check-dc-app .dc-page-content .text-xl{font-size:28px;letter-spacing:-.5px}
+.check-dc-app .dc-page-content [class*="text-slate-400"]{color:#7c8da4}
+.check-dc-app :is(input,select){min-height:42px;font-size:14px!important;border-radius:10px;border-color:#cedbec}
+.check-dc-app .dc-page-content button{min-height:39px;font-size:13px}
+.check-dc-app .dc-page-content table{border-collapse:separate;border-spacing:0;font-size:14px}
+.check-dc-app .dc-page-content thead th{padding:15px 16px;background:#edf3fa;color:#4b6688;font-size:12px;font-weight:750;line-height:1.6;white-space:nowrap;border-bottom:1px solid #d7e3f1}
+.check-dc-app .dc-page-content tbody td{padding:15px 16px;line-height:1.6}
+.check-dc-app .dc-page-content tbody tr:nth-child(even){background:#fafcff}
+.check-dc-app .dc-page-content tbody tr:hover{background:#f0f6ff}
+.check-dc-app .dc-page-content tfoot td{padding:16px;font-size:14px}
+.check-dc-app .dc-page-content .overflow-x-auto{scrollbar-width:thin;scrollbar-color:#c3d1e3 transparent}
+.check-dc-app .dc-fleet-dashboard{padding:0;border:0;background:transparent}
+.check-dc-app .dc-fleet-dashboard>div:first-child{padding:18px 20px;background:#fff;border:1px solid var(--dc-line);border-radius:15px}
+.check-dc-app .dc-week-card{min-height:300px;padding:17px;border:1px solid #dce6f3;box-shadow:0 3px 12px #29476708}
+.check-dc-app .dc-week-card.dc-today{border:2px solid #648fc8;background:#fafdff}
+.check-dc-app .dc-status-chip{display:inline-flex;align-items:center;gap:7px;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;border:1px solid #d5e3f4;background:#eff6ff;color:#3766a6}
+@media(max-width:700px){.check-dc-app .dc-page-content{padding:14px}.check-dc-app .dc-page-header{padding:20px}.check-dc-app .dc-tabbar{padding-left:12px;padding-right:12px}.check-dc-app .dc-tabbar button{padding:0 16px}.check-dc-app .dc-page-content [class*="min-h-[92px]"]{padding:16px}.check-dc-app .dc-page-header h2{font-size:22px}}
+@media(prefers-reduced-motion:reduce){.check-dc-app *{animation:none!important;transition:none!important}}
+`;
+
 
 export interface RequestDetailItem {
   id?: string | number;
@@ -78,16 +186,6 @@ interface WorkloadItem {
   [key: string]: unknown;
 }
 
-interface FleetCheckStats {
-  total: number;
-  fleet_in: number;
-  fleet_supplement: number;
-  fleet_transferred_in: number;
-  fleet_crossdock: number;
-  fleet_transferred_out: number;
-  fleet_backhaul: number;
-}
-
 type DashboardPair = { actual: number; planned: number };
 type DashboardMatrix = Record<string, Record<string, DashboardPair>>;
 type DashboardStatus = { id: number; name: string; code: number };
@@ -130,7 +228,7 @@ type FleetCapacityData = {
   success: boolean;
   message?: string;
   categories: string[];
-  series: Array<{ name: string; data: number[] }>;
+  series: Array<{ name: string; data: (number | null)[] }>;
 };
 
 interface CheckDCProps {
@@ -148,24 +246,11 @@ const DEFAULT_REQUEST_API =
 const WORKLOAD_API =
   "http://192.168.144.22/CENTRAL/Daily_Operaion_codeing/pages/chart/api_workload.php";
 
-const FLEET_CHECK_API =
-  "https://lite.cpall.co.th/Logistic/daily-fleet-management-v2/api/get_fleet_check_all.php";
-
 const FLEET_DASHBOARD_API =
   "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_dashboard_by_dc.php";
 
 const FLEET_CAPACITY_API =
-  "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_daily_workload.php";
-
-const EMPTY_FLEET_STATS: FleetCheckStats = {
-  total: 0,
-  fleet_in: 0,
-  fleet_supplement: 0,
-  fleet_transferred_in: 0,
-  fleet_crossdock: 0,
-  fleet_transferred_out: 0,
-  fleet_backhaul: 0,
-};
+  "https://lite.cpall.co.th/Logistic/Daily-fleet-management-v2/api/get_daily_workload_noauth.php";
 
 function getArrayFromResponse<T>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[];
@@ -281,12 +366,16 @@ function formatThaiMonthYear(monthKey?: string): string {
 }
 
 function getTodayKey(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (key: string) => parts.find(item => item.type === key)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+function useTodayKey(): string {
+  const [day, setDay] = useState("");
+  useEffect(() => { setDay(getTodayKey()); }, []);
+  return day;
 }
 
 function getStatusText(status?: string): string {
@@ -308,6 +397,7 @@ function getStatusText(status?: string): string {
     [
       "pending_gm",
       "gm_pending",
+      "gm_checking",
       "waiting_gm",
       "wait_gm",
     ].includes(value)
@@ -357,18 +447,18 @@ function getStatusText(status?: string): string {
     return "รออนุมัติ";
   }
 
-  // รอสรรหาผู้ประกอบการ
+  // รอประเมินกองรถ
   if (
     [
       "wait fleet",
       "waiting fleet",
       "pending_fleet",
       "fleet_pending",
-      "รอสรรหาผู้ประกอบการ",
+      "รอประเมินกองรถ",
       "รอกองรถประเมิน",
     ].includes(value)
   ) {
-    return "รอสรรหาผู้ประกอบการ";
+    return "รอประเมินกองรถ";
   }
 
   // กำลังดำเนินการ
@@ -381,6 +471,7 @@ function getStatusText(status?: string): string {
       "in progress",
       "processing",
       "progress",
+      "process",
       "กำลังดำเนินการ",
     ].includes(value)
   ) {
@@ -435,7 +526,7 @@ function getStatusClass(status?: string): string {
 
   if (
     text === "กำลังดำเนินการ" ||
-    text === "รอสรรหาผู้ประกอบการ"
+    text === "รอประเมินกองรถ"
   ) {
     return "border-blue-200 bg-blue-50 text-blue-700";
   }
@@ -467,10 +558,12 @@ function DashboardStat({ title, value, active = false }: { title: string; value:
 }
 
 function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads: WorkloadItem[] }) {
-  const [selectedDate, setSelectedDate] = useState(getTodayKey);
+  const [selectedDate, setSelectedDate] = useState("");
+  useEffect(() => { setSelectedDate(getTodayKey()); }, []);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const dashboardController = useRef<AbortController | null>(null);
   const [dashboard, setDashboard] = useState<FleetDashboardData | null>(null);
   const [capacity, setCapacity] = useState<FleetCapacityData | null>(null);
-  const [hoveredCapacity, setHoveredCapacity] = useState<{ dataIndex: number } | null>(null);
   const [capacityLoading, setCapacityLoading] = useState(false);
   const [capacityError, setCapacityError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -478,32 +571,53 @@ function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads
 
   const loadDashboard = useCallback(async () => {
     if (!warehouse || !selectedDate) return;
+    dashboardController.current?.abort();
+    const controller = new AbortController();
+    dashboardController.current = controller;
     try {
       setLoading(true); setError("");
+      setDashboard(null);
       const params = new URLSearchParams({ action: "summary", warehouse, date: selectedDate });
-      const response = await fetch(`${FLEET_DASHBOARD_API}?${params.toString().replace(/\+/g, "%20")}`, { headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
+      const response = await fetch(`${FLEET_DASHBOARD_API}?${params.toString().replace(/\+/g, "%20")}`, { signal: controller.signal, headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
       const text = await response.text();
       if (!response.ok) throw new Error(`โหลด Dashboard ไม่สำเร็จ HTTP ${response.status}`);
       const result = JSON.parse(text) as FleetDashboardData;
       if (!result.success) throw new Error(result.message || "ไม่สามารถโหลด Dashboard ได้");
-      setDashboard(result);
+      if (!controller.signal.aborted) setDashboard(result);
     } catch (loadError) {
+      if (controller.signal.aborted) return;
       setDashboard(null);
       setError(loadError instanceof Error ? loadError.message : "เกิดข้อผิดพลาดในการโหลด Dashboard");
-    } finally { setLoading(false); }
+    } finally { if (!controller.signal.aborted) setLoading(false); }
   }, [selectedDate, warehouse]);
 
-  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+  useEffect(() => {
+    void loadDashboard();
+    return () => dashboardController.current?.abort();
+  }, [loadDashboard, refreshKey]);
 
   useEffect(() => {
-    if (!warehouse || !selectedDate) return;
+    if (!selectedDate) return;
     let cancelled = false;
     const loadCapacity = async () => {
       try {
         setCapacityLoading(true);
+        setCapacity(null);
         setCapacityError("");
-        const params = new URLSearchParams({ action: "summary", warehouse, date: selectedDate });
-        const response = await fetch(`${FLEET_CAPACITY_API}?${params.toString().replace(/\+/g, "%20")}`, { headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
+        const [year, month] = selectedDate.slice(0, 7).split("-").map(Number);
+        const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        // GET parameters represent an unspecified DC as empty strings, not "null".
+        const dcCode = warehouse.trim();
+        const params = new URLSearchParams({
+          dc_code: dcCode && dcCode.toUpperCase() !== "CENTER" ? dcCode : "",
+          dc_name: "",
+          startDate: `${monthKey}-01`,
+          endDate: `${monthKey}-${String(lastDay).padStart(2, "0")}`,
+          view_type: "monthly",
+        });
+        const url = `${FLEET_CAPACITY_API}?${params.toString().replace(/\+/g, "%20")}`;
+        const response = await fetch(url, { headers: { Accept: "application/json" }, credentials: "omit", cache: "no-store" });
         const text = await response.text();
         if (!response.ok) throw new Error(`โหลด Fleet Capacity ไม่สำเร็จ HTTP ${response.status}`);
         const result = JSON.parse(text) as FleetCapacityData;
@@ -520,24 +634,30 @@ function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads
     };
     void loadCapacity();
     return () => { cancelled = true; };
-  }, [selectedDate, warehouse]);
+  }, [selectedDate, warehouse, refreshKey]);
 
-  const capacityColors = ["#2878c8", "#4d8dca", "#9ec7df", "#8db8d5", "#7440a8", "#3f007d", "#b91c1c", "#f0523b"];
-  const capacityChartData = useMemo(() => {
-    if (!capacity) return { categories: [] as string[], series: [] as Array<{ name: string; data: number[] }> };
-    return { categories: capacity.categories, series: capacity.series };
+  const capacityData = useMemo(() => {
+    if (!capacity) return { categories: [], series: [] };
+    const visibleIndexes = capacity.categories
+      .map((_, index) => index)
+      .filter(index => capacity.series.some(series => {
+        const value = series.data[index];
+        return value != null && Number.isFinite(Number(value));
+      }));
+    return {
+      categories: visibleIndexes.map(index => capacity.categories[index]),
+      series: capacity.series.map(series => ({
+        ...series,
+        data: visibleIndexes.map(index => series.data[index] ?? null),
+      })),
+    };
   }, [capacity]);
-  const capacityValues = capacityChartData.series.flatMap((series) => series.data.map(Number)).filter(Number.isFinite);
-  const capacityMin = capacityValues.length ? Math.floor(Math.min(...capacityValues) / 10000) * 10000 : 0;
-  const capacityMax = capacityValues.length ? Math.ceil(Math.max(...capacityValues) / 10000) * 10000 : 1;
-  const capacityWidth = Math.max(760, capacityChartData.categories.length * 28);
-  const capacityHeight = 270;
-  const capacityLeft = 64;
-  const capacityTop = 18;
-  const capacityRight = 20;
-  const capacityBottom = 48;
-  const capacityX = (index: number) => capacityLeft + (index / Math.max(capacityChartData.categories.length - 1, 1)) * (capacityWidth - capacityLeft - capacityRight);
-  const capacityY = (value: number) => capacityTop + (capacityMax - value) / Math.max(capacityMax - capacityMin, 1) * (capacityHeight - capacityTop - capacityBottom);
+  const capacityLabel = (value: string) => /^\d{4}-\d{2}$/.test(value)
+    ? formatThaiMonthYear(value) : formatThaiDate(value);
+  const capacityNumber = (value: number | null | undefined) =>
+    value == null || !Number.isFinite(Number(value))
+      ? "—"
+      : Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
   const fleetCount = (name: string) => dashboard?.fleet_types.find((item) => normalizeText(item.fleet_type) === normalizeText(name))?.count || 0;
   const all = fleetCount("รถทั้งหมด") || Object.values(dashboard?.matrix_type || {}).reduce((total, row) => total + Object.values(row).reduce((sum, item) => sum + Number(item.actual || 0), 0), 0);
@@ -564,37 +684,55 @@ function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads
   const excludedVendorStatusIds = new Set([2, ...restStatusIds, ...repairStatusIds, ...noDriverStatusIds]);
   const otherStatusIds = (dashboard?.statuses || []).filter((status) => !excludedVendorStatusIds.has(status.id)).map((status) => status.id);
 
-  return <div className="space-y-5 rounded-xl border border-blue-100 bg-slate-50/70 p-3.5">
+  return <div className="dc-fleet-dashboard space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div><h3 className="text-sm font-black text-slate-900">Dashboard สรุปข้อมูลกองรถ</h3><p className="mt-1 text-[10px] text-slate-500">คลัง <b className="text-blue-700">{warehouse}</b></p></div>
       <div className="flex gap-2">
         <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 outline-none" />
-        <button type="button" disabled={loading} onClick={() => void loadDashboard()} className="h-9 rounded-lg bg-blue-600 px-3 text-[10px] font-black text-white disabled:opacity-50">{loading ? "กำลังโหลด..." : "รีเฟรช"}</button>
+        <button type="button" disabled={loading || capacityLoading || !selectedDate} onClick={() => setRefreshKey(key => key + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-[10px] font-black text-white disabled:opacity-50">{loading || capacityLoading ? "กำลังโหลด..." : "รีเฟรช"}</button>
       </div>
     </div>
     {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">{error}</div>}
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="px-4 pb-2 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/50 px-5 py-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-black text-slate-900">Fleet Capacity Dashboard</h3><span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[9px] font-black text-blue-600">? คำอธิบายกราฟแต่ละเส้น</span></div>
-          <p className="mt-1 text-[10px] font-bold text-slate-400">แนวโน้มปริมาณงานและความสามารถในการรองรับรถ</p>
+          <h3 className="text-base font-black text-slate-900">Fleet Capacity · สรุปตัวเลข</h3>
+          <p className="mt-1 text-sm text-slate-500">ปริมาณงานและความสามารถในการรองรับรถ แยกตามช่วงเวลา</p>
         </div>
       </div>
-      {capacityError && <div className="mx-4 mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">{capacityError}</div>}
-      {capacityLoading ? <div className="flex h-[330px] items-center justify-center gap-2 text-xs font-bold text-slate-500"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />กำลังโหลด Fleet Capacity...</div> : capacityChartData.categories.length === 0 ? <div className="flex h-[330px] items-center justify-center text-xs font-bold text-slate-400">ไม่พบข้อมูล Fleet Capacity</div> : <>
-        <div className="relative overflow-x-auto px-2">
-          {hoveredCapacity && <div className="pointer-events-none sticky left-20 top-3 z-20 mb-[-292px] w-fit min-w-[370px] overflow-hidden rounded-lg border border-slate-300 bg-white/95 shadow-2xl backdrop-blur-sm">
-            <div className="border-b border-slate-300 bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">{formatThaiDate(capacityChartData.categories[hoveredCapacity.dataIndex])}</div>
-            <div className="space-y-2 px-4 py-3">{capacityChartData.series.map((series, seriesIndex) => <div key={series.name} className="flex items-center justify-between gap-4"><div className="flex min-w-0 items-center gap-2"><span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: capacityColors[seriesIndex % capacityColors.length] }} /><span className="truncate text-[11px] font-bold text-slate-700">{series.name}:</span></div><span className="shrink-0 text-sm font-black text-slate-900">{formatNumber(Math.round(Number(series.data[hoveredCapacity.dataIndex] || 0)))} <span className="text-[10px] text-slate-500">USC</span></span></div>)}</div>
-          </div>}
-          <svg width={capacityWidth} height={capacityHeight} viewBox={`0 0 ${capacityWidth} ${capacityHeight}`} className="block h-[300px] min-w-[760px] w-full" onMouseLeave={() => setHoveredCapacity(null)}>
-          {Array.from({ length: 6 }, (_, index) => capacityMax - ((capacityMax - capacityMin) / 5) * index).map((value, index) => { const y = capacityY(value); return <g key={`capacity-grid-${index}`}><line x1={capacityLeft} y1={y} x2={capacityWidth - capacityRight} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" /><text x={capacityLeft - 8} y={y + 3} textAnchor="end" fontSize="9" fontWeight="700" fill="#64748b">{formatNumber(Math.round(value))}</text></g>; })}
-          {capacityChartData.categories.map((date, index) => <g key={date}><line x1={capacityX(index)} y1={capacityTop} x2={capacityX(index)} y2={capacityHeight - capacityBottom} stroke={hoveredCapacity?.dataIndex === index ? "#94a3b8" : "#f1f5f9"} strokeWidth={hoveredCapacity?.dataIndex === index ? 1.5 : 1} strokeDasharray="3 3" /><rect x={capacityX(index) - 12} y={capacityTop} width="24" height={capacityHeight - capacityTop - capacityBottom} fill="transparent" className="cursor-crosshair" onMouseEnter={() => setHoveredCapacity({ dataIndex: index })} /><text x={capacityX(index)} y={capacityHeight - capacityBottom + 18} textAnchor="end" transform={`rotate(-45 ${capacityX(index)} ${capacityHeight - capacityBottom + 18})`} fontSize="8" fontWeight="700" fill="#64748b">{`${date.slice(8, 10)}/${date.slice(5, 7)}`}</text></g>)}
-          {capacityChartData.series.map((series, seriesIndex) => <g key={series.name}><polyline points={series.data.map((value, index) => `${capacityX(index)},${capacityY(Number(value || 0))}`).join(" ")} fill="none" stroke={capacityColors[seriesIndex % capacityColors.length]} strokeWidth={seriesIndex < 2 ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />{hoveredCapacity && <circle cx={capacityX(hoveredCapacity.dataIndex)} cy={capacityY(Number(series.data[hoveredCapacity.dataIndex] || 0))} r="5" fill="white" stroke={capacityColors[seriesIndex % capacityColors.length]} strokeWidth="3" pointerEvents="none" />}</g>)}
-          <text x="18" y={capacityHeight / 2} transform={`rotate(-90 18 ${capacityHeight / 2})`} textAnchor="middle" fontSize="10" fontWeight="800" fill="#94a3b8">USC</text>
-        </svg></div>
-        <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 border-t border-slate-100 px-4 py-3">{capacityChartData.series.map((series, index) => <span key={series.name} className="flex items-center gap-1.5 text-[9px] font-black text-slate-600"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: capacityColors[index % capacityColors.length] }} />{series.name}</span>)}</div>
-      </>}
+      {capacityError && <div role="alert" className="mx-5 my-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">{capacityError}</div>}
+      {capacityLoading ? (
+        <div role="status" className="flex min-h-[160px] items-center justify-center gap-3 text-sm font-bold text-slate-500"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />กำลังโหลด Fleet Capacity...</div>
+      ) : capacityData.categories.length === 0 || capacityData.series.length === 0 ? (
+        <div className="flex min-h-[160px] items-center justify-center text-sm font-bold text-slate-400">ไม่พบข้อมูล Fleet Capacity</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <caption className="sr-only">สรุปตัวเลข Fleet Capacity คลัง {warehouse}</caption>
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th scope="col" className="sticky left-0 z-10 min-w-[280px] border-r border-slate-200 bg-slate-50 px-5 py-4 text-left font-black text-slate-700">รายการ</th>
+                  {capacityData.categories.map((period, index) => (
+                    <th key={`${period}-${index}`} scope="col" className="min-w-[180px] whitespace-nowrap px-5 py-4 text-right font-black text-blue-800">{capacityLabel(period)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {capacityData.series.map((series, rowIndex) => (
+                  <tr key={`${series.name}-${rowIndex}`} className="group border-b border-slate-100 last:border-b-0 hover:bg-blue-50/50">
+                    <th scope="row" className={`sticky left-0 z-10 border-r border-slate-200 px-5 py-4 text-left font-bold text-slate-700 group-hover:bg-blue-50 ${rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>{series.name}</th>
+                    {capacityData.categories.map((period, columnIndex) => (
+                      <td key={`${period}-${columnIndex}`} className={`whitespace-nowrap px-5 py-4 text-right text-lg font-extrabold ${series.data[columnIndex] == null ? "text-slate-300" : "text-slate-900"} ${rowIndex % 2 ? "bg-slate-50/50" : ""}`}>{capacityNumber(series.data[columnIndex])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-sm text-slate-500">— หมายถึงไม่มีข้อมูล · เลื่อนตารางแนวนอนเพื่อดูทุกช่วงเวลา</div>
+        </>
+      )}
     </section>
     {dashboard && <>
       <section><h3 className="mb-2 text-sm font-black text-slate-900"><span className="mr-1.5 text-blue-600">▣</span>ประเภทรถยนต์</h3>
@@ -617,11 +755,11 @@ function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads
             const actualWorkloadFc = workloadMetric(dailyWorkload, ["WORKLOAD_FC", "workload_fc", "ACTUAL_WORKLOAD_FC"]);
             const fleetCap = workloadMetric(dailyWorkload, ["FLEET_CAP_TT_NORMAL", "fleet_cap_tt_normal", "FLEET_CAP", "TT_NORMAL"]);
 
-            return <article key={item.date} className={`flex min-h-[278px] flex-col rounded-xl bg-white p-3 shadow-sm ${item.is_today ? "border-2 border-rose-500" : "border-2 border-orange-500"}`}>
+            return <article key={item.date} className={`dc-week-card flex flex-col rounded-xl bg-white ${item.is_today ? "dc-today" : ""}`}>
               <div className="flex min-h-[48px] items-start justify-between gap-2 border-b border-slate-200 pb-2">
                 <div><p className="text-sm font-black text-slate-900">{item.day_name}</p><p className="mt-0.5 text-[10px] font-bold text-slate-500">{item.date.slice(8, 10)}/{item.date.slice(5, 7)}</p></div>
                 <div className="flex flex-col items-end gap-1">
-                  {item.is_today ? <><span className="rounded-full bg-violet-600 px-2 py-1 text-[9px] font-black text-white">วันนี้</span><span className="rounded-md bg-rose-600 px-2 py-1 text-[8px] font-black text-white">เรียกรถหยุด / ขอรถเสริม</span></> : <span className="rounded-md bg-orange-500 px-2 py-1 text-[9px] font-black text-slate-900">ลดการใช้รถ</span>}
+                  <span className="dc-status-chip">{item.is_today ? "วันนี้" : "แผนรายวัน"}</span>
                 </div>
               </div>
               <div className="mt-3"><p className="text-[9px] font-black uppercase tracking-wide text-slate-400">ตามแผน (Plan)</p><div className="mt-1 flex justify-between text-[10px] font-black"><span className="text-blue-700">● วิ่ง: {formatNumber(item.p_work)}</span><span className="text-orange-700">● หยุด: {formatNumber(item.p_down)}</span></div></div>
@@ -719,6 +857,179 @@ function FleetDashboard({ warehouse, workloads }: { warehouse: string; workloads
   </div>;
 }
 
+type WorkloadChartPoint = {
+  dateKey: string;
+  dateLabel: string;
+  forecast: number;
+  workload: number;
+};
+
+function WorkloadForecastChart({
+  data, monthLabel, todayKey, loading, error,
+}: {
+  data: WorkloadChartPoint[];
+  monthLabel: string;
+  todayKey: string;
+  loading: boolean;
+  error: string;
+}) {
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const [chartPointer, setChartPointer] = useState<ChartPointer | null>(null);
+  useEffect(() => {
+    const dismiss = () => { setChartPointer(null); setActiveDate(null); };
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => { window.removeEventListener("scroll", dismiss, true); window.removeEventListener("resize", dismiss); };
+  }, []);
+  useEffect(() => { setChartPointer(null); setActiveDate(null); }, [data]);
+  const [showForecast, setShowForecast] = useState(true);
+  const [showWorkload, setShowWorkload] = useState(true);
+  const points = data.map(item => ({
+    ...item,
+    forecast: Number.isFinite(Number(item.forecast)) ? Math.max(0, Number(item.forecast)) : 0,
+    workload: Number.isFinite(Number(item.workload)) ? Math.max(0, Number(item.workload)) : 0,
+  }));
+  const n = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const selected = points.find(item => item.dateKey === activeDate);
+  const forecastTotal = points.reduce((sum, item) => sum + item.forecast, 0);
+  const actualTotal = points.reduce((sum, item) => sum + item.workload, 0);
+  const maximum = Math.max(0, ...points.flatMap(item => [item.forecast, item.workload]));
+  const step = Math.max(1000, Math.ceil(maximum * 1.12 / 5 / 1000) * 1000);
+  const ceiling = step * 5;
+  const width = Math.max(1100, points.length * 65 + 170);
+  const height = 460;
+  const left = 140;
+  const right = width - 40;
+  const top = 35;
+  const bottom = height - 85;
+  const x = (index: number) => points.length <= 1 ? (left + right) / 2 : left + index / (points.length - 1) * (right - left);
+  const y = (value: number) => bottom - value / ceiling * (bottom - top);
+  const seriesPoints = (key: "forecast" | "workload") =>
+    points.map((item, index) => `${x(index)},${y(item[key])}`).join(" ");
+  const area = points.length > 1
+    ? `M ${x(0)},${bottom} ${points.map((item, index) => `L ${x(index)},${y(item.workload)}`).join(" ")} L ${x(points.length - 1)},${bottom} Z`
+    : "";
+  const panel = {
+    border: "1px solid #dbe5f0", borderRadius: 20, background: "#fff",
+    overflow: "hidden", boxShadow: "0 8px 26px rgba(30,58,95,.06)",
+  };
+  const metrics = [
+    { label: "Forecast FC รวม", value: forecastTotal, color: "#64748b", background: "#f8fafc" },
+    { label: "Workload FC รวม", value: actualTotal, color: "#2563eb", background: "#eff6ff" },
+  ];
+  return (
+    <section style={panel} aria-label="กราฟ Forecast และ Workload">
+      {selected && chartPointer && <ChartTooltip pointer={chartPointer}>
+        <div style={{ fontSize: 15, fontWeight: 800, borderBottom: "1px solid #e6edf5", paddingBottom: 9, marginBottom: 8 }}>{selected.dateLabel}</div>
+        {showForecast && <div style={{ display: "flex", justifyContent: "space-between", gap: 20, padding: "5px 0" }}><span>Forecast FC</span><strong>{n(selected.forecast)}</strong></div>}
+        {showWorkload && <div style={{ display: "flex", justifyContent: "space-between", gap: 20, padding: "5px 0", color: "#2563eb" }}><span>Workload FC</span><strong>{n(selected.workload)}</strong></div>}
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e6edf5", display: "flex", justifyContent: "space-between", gap: 20 }}><span>ส่วนต่าง Workload − Forecast</span><strong>{selected.workload > selected.forecast ? "+" : ""}{n(selected.workload - selected.forecast)}</strong></div>
+      </ChartTooltip>}
+      <div style={{ padding: "24px 26px", borderBottom: "1px solid #e8eef5", background: "linear-gradient(110deg,#f0f6ff,#ffffff 75%)", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 20 }}>
+        <div>
+          <div style={{ color: "#6682a5", fontSize: 12, fontWeight: 800, letterSpacing: 1.5 }}>WORKLOAD OVERVIEW</div>
+          <h4 style={{ margin: "5px 0 0", fontSize: 23, fontWeight: 800, color: "#203b60" }}>กราฟ Forecast และ Workload</h4>
+          <p style={{ margin: "6px 0 0", fontSize: 15, color: "#71839a" }}>{monthLabel} · เปรียบเทียบปริมาณงานรายวัน</p>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {[
+            { name: "Forecast FC", color: "#94a3b8", visible: showForecast, toggle: () => setShowForecast(value => !value) },
+            { name: "Workload FC", color: "#2563eb", visible: showWorkload, toggle: () => setShowWorkload(value => !value) },
+          ].map(item => (
+            <button key={item.name} type="button" aria-pressed={item.visible} onClick={item.toggle}
+              style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 15px", border: "1px solid #dce6f2", borderRadius: 12, background: item.visible ? "#fff" : "#f1f5f9", color: item.visible ? "#365170" : "#94a3b8", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+              <span style={{ width: 23, height: 4, borderRadius: 4, background: item.color, opacity: item.visible ? 1 : .25 }} />
+              {item.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14, padding: "20px 24px 0" }}>
+        {metrics.map(item => (
+          <div key={item.label} style={{ padding: "16px 18px", border: "1px solid #e3eaf3", borderRadius: 14, background: item.background }}>
+            <div style={{ fontSize: 13, color: item.color, fontWeight: 700 }}>{item.label}</div>
+            <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, color: item.color, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>{loading || error ? "—" : n(item.value)}</div>
+          </div>
+        ))}
+      </div>
+      {loading ? (
+        <div role="status" style={{ minHeight: 460, display: "grid", placeItems: "center", fontSize: 16, color: "#71839a" }}>กำลังโหลดข้อมูลกราฟ...</div>
+      ) : error ? (
+        <div role="alert" style={{ margin: 24, padding: 20, borderRadius: 12, background: "#fff1f2", color: "#be123c", fontSize: 15 }}>{error}</div>
+      ) : points.length === 0 ? (
+        <div style={{ minHeight: 460, display: "grid", placeItems: "center", fontSize: 16, color: "#94a3b8" }}>ไม่พบข้อมูล Workload ของเดือนนี้</div>
+      ) : (
+        <>
+          <div style={{ minHeight: 64, padding: "20px 26px 12px", fontSize: 14, color: "#73869e" }}>
+            วางเมาส์ แตะ หรือใช้ปุ่ม Tab บนกราฟเพื่อดูข้อมูลรายวัน
+          </div>
+          <div style={{ overflowX: "auto", padding: "0 12px 8px", scrollbarWidth: "thin" }}>
+            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
+              role="img" aria-label={`กราฟ Forecast และ Workload ${monthLabel}`}
+              style={{ display: "block", width, minWidth: "100%", height, fontFamily: "inherit" }}
+              onPointerMove={event => {
+                const index = nearestChartIndex(event.currentTarget, event.clientX, event.clientY, points.length, left, right, top, bottom);
+                setActiveDate(index === null ? null : points[index].dateKey);
+                setChartPointer(index === null ? null : { x: event.clientX, y: event.clientY });
+              }} onPointerLeave={() => { setActiveDate(null); setChartPointer(null); }}
+              onPointerCancel={() => { setActiveDate(null); setChartPointer(null); }}>
+              <rect x={left} y={top} width={right - left} height={bottom - top} rx="12" fill="#f8fafc" />
+              {[0, 1, 2, 3, 4, 5].map(index => {
+                const value = index * step;
+                return <g key={index}>
+                  <line x1={left} x2={right} y1={y(value)} y2={y(value)} stroke="#dfe7f0" strokeDasharray={index ? "4 6" : undefined} />
+                  <line x1={left - 7} x2={left} y1={y(value)} y2={y(value)} stroke="#94a3b8" strokeWidth="2" />
+                  <text x={left - 17} y={y(value) + 6} textAnchor="end" fontSize="18" fontWeight="700" fill="#64748b">{n(value)}</text>
+                </g>;
+              })}
+              <text x={left - 17} y="18" textAnchor="end" fontSize="13" fontWeight="700" fill="#94a3b8">ปริมาณงาน</text>
+              <line x1={left} x2={left} y1={top} y2={bottom} stroke="#94a3b8" strokeWidth="2" />
+              <line x1={left} x2={right} y1={bottom} y2={bottom} stroke="#94a3b8" strokeWidth="2" />
+              {showWorkload && area && <path d={area} fill="#2563eb" fillOpacity=".065" pointerEvents="none" />}
+              {showForecast && <polyline points={seriesPoints("forecast")} fill="none" stroke="#94a3b8" strokeWidth="3" strokeDasharray="8 6" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />}
+              {showWorkload && <polyline points={seriesPoints("workload")} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />}
+              {points.map((item, index) => {
+                const active = item.dateKey === activeDate;
+                const today = item.dateKey === todayKey;
+                const px = x(index);
+                const spacing = points.length <= 1 ? right - left : (right - left) / (points.length - 1);
+                const hitLeft = Math.max(left, px - spacing / 2);
+                const hitRight = Math.min(right, px + spacing / 2);
+                return <g key={`${item.dateKey}-${index}`}>
+                  {active && <line x1={px} x2={px} y1={top} y2={bottom} stroke="#93c5fd" strokeDasharray="4 4" strokeWidth="2" />}
+                  {showForecast && <circle cx={px} cy={y(item.forecast)} r={active ? 6 : 4} fill="#fff" stroke="#94a3b8" strokeWidth="2.5" pointerEvents="none" />}
+                  {showWorkload && <circle cx={px} cy={y(item.workload)} r={active ? 7 : 4.5} fill="#fff" stroke="#2563eb" strokeWidth="3" pointerEvents="none" />}
+                  <line x1={px} x2={px} y1={bottom} y2={bottom + 7} stroke="#94a3b8" strokeWidth="2" />
+                  {(today || active) && <rect x={px - 20} y={bottom + 16} width="40" height="32" rx="10" fill={today ? "#2563eb" : "#eff6ff"} />}
+                  <text x={px} y={bottom + 39} textAnchor="middle" fontSize="18" fontWeight="750" fill={today ? "#fff" : active ? "#2563eb" : "#64748b"}>{String(Number(item.dateKey.slice(8, 10)))}</text>
+                  {today && <text x={px} y={bottom + 67} textAnchor="middle" fontSize="12" fontWeight="700" fill="#2563eb">วันนี้</text>}
+                  <rect x={hitLeft} y={top} width={Math.max(1, hitRight - hitLeft)} height={bottom - top} fill="transparent"
+                    role="button" tabIndex={0} aria-label={`${item.dateLabel}: Forecast ${n(item.forecast)} Workload ${n(item.workload)}`}
+                    style={{ cursor: "crosshair" }} onFocus={event => {
+                      const box = event.currentTarget.getBoundingClientRect();
+                      setActiveDate(item.dateKey);
+                      setChartPointer({ x: box.left + box.width / 2, y: box.top + 30 });
+                    }}
+                    onBlur={() => { setActiveDate(null); setChartPointer(null); }}
+                    onClick={event => { setActiveDate(item.dateKey); setChartPointer({ x: event.clientX, y: event.clientY }); }}
+                    onKeyDown={event => {
+                      if (event.key === "Escape") { setActiveDate(null); setChartPointer(null); }
+                      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActiveDate(item.dateKey); }
+                    }} />
+                </g>;
+              })}
+            </svg>
+          </div>
+          <div style={{ padding: "13px 24px", borderTop: "1px solid #e8eef5", background: "#fafcff", display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8, color: "#8293a9", fontSize: 12 }}>
+            <span>แกน X: วันที่ · แกน Y: ปริมาณงาน</span>
+            <span>เลื่อนซ้าย–ขวาเพื่อดูครบทุกวัน · คลิกชื่อเส้นเพื่อเปิดหรือซ่อน</span>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function CheckDC({
   data,
   allRequests,
@@ -742,23 +1053,20 @@ export default function CheckDC({
   const [workloadError, setWorkloadError] = useState("");
   const [selectedWorkloadMonth, setSelectedWorkloadMonth] = useState("");
 
-  const [fleetStats, setFleetStats] =
-    useState<FleetCheckStats>(EMPTY_FLEET_STATS);
-  const [loadingFleet, setLoadingFleet] = useState(false);
-  const [fleetError, setFleetError] = useState("");
-
   const [selectedIssueTruckType, setSelectedIssueTruckType] = useState("");
   const [workloadViewMode, setWorkloadViewMode] =
     useState<"chart" | "table">("chart");
 
   useEffect(() => {
     if (allRequests) {
+      setLoadingRequests(false);
       setLocalRequests(allRequests);
     }
   }, [allRequests]);
 
   useEffect(() => {
     if (data?.id !== null && data?.id !== undefined) {
+      setLoadingRequests(false);
       setSelectedRequestId(String(data.id));
     }
   }, [data?.id]);
@@ -803,12 +1111,9 @@ export default function CheckDC({
         if (!cancelled) {
           setLocalRequests(rows);
 
-          if (rows.length > 0 && !selectedRequestId) {
-            const firstId = rows[0].id;
-            setSelectedRequestId(
-              firstId !== null && firstId !== undefined ? String(firstId) : "",
-            );
-          }
+          setSelectedRequestId(current => current || (
+            rows[0]?.id != null ? String(rows[0].id) : ""
+          ));
         }
       } catch (error) {
         if (!cancelled) {
@@ -829,7 +1134,7 @@ export default function CheckDC({
     return () => {
       cancelled = true;
     };
-  }, [allRequests, data, requestApiUrl, selectedRequestId]);
+  }, [allRequests, data, requestApiUrl]);
 
   const resolvedData = useMemo<RequestItem | null>(() => {
     if (data) return data;
@@ -845,12 +1150,12 @@ export default function CheckDC({
     return localRequests[0] ?? null;
   }, [data, localRequests, selectedRequestId]);
 
-  const todayKey = getTodayKey();
+  const todayKey = useTodayKey();
   const currentMonthKey = todayKey.slice(0, 7);
   const activeWorkloadMonth = selectedWorkloadMonth || currentMonthKey;
 
   useEffect(() => {
-    if (!resolvedData) return;
+    if (!resolvedData || !currentMonthKey) return;
 
     setActiveTab("summary");
     setSelectedIssueTruckType(resolvedData.fleet_truck_type || "");
@@ -887,255 +1192,6 @@ export default function CheckDC({
     void fetchWorkloads();
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    if (!resolvedData?.dc_code) {
-      setFleetStats(EMPTY_FLEET_STATS);
-      return;
-    }
-  
-    let cancelled = false;
-  
-    const fetchFleetCheck = async () => {
-      try {
-        setLoadingFleet(true);
-        setFleetError("");
-  
-        const normalizedDcCode = String(resolvedData.dc_code).trim();
-  
-        const params = new URLSearchParams({
-          dc: normalizedDcCode,
-        });
-  
-        const queryString = params
-          .toString()
-          .replace(/\+/g, "%20");
-  
-        const response = await fetch(
-          `${FLEET_CHECK_API}?${queryString}`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-            },
-            cache: "no-store",
-            credentials: "omit",
-          },
-        );
-  
-        const responseText = await response.text();
-        let result: unknown = null;
-  
-        try {
-          result = responseText
-            ? JSON.parse(responseText)
-            : null;
-        } catch {
-          throw new Error(
-            "Fleet Check API ไม่ได้ส่งข้อมูล JSON กลับมา",
-          );
-        }
-  
-        if (!response.ok) {
-          const message =
-            result &&
-            typeof result === "object" &&
-            "message" in result
-              ? String(
-                  (result as { message?: unknown })
-                    .message || "",
-                )
-              : "";
-  
-          throw new Error(
-            message ||
-              `Fleet Check API Error ${response.status}`,
-          );
-        }
-  
-        if (
-          result &&
-          typeof result === "object" &&
-          "success" in result &&
-          (result as { success?: boolean }).success === false
-        ) {
-          const message =
-            "message" in result
-              ? String(
-                  (result as { message?: unknown })
-                    .message || "",
-                )
-              : "";
-  
-          throw new Error(
-            message ||
-              "ไม่สามารถโหลดข้อมูลสถานะกองรถได้",
-          );
-        }
-  
-        const rows =
-          getArrayFromResponse<
-            Record<string, unknown>
-          >(result);
-  
-        const newStats: FleetCheckStats = {
-          total: 0,
-          fleet_in: 0,
-          fleet_supplement: 0,
-          fleet_transferred_in: 0,
-          fleet_crossdock: 0,
-          fleet_transferred_out: 0,
-          fleet_backhaul: 0,
-        };
-  
-        rows.forEach((item) => {
-          const fleetType = normalizeText(
-            getValueIgnoreCase(item, "fleet_type") ||
-              getValueIgnoreCase(item, "type") ||
-              getValueIgnoreCase(item, "fleet_status"),
-          );
-  
-          const quantity = Number(
-            getValueIgnoreCase(item, "qty") ||
-              getValueIgnoreCase(item, "count") ||
-              getValueIgnoreCase(item, "total") ||
-              1,
-          );
-  
-          const safeQuantity = Number.isNaN(quantity)
-            ? 0
-            : quantity;
-  
-          newStats.total += safeQuantity;
-  
-          if (fleetType === "รถในกอง") {
-            newStats.fleet_in += safeQuantity;
-          } else if (fleetType === "รถเสริม") {
-            newStats.fleet_supplement += safeQuantity;
-          } else if (
-            fleetType === "รถโอนมาช่วย" ||
-            fleetType === "โอนมาช่วย"
-          ) {
-            newStats.fleet_transferred_in +=
-              safeQuantity;
-          } else if (
-            fleetType === "CROSS DOCK" ||
-            fleetType === "CROSSDOCK"
-          ) {
-            newStats.fleet_crossdock += safeQuantity;
-          } else if (
-            fleetType === "รถโอนไปช่วยคลังอื่น" ||
-            fleetType === "โอนไปช่วยคลังอื่น"
-          ) {
-            newStats.fleet_transferred_out +=
-              safeQuantity;
-          } else if (fleetType === "BACKHAUL") {
-            newStats.fleet_backhaul += safeQuantity;
-          }
-        });
-  
-        if (!cancelled) {
-          setFleetStats(newStats);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setFleetError(
-            error instanceof Error
-              ? error.message
-              : "ไม่สามารถโหลดข้อมูลสถานะกองรถได้",
-          );
-  
-          setFleetStats(EMPTY_FLEET_STATS);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingFleet(false);
-        }
-      }
-    };
-  
-    void fetchFleetCheck();
-  
-    return () => {
-      cancelled = true;
-    };
-  }, [resolvedData?.dc_code]);
-
-  const fetchFleetStats = useCallback(async (dcCode: string) => {
-    const normalizedDcCode = String(dcCode || "").trim();
-
-    if (!normalizedDcCode) {
-      setFleetStats(EMPTY_FLEET_STATS);
-      setFleetError("ไม่พบรหัส DC");
-      return;
-    }
-
-    try {
-      setLoadingFleet(true);
-      setFleetError("");
-
-      const url =
-        `${FLEET_CHECK_API}?dc=` +
-        encodeURIComponent(normalizedDcCode);
-
-      const response = await fetch(url, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const responseText = await response.text();
-      let result: unknown = null;
-
-      try {
-        result = responseText ? JSON.parse(responseText) : null;
-      } catch {
-        throw new Error("Fleet Check API ไม่ได้ส่งข้อมูล JSON กลับมา");
-      }
-
-      if (!response.ok) {
-        throw new Error(`Fleet Check API Error ${response.status}`);
-      }
-
-      const object =
-        result && typeof result === "object"
-          ? (result as Record<string, unknown>)
-          : {};
-
-      const stats =
-        object.stats && typeof object.stats === "object"
-          ? (object.stats as Record<string, unknown>)
-          : object;
-
-      setFleetStats({
-        total: Number(stats.total || 0),
-        fleet_in: Number(stats.fleet_in || 0),
-        fleet_supplement: Number(stats.fleet_supplement || 0),
-        fleet_transferred_in: Number(stats.fleet_transferred_in || 0),
-        fleet_crossdock: Number(stats.fleet_crossdock || 0),
-        fleet_transferred_out: Number(stats.fleet_transferred_out || 0),
-        fleet_backhaul: Number(stats.fleet_backhaul || 0),
-      });
-    } catch (error) {
-      setFleetStats(EMPTY_FLEET_STATS);
-      setFleetError(
-        error instanceof Error
-          ? error.message
-          : "ไม่สามารถโหลดข้อมูลรถในคลังได้",
-      );
-    } finally {
-      setLoadingFleet(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!resolvedData?.dc_code) {
-      setFleetStats(EMPTY_FLEET_STATS);
-      setFleetError("");
-      return;
-    }
-
-    void fetchFleetStats(resolvedData.dc_code);
-  }, [fetchFleetStats, resolvedData?.dc_code]);
 
   const replacementTruckRows = useMemo<RequestDetailItem[]>(() => {
     if (!resolvedData) return [];
@@ -1183,39 +1239,6 @@ export default function CheckDC({
       license,
     }));
   }, [resolvedData]);
-
-  const sameDcRequests = useMemo(() => {
-    if (!resolvedData) return [];
-
-    return localRequests.filter(
-      (item) =>
-        normalizeText(item.dc_code) === normalizeText(resolvedData.dc_code),
-    );
-  }, [localRequests, resolvedData]);
-
-  const dcSummary = useMemo(() => {
-    const totalQty = sameDcRequests.reduce(
-      (sum, item) => sum + Number(item.qty || 0),
-      0,
-    );
-
-    const waitingCount = sameDcRequests.filter(
-      (item) => getStatusText(item.status) === "รออนุมัติ",
-    ).length;
-
-    const progressCount = sameDcRequests.filter((item) =>
-      ["กำลังดำเนินการ", "รอสรรหาผู้ประกอบการ"].includes(
-        getStatusText(item.status),
-      ),
-    ).length;
-
-    return {
-      totalRequest: sameDcRequests.length,
-      totalQty,
-      waitingCount,
-      progressCount,
-    };
-  }, [sameDcRequests]);
 
   const workloadRowsByCurrentDc = useMemo(() => {
     if (!resolvedData) return [];
@@ -1417,88 +1440,6 @@ export default function CheckDC({
 
 
 
-  const workloadChartWidth = Math.max(
-    460,
-    workloadChartData.length * 38
-  );
-
-  const workloadChartHeight = 190;
-
-  const workloadChartPadding = {
-    top: 16,
-    right: 14,
-    bottom: 34,
-    left: 44,
-  };
-
-  const workloadChartMaxValue = Math.max(
-    1,
-    ...workloadChartData.flatMap((item) => [
-      item.forecast,
-      item.workload,
-    ])
-  );
-
-  const workloadChartDrawableWidth =
-    workloadChartWidth -
-    workloadChartPadding.left -
-    workloadChartPadding.right;
-
-  const workloadChartDrawableHeight =
-    workloadChartHeight -
-    workloadChartPadding.top -
-    workloadChartPadding.bottom;
-
-  const getWorkloadChartX = (index: number) => {
-    if (workloadChartData.length <= 1) {
-      return (
-        workloadChartPadding.left +
-        workloadChartDrawableWidth / 2
-      );
-    }
-
-    return (
-      workloadChartPadding.left +
-      (index / (workloadChartData.length - 1)) *
-      workloadChartDrawableWidth
-    );
-  };
-
-  const getWorkloadChartY = (value: number) => {
-    return (
-      workloadChartPadding.top +
-      workloadChartDrawableHeight -
-      (value / workloadChartMaxValue) *
-      workloadChartDrawableHeight
-    );
-  };
-
-  const forecastChartPoints = workloadChartData
-    .map(
-      (item, index) =>
-        `${getWorkloadChartX(index)},${getWorkloadChartY(
-          item.forecast
-        )}`
-    )
-    .join(" ");
-
-  const workloadChartPoints = workloadChartData
-    .map(
-      (item, index) =>
-        `${getWorkloadChartX(index)},${getWorkloadChartY(
-          item.workload
-        )}`
-    )
-    .join(" ");
-
-  const workloadChartGridValues = Array.from(
-    { length: 6 },
-    (_, index) =>
-      Math.round(
-        workloadChartMaxValue -
-        (workloadChartMaxValue / 5) * index
-      )
-  );
   const cleanText = (value: unknown) => {
     const text = String(value ?? "")
       .replace(/_/g, " ")
@@ -1522,9 +1463,10 @@ export default function CheckDC({
   };
 
   return (
-    <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-lg shadow-slate-200/60">
+    <section className="check-dc-app">
+      <style>{CHECK_DC_STYLES}</style>
       {/* Header */}
-      <div className="relative overflow-hidden border-b border-slate-700 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-800 px-5 py-4 text-white">
+      <div className="dc-page-header relative overflow-hidden text-white">
         <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-white/[0.04]" />
         <div className="pointer-events-none absolute bottom-[-90px] left-[35%] h-44 w-44 rounded-full bg-blue-400/[0.05]" />
 
@@ -1608,7 +1550,7 @@ export default function CheckDC({
       </div>
 
       {/* Tabs */}
-      <div className="overflow-x-auto border-b border-slate-200 bg-white px-3 pt-2">
+      <div className="dc-tabbar overflow-x-auto">
         <div className="flex min-w-max gap-1">
           {tabs.map((tab) => {
             const active = activeTab === tab.key;
@@ -1632,9 +1574,7 @@ export default function CheckDC({
                       : "bg-slate-200 text-slate-600"
                       }`}
                   >
-                    {tab.key === "fleet" && loadingFleet
-                      ? "..."
-                      : tab.count}
+                    {tab.count}
                   </span>
                 )}
 
@@ -1647,7 +1587,7 @@ export default function CheckDC({
         </div>
       </div>
 
-      <div className="p-3 sm:p-4">
+      <div className="dc-page-content">
         {/* ข้อมูลคำขอ */}
         {activeTab === "summary" && (
           <div className="space-y-4">
@@ -1793,7 +1733,7 @@ export default function CheckDC({
                     : []),
                   ...(hasDisplayValue(resolvedData.approved_qty)
                     ? [{
-                        label: "จำนวนที่ FBP สรรหาผู้ประกอบการและอนุมัติ",
+                        label: "จำนวนที่ FBP ประเมินกองรถและอนุมัติ",
                         value: `${formatNumber(resolvedData.approved_qty)} คัน`,
                         sub: "FBP assessed and approved quantity",
                         code: "FBP",
@@ -2392,339 +2332,13 @@ export default function CheckDC({
             </div>
 
             {workloadViewMode === "chart" ? (
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex flex-col justify-between gap-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/50 px-3.5 py-3 sm:flex-row sm:items-center">
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900">
-                      กราฟ Forecast และ Workload
-                    </h4>
-
-                    <p className="mt-0.5 text-[10px] text-slate-500">
-                      {formatThaiMonthYear(activeWorkloadMonth)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-4 text-[10px] font-bold">
-                    <div className="flex items-center gap-1.5 text-slate-700">
-                      <span className="h-0.5 w-5 rounded-full bg-slate-500" />
-                      Forecast FC
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-blue-800">
-                      <span className="h-0.5 w-5 rounded-full bg-blue-700" />
-                      Workload FC
-                    </div>
-                  </div>
-                </div>
-
-                {loadingWorkload ? (
-                  <div className="flex h-[230px] items-center justify-center gap-2 text-xs font-bold text-slate-500">
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />
-                    กำลังโหลดข้อมูลกราฟ...
-                  </div>
-                ) : workloadChartData.length === 0 ? (
-                  <div className="flex h-[230px] items-center justify-center text-xs font-bold text-slate-400">
-                    ไม่พบข้อมูล Workload ของเดือนนี้
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto p-2">
-                    <svg
-                      width={workloadChartWidth}
-                      height={workloadChartHeight}
-                      viewBox={`0 0 ${workloadChartWidth} ${workloadChartHeight}`}
-                      className="block h-[230px] w-full min-w-[620px]"
-                    >
-                      <defs>
-                        <filter
-                          id="tooltipShadow"
-                          x="-20%"
-                          y="-20%"
-                          width="140%"
-                          height="140%"
-                        >
-                          <feDropShadow
-                            dx="0"
-                            dy="2"
-                            stdDeviation="2"
-                            floodOpacity="0.2"
-                          />
-                        </filter>
-                      </defs>
-
-                      <rect
-                        x="0"
-                        y="0"
-                        width={workloadChartWidth}
-                        height={workloadChartHeight}
-                        fill="#ffffff"
-                      />
-
-                      {workloadChartGridValues.map(
-                        (gridValue, index) => {
-                          const y =
-                            workloadChartPadding.top +
-                            (index / 5) *
-                            workloadChartDrawableHeight;
-
-                          return (
-                            <g key={`grid-${index}`}>
-                              <line
-                                x1={workloadChartPadding.left}
-                                y1={y}
-                                x2={
-                                  workloadChartWidth -
-                                  workloadChartPadding.right
-                                }
-                                y2={y}
-                                stroke="#e2e8f0"
-                                strokeDasharray="3 3"
-                              />
-
-                              <text
-                                x={workloadChartPadding.left - 8}
-                                y={y + 3}
-                                textAnchor="end"
-                                fontSize="8"
-                                fontWeight="700"
-                                fill="#64748b"
-                              >
-                                {formatNumber(gridValue)}
-                              </text>
-                            </g>
-                          );
-                        }
-                      )}
-
-                      <line
-                        x1={workloadChartPadding.left}
-                        y1={workloadChartPadding.top}
-                        x2={workloadChartPadding.left}
-                        y2={
-                          workloadChartHeight -
-                          workloadChartPadding.bottom
-                        }
-                        stroke="#94a3b8"
-                      />
-
-                      <line
-                        x1={workloadChartPadding.left}
-                        y1={
-                          workloadChartHeight -
-                          workloadChartPadding.bottom
-                        }
-                        x2={
-                          workloadChartWidth -
-                          workloadChartPadding.right
-                        }
-                        y2={
-                          workloadChartHeight -
-                          workloadChartPadding.bottom
-                        }
-                        stroke="#94a3b8"
-                      />
-
-                      <polyline
-                        points={forecastChartPoints}
-                        fill="none"
-                        stroke="#64748b"
-                        strokeWidth="2"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-
-                      <polyline
-                        points={workloadChartPoints}
-                        fill="none"
-                        stroke="#1d4ed8"
-                        strokeWidth="2.5"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-
-                      {workloadChartData.map((item, index) => {
-                        const x = getWorkloadChartX(index);
-
-                        const forecastY = getWorkloadChartY(
-                          item.forecast
-                        );
-
-                        const workloadY = getWorkloadChartY(
-                          item.workload
-                        );
-
-                        const tooltipWidth = 124;
-                        const tooltipHeight = 53;
-
-                        const tooltipX =
-                          x + tooltipWidth + 8 >
-                            workloadChartWidth
-                            ? x - tooltipWidth - 8
-                            : x + 8;
-
-                        const tooltipY = Math.max(
-                          4,
-                          Math.min(
-                            Math.min(forecastY, workloadY) -
-                            tooltipHeight -
-                            5,
-                            workloadChartHeight -
-                            workloadChartPadding.bottom -
-                            tooltipHeight -
-                            3
-                          )
-                        );
-
-                        return (
-                          <g
-                            key={`${item.dateKey}-${index}`}
-                            className="group cursor-crosshair"
-                          >
-                            <rect
-                              x={x - 12}
-                              y={workloadChartPadding.top}
-                              width="24"
-                              height={workloadChartDrawableHeight}
-                              fill="transparent"
-                            />
-
-                            <line
-                              x1={x}
-                              y1={workloadChartPadding.top}
-                              x2={x}
-                              y2={
-                                workloadChartHeight -
-                                workloadChartPadding.bottom
-                              }
-                              stroke="#94a3b8"
-                              strokeDasharray="3 3"
-                              className="pointer-events-none opacity-0 transition-opacity group-hover:opacity-100"
-                            />
-
-                            <circle
-                              cx={x}
-                              cy={forecastY}
-                              r="3.5"
-                              fill="white"
-                              stroke="#64748b"
-                              strokeWidth="2"
-                            />
-
-                            <circle
-                              cx={x}
-                              cy={workloadY}
-                              r="4"
-                              fill="white"
-                              stroke="#1d4ed8"
-                              strokeWidth="2"
-                            />
-
-                            <g
-                              className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                              filter="url(#tooltipShadow)"
-                            >
-                              <rect
-                                x={tooltipX}
-                                y={tooltipY}
-                                width={tooltipWidth}
-                                height={tooltipHeight}
-                                rx="6"
-                                fill="#0f172a"
-                                opacity="0.96"
-                              />
-
-                              <text
-                                x={tooltipX + 8}
-                                y={tooltipY + 13}
-                                fontSize="8"
-                                fontWeight="800"
-                                fill="#ffffff"
-                              >
-                                {item.dateLabel}
-                              </text>
-
-                              <circle
-                                cx={tooltipX + 10}
-                                cy={tooltipY + 28}
-                                r="2.5"
-                                fill="#94a3b8"
-                              />
-
-                              <text
-                                x={tooltipX + 17}
-                                y={tooltipY + 31}
-                                fontSize="8"
-                                fontWeight="700"
-                                fill="#e2e8f0"
-                              >
-                                Forecast:{" "}
-                                {formatNumber(item.forecast)}
-                              </text>
-
-                              <circle
-                                cx={tooltipX + 10}
-                                cy={tooltipY + 42}
-                                r="2.5"
-                                fill="#3b82f6"
-                              />
-
-                              <text
-                                x={tooltipX + 17}
-                                y={tooltipY + 45}
-                                fontSize="8"
-                                fontWeight="700"
-                                fill="#e2e8f0"
-                              >
-                                Workload:{" "}
-                                {formatNumber(item.workload)}
-                              </text>
-                            </g>
-
-                            <text
-                              x={x}
-                              y={
-                                workloadChartHeight -
-                                workloadChartPadding.bottom +
-                                16
-                              }
-                              textAnchor="middle"
-                              fontSize="8"
-                              fontWeight={
-                                item.dateKey === todayKey
-                                  ? "900"
-                                  : "600"
-                              }
-                              fill={
-                                item.dateKey === todayKey
-                                  ? "#1d4ed8"
-                                  : "#64748b"
-                              }
-                            >
-                              {item.dateLabel.slice(0, 5)}
-                            </text>
-
-                            {item.dateKey === todayKey && (
-                              <text
-                                x={x}
-                                y={
-                                  workloadChartHeight -
-                                  workloadChartPadding.bottom +
-                                  27
-                                }
-                                textAnchor="middle"
-                                fontSize="7"
-                                fontWeight="900"
-                                fill="#1d4ed8"
-                              >
-                                วันนี้
-                              </text>
-                            )}
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  </div>
-                )}
-              </div>
+              <WorkloadForecastChart
+                data={workloadChartData}
+                monthLabel={formatThaiMonthYear(activeWorkloadMonth)}
+                todayKey={todayKey}
+                loading={loadingWorkload}
+                error={workloadError}
+              />
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <table className="w-full min-w-[580px] text-left text-xs">

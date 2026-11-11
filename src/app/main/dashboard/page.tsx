@@ -119,10 +119,12 @@ function DashboardStatusIcon({ status }: { status: DashboardSummaryKey }) {
 const FLEET_STATUSES = DASHBOARD_SUMMARY_CARDS.filter(card => card.key !== "all");
 function dashboardStatusGroup(value: string | null): string {
   const status = String(value ?? "").trim().toLowerCase();
-  if (status === "gm_pending") return "gm";
+
+  if (status === "gm_pending" || status === "gm_checking") return "gm";
   if (status === "fbp_pending" || status === "partial_approved") return "fbp";
   if (status === "process" || status === "progress") return "tcas";
   if (["cancel", "reject_by_gm", "reject_by_fbp"].includes(status)) return "cancel";
+
   return status;
 }
 const MONTH_NAMES = [
@@ -568,7 +570,7 @@ function MonthlyDeliveryBars({ points, year, loading, error }: {
     <div className="fleet-monthly-bars-scroll"><svg viewBox="0 0 1000 218" role="img" aria-label={`แผนและยอดส่งมอบรายเดือน ปี ${year + 543}`} onMouseLeave={() => setHovered(null)}>
       {[0,1,2,3,4].map(tick => <g key={tick}><line x1="58" x2="976" y1={178-tick*37} y2={178-tick*37} stroke="#e8edf3"/><text x="47" y={183-tick*37} textAnchor="end" fill="#7c8ca2" fontSize="15">{(ceiling*tick/4).toLocaleString("th-TH")}</text></g>)}
       {months.map((month,index) => { const x=68+index*76; return <g key={month.label} tabIndex={0} role="img" aria-label={`${month.label}: แผน ${month.planned} คัน ส่งมอบ ${month.actual === null ? "ยังไม่มีข้อมูล" : `${month.actual} คัน`}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => setHovered(index)}>
-        <title>{month.label}: แผน {month.planned} คัน · ส่งมอบ {month.actual ?? "ยังไม่มีข้อมูล"}</title>
+      <title>{`${month.label}: แผน ${month.planned} คัน · ส่งมอบ ${month.actual ?? "ยังไม่มีข้อมูล"}`}</title>
         <rect x={x-7} y="30" width="66" height="148" fill={hovered===index ? "#f1f5f9" : "transparent"} rx="8"/>
         <rect x={x} y={178-month.planned/ceiling*148} width="21" height={month.planned/ceiling*148} rx="6" fill="#94a3b8"/>
         <rect x={x+25} y={178-(month.actual??0)/ceiling*148} width="21" height={(month.actual??0)/ceiling*148} rx="6" fill="#2563eb"/>
@@ -1020,27 +1022,49 @@ function FleetStatusByDc({
   const monthScrollRef = useRef<HTMLDivElement>(null);
   const monthPickerDialogRef = useRef<HTMLDialogElement>(null);
   const stageColumns = useMemo(() => {
-    const columns = new Map<string, { key: string; level: string; name: string }>();
-    // หัวตารางจาก master_flow: รวมชื่อซ้ำข้าม fleet_type
+    const levels = new Map<string, { usage: Map<string, number>; defaults: Map<string, number> }>();
+    const getLevel = (value: unknown) => {
+      const raw = String(value ?? "").trim();
+      const number = Number(raw);
+      return raw && Number.isInteger(number) ? String(number) : raw;
+    };
+    const ensureLevel = (level: string) => {
+      let entry = levels.get(level);
+      if (!entry) {
+        entry = { usage: new Map(), defaults: new Map() };
+        levels.set(level, entry);
+      }
+      return entry;
+    };
+    // Master names are fallbacks only; duplicate definitions must not add votes.
+    const seenDefinitions = new Set<string>();
     for (const row of [...processes, ...apiProcesses]) {
       if (isTemporaryFleet(row.fleet_type)) continue;
-      const level = String(row.process_level ?? "").trim();
-      const name = String(row.process ?? "").trim();
+      const level = getLevel(row.process_level);
+      const name = String(row.process ?? "").replace(/\s+/g, " ").trim();
       if (!level || !name) continue;
-      const key = JSON.stringify([level, name]);
-      columns.set(key, { key, level, name });
+      const entry = ensureLevel(level);
+      const identity = JSON.stringify([row.id, level, name, row.fleet_type]);
+      if (seenDefinitions.has(identity)) continue;
+      seenDefinitions.add(identity);
+      entry.defaults.set(name, (entry.defaults.get(name) ?? 0) + 1);
     }
-    // ใช้ key เดียวกับเซลล์จำนวนรถเดิม
+    // Choose the name used by the most vehicles at each level.
     for (const row of typeRequests) {
-      const level = String(row.latest_process_level ?? "").trim();
-      const name = String(row.latest_process_name ?? "").trim() || "ไม่ระบุชื่อขั้นตอน";
-      if (!level) continue;
-      const key = JSON.stringify([level, name]);
-      columns.set(key, { key, level, name });
+      const level = getLevel(row.latest_process_level);
+      const qty = Number(row.qty);
+      if (!level || !Number.isFinite(qty) || qty <= 0) continue;
+      const entry = ensureLevel(level);
+      const name = String(row.latest_process_name ?? "").replace(/\s+/g, " ").trim();
+      if (name) entry.usage.set(name, (entry.usage.get(name) ?? 0) + qty);
     }
-    return Array.from(columns.values()).sort((a, b) =>
-      Number(a.level) - Number(b.level) || a.name.localeCompare(b.name, "th"),
-    );
+    return Array.from(levels, ([level, entry]) => {
+      const names = entry.usage.size ? entry.usage : entry.defaults;
+      const name = Array.from(names).sort((a, b) =>
+        b[1] - a[1] || a[0].localeCompare(b[0], "th"),
+      )[0]?.[0] ?? "ไม่ระบุชื่อขั้นตอน";
+      return { key: JSON.stringify([level]), level, name };
+    }).sort((a, b) => Number(a.level) - Number(b.level) || a.level.localeCompare(b.level));
   }, [processes, apiProcesses, typeRequests]);
 
   const [showClosedSteps, setShowClosedSteps] = useState(false);
@@ -1183,9 +1207,9 @@ function FleetStatusByDc({
         truck = { truckType, total: 0, stages: new Map() };
         group.trucks.set(truckType, truck);
       }
-      const level = String(row.latest_process_level ?? "").trim();
-      const name = String(row.latest_process_name ?? "").trim() || "ไม่ระบุชื่อขั้นตอน";
-      const key = JSON.stringify([level, name]);
+      const rawLevel = String(row.latest_process_level ?? "").trim();
+      const level = rawLevel && Number.isInteger(Number(rawLevel)) ? String(Number(rawLevel)) : rawLevel;
+      const key = JSON.stringify([level]);
       const cell = truck.stages.get(key) ?? { count: 0, vendors: new Map<string, number>(), companies: new Map<string, number>() };
       cell.count += qty;
       const warehouseInfo = asRecords(row.vehicle_warehouse_info ?? row.vehicle_info);
@@ -1206,7 +1230,7 @@ function FleetStatusByDc({
 
   const totalForSteps = (stages: Map<string, { count: number }>, lastStep: number) =>
     Array.from(stages.entries()).reduce((sum, [key, cell]) => {
-      const [level] = JSON.parse(key) as [string, string];
+      const [level] = JSON.parse(key) as [string];
       const step = Number(level);
       return sum + (Number.isInteger(step) && step >= 1 && step <= lastStep ? cell.count : 0);
     }, 0);
@@ -1804,15 +1828,65 @@ function FleetStatusByDc({
 .fleet-dashboard .fleet-timeline .fleet-panel-description{font-size:15px}
 .fleet-dashboard .fleet-timeline .fleet-panel-content{padding:16px 18px}
 .fleet-dashboard .fleet-timeline .fleet-legend{font-size:15px;gap:16px}
-@media(max-width:650px){.fleet-dashboard .fleet-delivery-summary{grid-template-columns:1fr;gap:14px;padding:15px}.fleet-dashboard .fleet-delivery-card{padding:10px}.fleet-dashboard .fleet-delivery-number strong{font-size:27px}.fleet-dashboard .delivery-stage-panel{padding:12px 0 0}.fleet-dashboard .delivery-stage-row{grid-template-columns:25px minmax(0,1fr) minmax(70px,32%)}.fleet-dashboard .delivery-stage-name{font-size:15px}}
+.fleet-delivery-region{container: fleet-delivery / inline-size;min-width:0}
+.fleet-dashboard .fleet-delivery-summary{
+  grid-template-columns:minmax(300px,34%) minmax(0,1fr);
+  gap:26px;
+}
+.fleet-dashboard .delivery-stage-panel{padding-left:24px}
+.fleet-dashboard .fleet-delivery-number>div,
+.fleet-dashboard .delivery-stage-name{min-width:0;overflow-wrap:anywhere}
+.fleet-dashboard .delivery-stage-bar-track{min-width:0}
+.fleet-dashboard .delivery-stage-value strong{white-space:nowrap}
 
-/* เพิ่มพื้นที่ฝั่งสรุปและขยับตารางไปทางขวา */
-@media (min-width: 651px) {
-  .fleet-dashboard .fleet-delivery-summary {
-    grid-template-columns: minmax(300px, 34%) minmax(0, 1fr);
-    gap: 26px;
+@container fleet-delivery (max-width:760px){
+  .fleet-dashboard .fleet-delivery-summary{
+    grid-template-columns:minmax(0,1fr);
+    gap:14px;
+    padding:15px;
   }
-  .fleet-dashboard .delivery-stage-panel { padding-left: 24px; }
+  .fleet-dashboard .fleet-delivery-cards{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-rows:auto;
+  }
+  .fleet-dashboard .fleet-delivery-card{justify-content:flex-start;padding:10px}
+  .fleet-dashboard .fleet-delivery-label small{display:block;margin:2px 0 0}
+  .fleet-dashboard .fleet-delivery-number svg{display:none}
+  .fleet-dashboard .fleet-delivery-number strong{font-size:clamp(21px,4cqi,27px)}
+  .fleet-dashboard .delivery-stage-panel{
+    padding:12px 0 0;
+    border-left:0;
+    border-top:1px solid #e7edf5;
+  }
+  .fleet-dashboard .delivery-stage-row{
+    grid-template-columns:25px minmax(0,1fr) minmax(90px,32%);
+    padding:5px 0;
+  }
+  .fleet-dashboard .delivery-stage-name,
+  .fleet-dashboard .delivery-stage-value strong{font-size:15px}
+}
+
+@container fleet-delivery (max-width:459px){
+  .fleet-dashboard .fleet-delivery-summary{padding:12px}
+  .fleet-dashboard .fleet-delivery-cards{grid-template-columns:minmax(0,1fr)}
+  .fleet-dashboard .fleet-delivery-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5px 8px}
+  .fleet-dashboard .fleet-delivery-number{margin-top:0;justify-content:flex-end;text-align:right}
+  .fleet-dashboard .fleet-delivery-number strong{font-size:24px}
+  .fleet-dashboard .fleet-delivery-unit{font-size:12px}
+  .fleet-dashboard .fleet-delivery-note,
+  .fleet-dashboard .fleet-delivery-progress-row{grid-column:1 / -1}
+  .fleet-dashboard .fleet-delivery-progress-row{margin-top:0}
+  .fleet-dashboard .delivery-stage-row{
+    grid-template-columns:23px minmax(0,1fr) max-content;
+    gap:4px 7px;
+  }
+  .fleet-dashboard .delivery-stage-value{display:contents}
+  .fleet-dashboard .delivery-stage-value strong{grid-column:3;grid-row:1}
+  .fleet-dashboard .delivery-stage-bar-track{
+    grid-column:2 / -1;
+    grid-row:2;
+    height:6px;
+  }
 }
 
 /* Reduce the previous 125% scale by a quarter while keeping the full-width layout. */
@@ -2017,118 +2091,120 @@ function FleetStatusByDc({
         </p>
       </section>
       <SlaOverduePanel requests={filteredRequests} parentLoading={isLoading} parentError={activeError} reloadKey={reloadKey} />
-      <div className="fleet-delivery-summary">
-        <div>
-          <h3 className="fleet-delivery-heading">
-            สถานะออกรถใหม่/ออกรถทดแทน
-          </h3>
-          <div className="fleet-delivery-cards">
-            <article className="fleet-delivery-card">
-              <div className="fleet-delivery-label">
-                เป้าหมายทั้งหมด
-                <small>(Plan)</small>
-              </div>
-              <div className="fleet-delivery-number">
-                <SummaryIcon type="plan" />
-                <div>
-                  <strong>{metricValue(totals.total)}</strong>
-                  <div className="fleet-delivery-unit">คัน</div>
+      <div className="fleet-delivery-region">
+        <div className="fleet-delivery-summary">
+          <div>
+            <h3 className="fleet-delivery-heading">
+              สถานะออกรถใหม่/ออกรถทดแทน
+            </h3>
+            <div className="fleet-delivery-cards">
+              <article className="fleet-delivery-card">
+                <div className="fleet-delivery-label">
+                  เป้าหมายทั้งหมด
+                  <small>(Plan)</small>
                 </div>
-              </div>
-              <p className="fleet-delivery-note">
-                ส่งมอบแล้ว + TCAS ขั้นตอน 1–7
-              </p>
-            </article>
-            <article className="fleet-delivery-card">
-              <div className="fleet-delivery-label">
-                ส่งมอบแล้ว
-                <small>(Actual)</small>
-              </div>
-              <div
-                className="fleet-delivery-number"
-                style={{ color: "#059669" }}
-              >
-                <SummaryIcon type="actual" />
-                <div>
-                  <strong>{metricValue(totals.delivered)}</strong>
-                  <div className="fleet-delivery-unit">คัน</div>
-                </div>
-              </div>
-              <div className="fleet-delivery-progress-row">
-                <div className="fleet-delivery-progress-track">
-                  <span
-                    style={{
-                      width:
-                        isLoading || activeError ? "0%" : `${completion}%`,
-                      background: "#43a51c",
-                    }}
-                  />
-                </div>
-                <span className="fleet-delivery-percent">
-                  {isLoading || activeError
-                    ? "—"
-                    : `${completion.toFixed(0)}%`}
-                </span>
-              </div>
-            </article>
-            <article className="fleet-delivery-card" tabIndex={0}
-              title={isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถโหลดข้อมูลได้" : pendingStageTooltip}
-              aria-label={isLoading || activeError ? "อยู่ระหว่างดำเนินการ" : pendingStageTooltip}
-              style={{ cursor: "help" }}>
-              <div className="fleet-delivery-label">
-                อยู่ระหว่างดำเนินการ
-                <small>(Processing)</small>
-              </div>
-              <div
-                className="fleet-delivery-number"
-                style={{ color: "#ea580c" }}
-              >
-                <SummaryIcon type="pending" />
-                <div>
-                  <strong>{metricValue(totals.remaining)}</strong>
-                  <div className="fleet-delivery-unit">คัน</div>
-                </div>
-              </div>
-              <div className="fleet-delivery-progress-row">
-                <div className="fleet-delivery-progress-track">
-                  <span
-                    style={{
-                      width:
-                        isLoading || activeError
-                          ? "0%"
-                          : `${pendingPercentage}%`,
-                      background: "#f56623",
-                    }}
-                  />
-                </div>
-                <span className="fleet-delivery-percent">
-                  {isLoading || activeError
-                    ? "—"
-                    : `${pendingPercentage.toFixed(0)}%`}
-                </span>
-              </div>
-            </article>
-          </div>
-        </div>
-        <section className="delivery-stage-panel" aria-label="จำนวนรถในแต่ละขั้นตอน">
-          <h3>จำนวนรถในแต่ละสถานะ <small>(คัน)</small></h3>
-          <div className="delivery-stage-list">
-            {deliveryStages.map(stage => (
-              <div className="delivery-stage-row" key={stage.level}>
-                <span className="delivery-stage-number">{stage.level}</span>
-                <span className="delivery-stage-name">{stage.name}</span>
-                <div className="delivery-stage-value">
-                  <div className="delivery-stage-bar-track" aria-hidden="true">
-                    <span style={{ width: `${percentage(stage.qty, totals.total)}%`, background: stage.level === 8 ? "#43a51c" : "#f56623" }} />
+                <div className="fleet-delivery-number">
+                  <SummaryIcon type="plan" />
+                  <div>
+                    <strong>{metricValue(totals.total)}</strong>
+                    <div className="fleet-delivery-unit">คัน</div>
                   </div>
-                  <strong>{metricValue(stage.qty)}</strong>
                 </div>
-              </div>
-            ))}
+                <p className="fleet-delivery-note">
+                  ส่งมอบแล้ว + TCAS ขั้นตอน 1–7
+                </p>
+              </article>
+              <article className="fleet-delivery-card">
+                <div className="fleet-delivery-label">
+                  ส่งมอบแล้ว
+                  <small>(Actual)</small>
+                </div>
+                <div
+                  className="fleet-delivery-number"
+                  style={{ color: "#059669" }}
+                >
+                  <SummaryIcon type="actual" />
+                  <div>
+                    <strong>{metricValue(totals.delivered)}</strong>
+                    <div className="fleet-delivery-unit">คัน</div>
+                  </div>
+                </div>
+                <div className="fleet-delivery-progress-row">
+                  <div className="fleet-delivery-progress-track">
+                    <span
+                      style={{
+                        width:
+                          isLoading || activeError ? "0%" : `${completion}%`,
+                        background: "#43a51c",
+                      }}
+                    />
+                  </div>
+                  <span className="fleet-delivery-percent">
+                    {isLoading || activeError
+                      ? "—"
+                      : `${completion.toFixed(0)}%`}
+                  </span>
+                </div>
+              </article>
+              <article className="fleet-delivery-card" tabIndex={0}
+                title={isLoading ? "กำลังโหลดข้อมูล..." : activeError ? "ไม่สามารถโหลดข้อมูลได้" : pendingStageTooltip}
+                aria-label={isLoading || activeError ? "อยู่ระหว่างดำเนินการ" : pendingStageTooltip}
+                style={{ cursor: "help" }}>
+                <div className="fleet-delivery-label">
+                  อยู่ระหว่างดำเนินการ
+                  <small>(Processing)</small>
+                </div>
+                <div
+                  className="fleet-delivery-number"
+                  style={{ color: "#ea580c" }}
+                >
+                  <SummaryIcon type="pending" />
+                  <div>
+                    <strong>{metricValue(totals.remaining)}</strong>
+                    <div className="fleet-delivery-unit">คัน</div>
+                  </div>
+                </div>
+                <div className="fleet-delivery-progress-row">
+                  <div className="fleet-delivery-progress-track">
+                    <span
+                      style={{
+                        width:
+                          isLoading || activeError
+                            ? "0%"
+                            : `${pendingPercentage}%`,
+                        background: "#f56623",
+                      }}
+                    />
+                  </div>
+                  <span className="fleet-delivery-percent">
+                    {isLoading || activeError
+                      ? "—"
+                      : `${pendingPercentage.toFixed(0)}%`}
+                  </span>
+                </div>
+              </article>
+            </div>
           </div>
-          <div className="delivery-stage-total"><span>รวม</span><strong>{metricValue(totals.total)} คัน</strong></div>
-          <p>ขั้นตอน 1–7 เฉพาะ TCAS · ขั้นตอน 8 แสดงยอดส่งมอบแล้ว</p>
-        </section>
+          <section className="delivery-stage-panel" aria-label="จำนวนรถในแต่ละขั้นตอน">
+            <h3>จำนวนรถในแต่ละสถานะ <small>(คัน)</small></h3>
+            <div className="delivery-stage-list">
+              {deliveryStages.map(stage => (
+                <div className="delivery-stage-row" key={stage.level}>
+                  <span className="delivery-stage-number">{stage.level}</span>
+                  <span className="delivery-stage-name">{stage.name}</span>
+                  <div className="delivery-stage-value">
+                    <div className="delivery-stage-bar-track" aria-hidden="true">
+                      <span style={{ width: `${percentage(stage.qty, totals.total)}%`, background: stage.level === 8 ? "#43a51c" : "#f56623" }} />
+                    </div>
+                    <strong>{metricValue(stage.qty)}</strong> <small className="pr-3">คัน  </small>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="delivery-stage-total"><span>รวม</span><strong>{metricValue(totals.total)} คัน</strong></div>
+            <p>ขั้นตอน 1–7 เฉพาะ TCAS · ขั้นตอน 8 แสดงยอดส่งมอบแล้ว</p>
+          </section>
+        </div>
       </div>
       <div className="fleet-comparison-region">
       <div className="fleet-comparison-layout">
@@ -2894,7 +2970,9 @@ function SlaOverduePanel({ requests: visibleRequests, parentLoading, parentError
 
                     <td className="sla-action">{row.detail?.trim() || row.action_required?.trim() || "—"}</td>
                     <td className="sla-detail-cell">
-                      <button type="button" className="sla-detail-button" onClick={() => handleOpenDetail(row)} aria-label={`เปิดรายละเอียดคำขอ ${row.running_doc || row.request_id} คันที่ ${row.vehicle_no}`}>
+                      <button type="button" className="sla-detail-button"
+                        disabled={!String(row.request_id ?? "").trim() || !String(row.vehicle_no ?? "").trim()}
+                        onClick={() => handleOpenDetail(row)} aria-label={`เปิดรายละเอียดคำขอ ${row.running_doc || row.request_id} คันที่ ${row.vehicle_no}`}>
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12s3-7 9-7 9 7 9 7-3 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="3" /></svg>
                         ดู Flow
                       </button>
@@ -2921,10 +2999,10 @@ function SlaOverduePanel({ requests: visibleRequests, parentLoading, parentError
             <FlowAssessmentModal
               open={openDetailModal}
               requestId={
-                selectedRequest?.request_id ?? selectedRequest?.id ?? null
+                String(selectedRequest?.request_id ?? "").trim() || null
               }
               vehicleNo={
-                selectedRequest?.unit_code ?? selectedRequest?.vehicle_no ?? null
+                String(selectedRequest?.vehicle_no ?? "").trim() || null
               }
               onClose={handleCloseDetail}
             />
