@@ -2392,6 +2392,9 @@ export default function CenterVehicleRequestModal({
         const missingFields: string[] = [];
         if (!dcCode) missingFields.push("คลังปลายทาง");
         if (!selectedProvider) missingFields.push("ผู้ให้บริการ");
+        if (isAllNowProvider && !providerSubsidiary.trim()) {
+            missingFields.push("บริษัทภายใต้ (สำหรับออลล์ นาว)");
+        }
         if (!formData.fleet_type.trim()) missingFields.push("ประเภทคำขอ");
         if (!formData.fleet_truck_type.trim()) missingFields.push("ประเภทกองรถ (Fleet Type)");
         if (!formData.qty.trim()) missingFields.push("จำนวนรถที่ขอ (คัน)");
@@ -3282,52 +3285,22 @@ export default function CenterVehicleRequestModal({
                                     )}
                                 </div>
 
-                                {selectedProvider && (
-                                    <div className="mt-3 rounded-xl border border-blue-100 bg-white p-3">
-                                        <label htmlFor="new-supplier-grade" className="mb-2 block text-xs font-semibold text-slate-700">เลือกเกรดใหม่สำหรับ {selectedProvider.name}</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            <select id="new-supplier-grade" value={newSupplierGrade} disabled={saving || gradeSaving}
-                                                onChange={event => { setNewSupplierGrade(event.target.value); setGradeMessage(""); }}
-                                                className="min-h-10 min-w-48 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-800">
-                                                <option value="">{currentGradeOption}</option>
-                                                {Array.from(supplierGradeLabels, ([grade, name]) => (
-                                                    <option key={grade} value={grade}>{grade} ({name})</option>
-                                                ))}
-                                            </select>
-                                            <button type="button" disabled={saving || gradeSaving || !newSupplierGrade} onClick={() => void saveNewSupplierGrade()}
-                                                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40"><Save size={14} />{gradeSaving ? "กำลังบันทึก..." : "บันทึกเกรดใหม่"}</button>
-                                        </div>
-                                        {gradeMessage && <p role={gradeError ? "alert" : "status"} className={`mt-2 text-xs ${gradeError ? "text-rose-600" : "text-emerald-600"}`}>{gradeMessage}</p>}
-                                    </div>
-                                )}
-
-                                {selectedProvider && (
-                                    <button type="button" disabled={saving}
-                                        onClick={() => setHistorySupplier({ id: selectedProvider.id, code: selectedProvider.id, name: selectedProvider.name })}
-                                        className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40">
-                                        <History size={14} />ดูประวัติเกรดผู้ให้บริการที่เลือก
-                                    </button>
-                                )}
-
-                                {!filteredProviders.length && (
-                                    <p className="py-3 text-slate-500">
-                                        ไม่พบผู้ให้บริการ
-                                        กรุณาตรวจสอบคลังหรือรายการผู้ให้บริการ
-                                    </p>
-                                )}
-
                                 {isAllNowProvider && (
                                     <>
-                                        <label className="mt-3 block">
+                                        <label className="mt-3 block rounded-xl border border-blue-300 bg-blue-50 p-3">
                                             <span
                                                 className={
                                                     labelClass
                                                 }
                                             >
-                                                บริษัทภายใต้
+                                                บริษัทภายใต้ <span className="text-red-500">*</span>
                                             </span>
 
+                                            <p id="provider-subsidiary-help" className="mb-2 text-xs text-blue-700">กรุณาพิมพ์หรือเลือกบริษัทภายใต้ให้ครบถ้วนเมื่อเลือกออลล์ นาว</p>
                                             <input
+                                                required={isAllNowProvider}
+                                                aria-required={isAllNowProvider}
+                                                aria-describedby="provider-subsidiary-help"
                                                 type="text"
                                                 list="center-provider-subsidiaries"
                                                 value={
@@ -3372,6 +3345,48 @@ export default function CenterVehicleRequestModal({
                                                 )}
                                         </label>
 
+                                    </>
+                                )}
+
+                                {selectedProvider && (
+                                    <div className="mt-3 flex items-start gap-2">
+                                    <details className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3">
+                                        <summary className="cursor-pointer text-xs font-medium text-slate-600">ปรับปรุงเกรดผู้ให้บริการ</summary>
+                                        <div className="mt-3">
+                                        <label htmlFor="new-supplier-grade" className="mb-2 block text-xs font-semibold text-slate-700">เลือกเกรดใหม่สำหรับ {selectedProvider.name}</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            <select id="new-supplier-grade" value={newSupplierGrade} disabled={saving || gradeSaving}
+                                                onChange={event => { setNewSupplierGrade(event.target.value); setGradeMessage(""); }}
+                                                className="min-h-10 min-w-0 w-full flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-800">
+                                                <option value="">{currentGradeOption}</option>
+                                                {Array.from(supplierGradeLabels, ([grade, name]) => (
+                                                    <option key={grade} value={grade}>{grade} ({name})</option>
+                                                ))}
+                                            </select>
+                                            <button type="button" disabled={saving || gradeSaving || !newSupplierGrade} onClick={() => void saveNewSupplierGrade()}
+                                                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"><Save size={14} />{gradeSaving ? "กำลังบันทึก..." : "บันทึกเกรดใหม่"}</button>
+                                        </div>
+                                        {gradeMessage && <p role={gradeError ? "alert" : "status"} className={`mt-2 text-xs ${gradeError ? "text-rose-600" : "text-emerald-600"}`}>{gradeMessage}</p>}
+                                        </div>
+                                    </details>
+                                    <button type="button" disabled={saving}
+                                        onClick={() => setHistorySupplier({ id: selectedProvider.id, code: selectedProvider.id, name: selectedProvider.name })}
+                                        aria-label="ดูประวัติเกรดผู้ให้บริการที่เลือก"
+                                        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                                        <History size={14} />ดูประวัติ
+                                    </button>
+                                    </div>
+                                )}
+
+                                {!filteredProviders.length && (
+                                    <p className="py-3 text-slate-500">
+                                        ไม่พบผู้ให้บริการ
+                                        กรุณาตรวจสอบคลังหรือรายการผู้ให้บริการ
+                                    </p>
+                                )}
+
+                                {isAllNowProvider && (
+                                    <>
                                         <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <h4 className="font-semibold">
                                                 เอกสารแนบผู้ให้บริการ
@@ -4071,9 +4086,16 @@ export default function CenterVehicleRequestModal({
                                                             return (
                                                                 <div
                                                                     key={index}
-                                                                    className="rounded-xl border border-orange-100 bg-white p-3 shadow-sm"
+                                                                    className="min-w-0 overflow-x-auto rounded-xl border border-orange-100 bg-white p-3 shadow-sm"
                                                                 >
-                                                                    <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[80px_1.2fr_1fr_110px]">
+                                                                    <div
+                                                                        className="grid items-start gap-3"
+                                                                        style={{
+                                                                            display: "grid",
+                                                                            gridTemplateColumns: "48px minmax(190px, 1.2fr) minmax(220px, 1fr) 110px",
+                                                                            minWidth: 640,
+                                                                        }}
+                                                                    >
                                                                         <div>
                                                                             <p className="text-[11px] text-slate-400">
                                                                                 คันที่

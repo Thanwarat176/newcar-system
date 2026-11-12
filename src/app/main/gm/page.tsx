@@ -438,9 +438,9 @@ function DCFilter({
                 activeIndex < 0
                   ? initialIndex
                   : Math.min(
-                      matches.length - 1,
-                      Math.max(0, activeIndex + step),
-                    ),
+                    matches.length - 1,
+                    Math.max(0, activeIndex + step),
+                  ),
               );
             } else if (event.key === "Enter" && activeOption) {
               event.preventDefault();
@@ -625,9 +625,9 @@ export default function GmStatusPage() {
 
   const userWarehouse = normalizeCode(
     userInfo?.warehouse ||
-      userInfo?.WAREHOUSE ||
-      userInfo?.team ||
-      userInfo?.TEAM,
+    userInfo?.WAREHOUSE ||
+    userInfo?.team ||
+    userInfo?.TEAM,
   );
   const selectedCode = normalizeCode(selectedDC?.DC_CODE);
   const warehouseFilteredRequests = useMemo(() => {
@@ -864,11 +864,11 @@ export default function GmStatusPage() {
   const todayKey = formatDateToKey(new Date());
   const rangeLabel = hasRequestDateRange
     ? requestDateRange
-        .flatMap(({ startDate, endDate }) => [
-          formatThaiDate(formatDateToKey(startDate)),
-          formatThaiDate(formatDateToKey(endDate)),
-        ])
-        .join(" - ")
+      .flatMap(({ startDate, endDate }) => [
+        formatThaiDate(formatDateToKey(startDate)),
+        formatThaiDate(formatDateToKey(endDate)),
+      ])
+      .join(" - ")
     : "เลือกช่วงวันที่ขอ";
 
   function clearRequestDate() {
@@ -967,7 +967,7 @@ export default function GmStatusPage() {
                 {statusFilter === "all"
                   ? "ดูทั้งหมด"
                   : statusCards.find((card) => card.key === statusFilter)
-                      ?.label}
+                    ?.label}
               </span>
             </div>
           </div>
@@ -1090,6 +1090,7 @@ export default function GmStatusPage() {
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <SlidersHorizontal size={16} />
               </span>
+
               <div>
                 <h2
                   id="gm-filters-heading"
@@ -1102,122 +1103,137 @@ export default function GmStatusPage() {
                 </p>
               </div>
             </div>
+
             <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-100">
               พบ {formatNumber(filteredRequests.length)} รายการ
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <div className="min-w-0">
-              <label htmlFor="gm-search" className={labelClass}>
-                ค้นหา
-              </label>
-              <div className="relative">
-                <Search size={14} className={iconClass} />
-                <input
-                  id="gm-search"
-                  type="text"
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..."
-                  className={fieldClass}
-                />
-                {searchText && (
-                  <button
-                    type="button"
-                    aria-label="ล้างคำค้นหา"
-                    onClick={() => setSearchText("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
+          <div className="space-y-3">
+            {/* แถวแรก: 3 ช่อง */}
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="min-w-0">
+                <label htmlFor="gm-search" className={labelClass}>
+                  ค้นหา
+                </label>
+
+                <div className="relative w-full">
+                  <Search size={14} className={iconClass} />
+                  <input
+                    id="gm-search"
+                    type="text"
+                    value={searchText}
+                    onChange={(event) => setSearchText(event.target.value)}
+                    placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..."
+                    className={`${fieldClass} w-full min-w-0 pr-9`}
+                  />
+
+                  {searchText && (
+                    <button
+                      type="button"
+                      aria-label="ล้างคำค้นหา"
+                      onClick={() => setSearchText("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
+
+              <FilterSelect
+                id="gm-request-type"
+                label="ประเภทคำขอ"
+                allLabel="ทุกประเภทคำขอ"
+                icon={Filter}
+                value={requestTypeFilter}
+                options={requestTypeOptions}
+                onChange={(value) => {
+                  setRequestTypeFilter(value);
+                  setTruckTypeFilter("all");
+                }}
+              />
+
+              <FilterSelect
+                id="gm-truck-type"
+                label="ประเภทรถ"
+                allLabel="ทุกประเภทรถ"
+                icon={Truck}
+                value={truckTypeFilter}
+                options={truckTypeOptions}
+                onChange={setTruckTypeFilter}
+              />
             </div>
 
-            <FilterSelect
-              id="gm-request-type"
-              label="ประเภทคำขอ"
-              allLabel="ทุกประเภทคำขอ"
-              icon={Filter}
-              value={requestTypeFilter}
-              options={requestTypeOptions}
-              onChange={(value) => {
-                setRequestTypeFilter(value);
-                setTruckTypeFilter("all");
-              }}
-            />
-            <FilterSelect
-              id="gm-truck-type"
-              label="ประเภทรถ"
-              allLabel="ทุกประเภทรถ"
-              icon={Truck}
-              value={truckTypeFilter}
-              options={truckTypeOptions}
-              onChange={setTruckTypeFilter}
-            />
-            <FilterSelect
-              id="gm-dc-type"
-              label="DC Type"
-              allLabel="ทุก DC Type"
-              icon={Filter}
-              value={dcTypeFilter}
-              options={dcTypeOptions}
-              onChange={(value) => {
-                setDcTypeFilter(value);
-                setDcFilter("");
-              }}
-            />
-            <DCFilter
-              value={dcFilter}
-              options={dcOptions}
-              onChange={setDcFilter}
-            />
+            {/* แถวที่สอง: 4 ช่อง */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+              <FilterSelect
+                id="gm-dc-type"
+                label="DC Type"
+                allLabel="ทุก DC Type"
+                icon={Filter}
+                value={dcTypeFilter}
+                options={dcTypeOptions}
+                onChange={(value) => {
+                  setDcTypeFilter(value);
+                  setDcFilter("");
+                }}
+              />
 
-            <div className="min-w-0">
-              <label htmlFor="gm-request-date" className={labelClass}>
-                วันที่ขอ
-              </label>
-              <div className="relative">
-                <CalendarDays size={14} className={iconClass} />
+              <DCFilter
+                value={dcFilter}
+                options={dcOptions}
+                onChange={setDcFilter}
+              />
+
+              <div className="min-w-0">
+                <label htmlFor="gm-request-date" className={labelClass}>
+                  วันที่ขอ
+                </label>
+
+                <div className="relative w-full">
+                  <CalendarDays size={14} className={iconClass} />
+                  <button
+                    id="gm-request-date"
+                    ref={requestDateButtonRef}
+                    type="button"
+                    aria-expanded={showRequestDatePicker}
+                    title={rangeLabel}
+                    onClick={toggleDatePicker}
+                    className={
+                      fieldClass +
+                      " w-full min-w-0 truncate pr-9 text-left " +
+                      (hasRequestDateRange
+                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        : "")
+                    }
+                  >
+                    {rangeLabel}
+                  </button>
+
+                  {hasRequestDateRange && (
+                    <button
+                      type="button"
+                      aria-label="ล้างวันที่ขอ"
+                      onClick={clearRequestDate}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-w-0 items-end">
                 <button
-                  id="gm-request-date"
-                  ref={requestDateButtonRef}
                   type="button"
-                  aria-expanded={showRequestDatePicker}
-                  title={rangeLabel}
-                  onClick={toggleDatePicker}
-                  className={
-                    fieldClass +
-                    " truncate text-left " +
-                    (hasRequestDateRange
-                      ? "border-blue-300 bg-blue-50 text-blue-700"
-                      : "")
-                  }
+                  onClick={clearFilters}
+                  className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                 >
-                  {rangeLabel}
+                  <Eraser size={13} />
+                  ล้างตัวกรอง
                 </button>
-                {hasRequestDateRange && (
-                  <button
-                    type="button"
-                    aria-label="ล้างวันที่ขอ"
-                    onClick={clearRequestDate}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
               </div>
-            </div>
-
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-              >
-                <Eraser size={13} /> ล้างตัวกรอง
-              </button>
             </div>
           </div>
         </section>
@@ -1390,7 +1406,7 @@ export default function GmStatusPage() {
                             </td>
                             <td className="px-3 py-3">
                               {status === "reject_by_gm" ||
-                              status === "fbp_pending" ? (
+                                status === "fbp_pending" ? (
                                 <div className="grid min-w-[190px] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                                   {getQtySummary(item).map((qty, index) => {
                                     const cell = qtyCells[index];

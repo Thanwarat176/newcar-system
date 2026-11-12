@@ -1498,11 +1498,11 @@ export default function CheckDC({
 
             <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold">
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">
-                {cleanText(resolvedData.running_doc)}
+                {(resolvedData.running_doc)}
               </span>
 
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">
-                DC {cleanText(resolvedData.dc_code)}
+                DC : {(resolvedData.dc_code)}
               </span>
 
               <span className="rounded-md bg-white/[0.08] px-2.5 py-1 text-slate-100 ring-1 ring-white/10">

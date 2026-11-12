@@ -66,8 +66,14 @@ const COLUMNS: { label: string; sort?: SortKey }[] = [
 // Group approved, success and progress under the approved card.
 function normalizeStatus(value: unknown): string {
   const status = text(value).toLowerCase();
-  if (status === "partial_approved") return "fbp_pending";
-  return ["approved", "success", "progress"].includes(status) ? "approved" : status;
+
+  if (["gm_checking", "partial_approved"].includes(status)) {
+    return "fbp_pending";
+  }
+
+  return ["approved", "success", "progress"].includes(status)
+    ? "approved"
+    : status;
 }
 function statusLabel(raw: string): string {
   const status = normalizeStatus(raw);
@@ -485,6 +491,44 @@ export default function WaitingFleetPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs"><div className="flex flex-wrap items-center gap-2"><span>แสดง</span><select aria-label="จำนวนรายการต่อหน้า" value={pageSize} disabled={loading} onChange={e => setPageSize(Number(e.target.value))} className="h-9 rounded-lg border border-slate-200 px-2">{[20, 25, 50, 100].map(size => <option key={size} value={size}>{size} รายการ</option>)}</select><span className="text-slate-400">{sortedRows.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, sortedRows.length)} จากทั้งหมด {number(sortedRows.length)} รายการ</span></div><div className="flex items-center gap-2"><button type="button" disabled={loading || activePage <= 1} onClick={() => setCurrentPage(activePage - 1)} className="h-9 rounded-lg border px-3 disabled:opacity-40">ก่อนหน้า</button><span>หน้า</span><select aria-label="เลือกหน้าตาราง" value={activePage} disabled={loading || !sortedRows.length} onChange={e => setCurrentPage(Number(e.target.value))} className="h-9 rounded-lg border px-2">{Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select><span>/ {totalPages}</span><button type="button" disabled={loading || activePage >= totalPages} onClick={() => setCurrentPage(activePage + 1)} className="h-9 rounded-lg bg-blue-600 px-3 text-white disabled:opacity-40">ถัดไป</button></div></div>
     </section>
     
+    {showPicker && portalTarget && createPortal(
+      <div
+        ref={pickerRef}
+        role="dialog"
+        aria-label="เลือกช่วงวันที่ขอ"
+        className="fixed z-[100000] overflow-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl"
+        style={{
+          top: pickerPosition.top,
+          left: pickerPosition.left,
+          width: "min(330px, calc(100vw - 32px))",
+          maxHeight: "calc(100vh - 32px)",
+        }}
+      >
+        <div className="mb-2 flex items-center justify-between px-2">
+          <span className="text-sm font-semibold text-slate-700">เลือกช่วงวันที่ขอ</span>
+          <button type="button" aria-label="ปิดปฏิทิน" onClick={() => setShowPicker(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100">
+            <X size={16} />
+          </button>
+        </div>
+        <DateRange
+          ranges={requestDateRange}
+          onChange={changeDate}
+          locale={th}
+          months={1}
+          direction="vertical"
+          moveRangeOnFirstSelection={false}
+          editableDateInputs={true}
+          showDateDisplay={false}
+          rangeColors={["#2563eb"]}
+          className="request-date-calendar"
+        />
+        <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+          <button type="button" onClick={clearDates} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-rose-50 hover:text-rose-600">ล้างวันที่</button>
+          <button type="button" onClick={() => setShowPicker(false)} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700">เสร็จสิ้น</button>
+        </div>
+      </div>,
+      portalTarget
+    )}
     {selectedRequest && portalTarget && createPortal(
   <FleetModalDetail
     open={true}
@@ -509,6 +553,10 @@ export default function WaitingFleetPage() {
         <div className="rounded-2xl bg-white p-6 shadow-xl"><p>ไม่พบข้อมูลสำหรับดึงรายงาน</p><button type="button" onClick={() => setOpenExportModal(false)} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-white">ปิด</button></div>
       </div>
     ), portalTarget)}
+    <style jsx global>{`
+      .request-date-calendar.rdrCalendarWrapper { width: 100%; }
+      .request-date-calendar .rdrMonth { width: 100%; }
+    `}</style>
     <style jsx>{`
         .waiting-filter-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
         .waiting-filter-grid > :global(*) { min-width: 0; }

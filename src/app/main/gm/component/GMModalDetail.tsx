@@ -329,6 +329,9 @@ export default function GMModalDetail({
       approve_qty_gm: quantity,
       reject_reason: isApproval ? "" : remark.trim(),
       status_details: remark.trim() || decisionDescription(status),
+      ...(normalizeStatus(data.status) === "gm_checking"
+        ? { license_replace: data.license_replace }
+        : {}),
     };
 
     busyRef.current = true;

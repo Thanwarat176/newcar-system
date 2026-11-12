@@ -396,7 +396,7 @@ function formatStatusText(status: string): string {
     const value = status.trim().toLowerCase();
 
     if (
-        ["fbp_pending", "partial_approved", "pending_fbp"].includes(value)
+        ["fbp_pending", "gm_checking", "partial_approved", "pending_fbp"].includes(value)
     ) {
         return "รอจัดรถ";
     }
@@ -709,6 +709,7 @@ export default function FleetModalDetail({
 
     const isFbpPending = [
         "fbp_pending",
+        "gm_checking",
         "partial_approved",
         "pending_fbp",
     ].includes(data.status.trim().toLowerCase());
@@ -1733,7 +1734,7 @@ export default function FleetModalDetail({
                 : remainingAllocationQty;
 
             const status = remaining > 0
-                ? isStandardReplacementType ? "fbp_pending" : "partial_approved"
+                ? "partial_approved"
                 : "progress";
 
             const suppliersPayload = rowsToSave.map((row) => ({
@@ -1947,7 +1948,7 @@ export default function FleetModalDetail({
                         // ยังมีทะเบียนเหลือ ต้องให้พิจารณาต่อได้
                         status:
                             remaining > 0
-                                ? "fbp_pending"
+                                ? "partial_approved"
                                 : hasApproved
                                     ? "progress"
                                     : "rejected",
