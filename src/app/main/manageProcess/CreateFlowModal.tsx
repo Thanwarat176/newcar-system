@@ -103,7 +103,7 @@ export default function CreateFlowModal({ open, flowData, fleetTypes, onClose, o
     if (emptyIndex !== -1) { setError(`กรุณาระบุชื่อขั้นตอนแถวที่ ${emptyIndex + 1} หรือลบแถวนั้น`); return; }
     if (rows.some(row => row.sla.trim() !== "" && (!Number.isSafeInteger(Number(row.sla)) || Number(row.sla) < 1 || Number(row.sla) > 1000))) { setError("SLA ต้องเป็นจำนวนเต็ม 1–1000 หรือเว้นว่าง"); return; }
     for (const type of selectedTypes) {
-      if (roleChanges[type] !== undefined && (!roleChanges[type].trim() || roleChanges[type].split(",").some(role => !["DC", "TC", "CT"].includes(role.trim().toUpperCase())))) { setError(`Role ของ ${type} ต้องเป็น DC, TC หรือ CT คั่นด้วยจุลภาค`); return; }
+      if (roleChanges[type] !== undefined && (!roleChanges[type].trim() || roleChanges[type].split(",").some(role => !["DC", "CT", "CT"].includes(role.trim().toUpperCase())))) { setError(`Role ของ ${type} ต้องเป็น DC, TC หรือ CT คั่นด้วยจุลภาค`); return; }
     }
     if (!rows.length) return;
     busy.current = true; setSubmitting(true); setError(""); setNotice("");
@@ -192,12 +192,12 @@ export default function CreateFlowModal({ open, flowData, fleetTypes, onClose, o
             {selectedTypes.length > 0 && <div className="mb-4 space-y-2 rounded-xl bg-slate-50 p-3">
               <p className="text-xs font-semibold text-slate-700">Role ของแต่ละประเภท</p>
               <p className="text-[11px] text-slate-500">เลือกคลังขอ ส่วนกลางขอ หรือขอได้ทั้งคู่ — การเปลี่ยนมีผลกับประเภทนี้ทั้งระบบ</p>
-              {selectedTypes.map(type => <label key={type} className="grid items-center gap-2 text-xs sm:grid-cols-[minmax(0,1fr)_150px]"><span>{type}</span><select aria-label={`Role ${type}`} value={roleChanges[type] ?? ((typeRoles[type]?.split(",").map(value => value.trim()).sort().join(",") === "DC,TC" ? "TC,DC" : typeRoles[type] || ""))} disabled={locked || rolesLoading || !!rolesError} onChange={event => setRoleChanges(current => ({ ...current, [type]: event.target.value }))} className={inputClass}>
+              {selectedTypes.map(type => <label key={type} className="grid items-center gap-2 text-xs sm:grid-cols-[minmax(0,1fr)_150px]"><span>{type}</span><select aria-label={`Role ${type}`} value={roleChanges[type] ?? ((typeRoles[type]?.split(",").map(value => value.trim()).sort().join(",") === "DC,CT" ? "TC,DC" : typeRoles[type] || ""))} disabled={locked || rolesLoading || !!rolesError} onChange={event => setRoleChanges(current => ({ ...current, [type]: event.target.value }))} className={inputClass}>
                   <option value="" disabled>เลือกการใช้งาน</option>
                   <option value="DC">คลังขอ</option>
                   <option value="CT">ส่วนกลางขอ</option>
                   <option value="TC,DC">ขอได้ทั้งคู่</option>
-                  {typeRoles[type] && !["DC", "CT", "DC,TC"].includes(typeRoles[type].split(",").map(value => value.trim()).sort().join(",")) && <option value={typeRoles[type]} disabled>ค่าเดิม: {typeRoles[type]} (กรุณาเลือกใหม่)</option>}
+                  {typeRoles[type] && !["DC", "CT", "DC,CT"].includes(typeRoles[type].split(",").map(value => value.trim()).sort().join(",")) && <option value={typeRoles[type]} disabled>ค่าเดิม: {typeRoles[type]} (กรุณาเลือกใหม่)</option>}
                 </select></label>)}
             </div>}
 

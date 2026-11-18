@@ -99,7 +99,7 @@ function getFleetType(item: FlowItem): string {
 
 function formatRole(value?: string | null): string {
     const roles = Array.from(new Set(String(value ?? "").split(",").map(role => role.trim().toUpperCase()).filter(Boolean)));
-    if (roles.includes("DC") && roles.includes("TC")) return "ขอได้ทั้งคู่";
+    if (roles.includes("DC") && roles.includes("CT")) return "ขอได้ทั้งคู่";
     const labels: Record<string, string> = { DC: "คลังขอ", CT: "ส่วนกลางขอ" };
     return roles.length ? roles.map(role => labels[role] ?? role).join(" / ") : "ยังไม่ระบุ Role";
 }

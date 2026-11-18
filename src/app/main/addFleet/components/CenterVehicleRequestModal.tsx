@@ -469,7 +469,7 @@ export default function CenterVehicleRequestModal({
             setGradeMessage(error instanceof Error ? error.message : "บันทึกเกรดไม่สำเร็จ");
         } finally { gradeBusyRef.current = false; setGradeSaving(false); }
     };
-    const requestSource = "TC";
+    const requestSource = "CT";
     const endDateButtonRef = useRef<HTMLButtonElement | null>(null);
     const [calendarTarget, setCalendarTarget] = useState<"usage_date" | "usage_end_date">("usage_date");
     const [hasUsageEndDate, setHasUsageEndDate] = useState(false);

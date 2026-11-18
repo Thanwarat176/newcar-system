@@ -564,25 +564,29 @@ const remainingUsage = (value?: string) => {
 const vehicleCode = (vehicle: RequestItem, index: number) =>
   vehicle.unit_code || vehicle.running_doc_vehicle_no || textValue(vehicle.vehicle_no) || `คันที่ ${index + 1}`;
 // จัดกลุ่ม -N01, -N02 เป็นเอกสารเดียวกัน และแยกเลขท้าย -005, -006
-const getDocumentGroupInfo = (vehicle: RequestItem, index: number): { key: string; displayDocument: string } => {
+const getDocumentGroupInfo = (
+  vehicle: RequestItem,
+  index: number,
+): { key: string; displayDocument: string } => {
   const runningDoc = textValue(vehicle.running_doc);
-  const code = [vehicle.unit_code, vehicle.running_doc_vehicle_no]
-    .map(textValue)
-    .find((value) => /-(?:N\d+|\d+)$/i.test(value));
 
-  if (code) {
-    if (/-N\d+$/i.test(code)) {
-      const base = code.replace(/-N\d+$/i, "");
-      return { key: `new:${base.toUpperCase()}`, displayDocument: base };
-    }
-    return { key: `numbered:${code.toUpperCase()}`, displayDocument: code };
+  if (runningDoc) {
+    const documentNo = runningDoc.replace(/-N\d+$/i, "");
+
+    return {
+      key: `document:${documentNo.toUpperCase()}`,
+      displayDocument: documentNo,
+    };
   }
-  if (/-N\d+$/i.test(runningDoc)) {
-    const base = runningDoc.replace(/-N\d+$/i, "");
-    return { key: `new:${base.toUpperCase()}`, displayDocument: base };
-  }
-  if (runningDoc) return { key: `document:${runningDoc.toUpperCase()}`, displayDocument: runningDoc };
-  return { key: `missing-document-${vehicle.id ?? index}-${index}`, displayDocument: "" };
+
+  const requestId = textValue(vehicle.request_id);
+
+  return {
+    key: requestId
+      ? `request:${requestId}`
+      : `missing:${vehicle.incoming_truck_id ?? vehicle.id ?? index}`,
+    displayDocument: "",
+  };
 };
 const vehicleKey = (vehicle: RequestItem, index: number) =>
   `${vehicle.request_id ?? ""}-${vehicle.incoming_truck_id ?? vehicle.id ?? vehicleCode(vehicle, index)}-${index}`;
@@ -1161,9 +1165,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: summary.all.qty,
-                itemCount: summary.all.items,
-                sub: "รวมจำนวนรถทั้งหมด",
+                count: summary.all.items,
+                sub: "จำนวนเอกสารทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -1179,9 +1182,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
               {
                 key: "progress",
                 label: "คำขอรอพิจารณา (TCAS)",
-                count: summary.progress.qty,
-                itemCount: summary.progress.items,
-                sub: "จำนวนรถที่รอการพิจารณา",
+                count: summary.progress.items,
+                sub: "เอกสารที่รอการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
                 inactiveClass:
@@ -1197,9 +1199,8 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
               {
                 key: "cancel",
                 label: "ไม่ผ่านกระบวนการ",
-                count: summary.cancel.qty,
-                itemCount: summary.cancel.items,
-                sub: "จำนวนรถที่ไม่ผ่านกระบวนการ",
+                count: summary.cancel.items,
+                sub: "เอกสารที่ไม่ผ่านกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1214,10 +1215,9 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
               },
               {
                 key: "success",
-                label: "เสร็จสิ้นกระบวนการ ",
-                count: summary.success.qty,
-                itemCount: summary.success.items,
-                sub: "จำนวนรถที่เสร็จสิ้นกระบวนการ",
+                label: "เสร็จสิ้นกระบวนการ",
+                count: summary.success.items,
+                sub: "เอกสารที่เสร็จสิ้นกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1236,7 +1236,6 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
               key,
               label,
               count,
-              itemCount,
               sub,
               activeClass,
               inactiveClass,
@@ -1263,7 +1262,16 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                   className={`group relative overflow-hidden rounded-xl p-3 text-left shadow-sm ring-1 transition duration-200 hover:shadow-md ${isActive ? activeClass : inactiveClass
                     }`}
                 >
-                  <BackgroundIcon aria-hidden="true" size={88} strokeWidth={1.2} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive ? "text-white opacity-[0.12]" : "opacity-[0.07]"}`} />
+                  <BackgroundIcon
+                    aria-hidden="true"
+                    size={88}
+                    strokeWidth={1.2}
+                    className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive
+                        ? "text-white opacity-[0.12]"
+                        : "opacity-[0.07]"
+                      }`}
+                  />
+
                   <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
                   <div className="pointer-events-none absolute -bottom-10 left-6 h-20 w-20 rounded-full bg-white/10 blur-2xl" />
 
@@ -1271,12 +1279,14 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span
-                          className={`h-2 w-2 rounded-full ${isActive ? "bg-white" : dotClass
+                          className={`h-2 w-2 shrink-0 rounded-full ${isActive ? "bg-white" : dotClass
                             }`}
                         />
+
                         <p
                           className={`truncate text-[11px] font-semibold ${isActive ? "text-white/90" : ""
                             }`}
+                          title={label}
                         >
                           {label}
                         </p>
@@ -1303,20 +1313,12 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                       className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {formatNumber(count)}
+                      {loading ? "…" : formatNumber(count)}
+
                       <span className="ml-1 text-xs font-semibold opacity-60">
-                      รายการ
+                        เอกสาร
                       </span>
                     </p>
-
-                    {/* <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isActive
-                        ? "bg-white/15 text-white"
-                        : "bg-white/80 text-slate-400 shadow-sm"
-                        }`}
-                    >
-                      {formatNumber(itemCount)} เอกสาร
-                    </span> */}
                   </div>
                 </button>
               );
@@ -1479,19 +1481,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
             <div><h2 className="text-xs font-semibold">{pageTitle}</h2><p className="mt-1 text-[11px] text-slate-400">แสดง {groupedDocuments.length} เอกสาร จากข้อมูลรถ {visibleRequests.length} คันในหน้านี้</p></div>
-            {showExcelTools && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-800">รายงาน Excel</h3>
-                <p className="mt-1 text-[11px] text-slate-600">แก้เฉพาะสามคอลัมน์หัวสีเขียว แล้วอัปโหลดกลับเพื่อบันทึก</p>
-              </div>
-              <input ref={excelInputRef} type="file" accept=".xlsx" className="hidden" onChange={event => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                if (file) void importFleetExcel(file);
-              }} />
-              <button type="button" disabled={Boolean(excelBusy) || !canExportFleetExcel} onClick={() => void exportFleetExcel()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Download size={16} />{excelBusy === "export" ? "กำลังเตรียมไฟล์…" : "1. ดาวน์โหลด Excel"}</button>
-              <button type="button" disabled={Boolean(excelBusy) || !activeWarehouse} onClick={() => excelInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 px-4 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Upload size={16} />{excelBusy === "import" ? "กำลังบันทึก…" : "2. อัปโหลดไฟล์ที่แก้แล้ว"}</button>
-            </div>}
+
           </div>
           {showExcelTools && excelResult && <section aria-label="ผลการทำงาน Excel" className="border-b border-slate-100 bg-white px-4 py-3 text-xs">
             <div className="flex items-start justify-between gap-3">
@@ -1533,10 +1523,12 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
                       }}</VehicleBlocks></td>
                       <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => [normalizeDateKey(v.usage_date), v.usage_end_date?.trim() ? normalizeDateKey(v.usage_end_date) : "", normalizeStatus(v.status) === "cancel"]}>{(v) => { const remaining = remainingUsage(v.usage_date); return <><p className="whitespace-nowrap font-semibold">{formatThaiDate(v.usage_date)}{v.usage_end_date?.trim() ? ` - ${formatThaiDate(v.usage_end_date)}` : ""}</p>{normalizeStatus(v.status) !== "cancel" && <p className={`mt-1 whitespace-nowrap text-[11px] ${remaining.className}`}>{remaining.label}</p>}</>; }}</VehicleBlocks></td>
                       <td><DocumentValues vehicles={vehicles} getValue={(v) => v.request_by} /></td>
-                      <td>{(() => { const reference = assessmentReference(vehicles); return reference ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] font-semibold leading-5 text-blue-700">{getProcessStatus(reference)}</p><div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
-                        <p>วันที่เริ่ม: {reference.latest_process_str_date ? formatThaiDate(reference.latest_process_str_date) : "-"}</p>
-                        <p>วันที่สิ้นสุด: {reference.latest_process_end_date ? formatThaiDate(reference.latest_process_end_date) : "-"}</p>
-                      </div></div> : <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>; })()}</td>
+                      <td>{(() => {
+                        const reference = assessmentReference(vehicles); return reference ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] font-semibold leading-5 text-blue-700">{getProcessStatus(reference)}</p><div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
+                          <p>วันที่เริ่ม: {reference.latest_process_str_date ? formatThaiDate(reference.latest_process_str_date) : "-"}</p>
+                          <p>วันที่สิ้นสุด: {reference.latest_process_end_date ? formatThaiDate(reference.latest_process_end_date) : "-"}</p>
+                        </div></div> : <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>;
+                      })()}</td>
                       <td><button type="button" onClick={() => handleOpenDocument(document)} className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white hover:bg-blue-800">ประเมิน</button></td>
                     </tr>;
                   })}
