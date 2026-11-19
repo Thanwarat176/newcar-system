@@ -1680,9 +1680,6 @@ const handleConfirmSubmit = async () => {
             remark: formData.remark,
         };
 
-        console.log("========== CREATE REQUEST PAYLOAD ==========");
-        console.log(payload);
-        console.log("============================================");
 
         const res = await fetch(
             "http://192.168.158.210/api_new_truck/api/request_save.php",
@@ -1695,10 +1692,6 @@ const handleConfirmSubmit = async () => {
 
         const result = await res.json().catch(() => null);
 
-        console.log("========== CREATE RESPONSE ==========");
-        console.log("STATUS:", res.status);
-        console.log("RESULT:", result);
-        console.log("=====================================");
 
         if (!res.ok || result?.status === "error") {
             throw new Error(result?.message || "บันทึกข้อมูลไม่สำเร็จ");
@@ -2482,7 +2475,7 @@ return (
             <div style={{ zIndex: 2147483000 }} className="fixed inset-0 flex items-center justify-center bg-slate-950/60 p-4" onClick={closeConfirmation}>
                 <section ref={confirmDialogRef} role="dialog" aria-modal="true"
                     aria-labelledby="dc-confirm-title" aria-busy={saving}
-                    className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl"
+                    className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden supports-[height:100dvh]:max-h-[90dvh] rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl"
                     onClick={event => event.stopPropagation()}
                     onKeyDown={event => {
                         if (event.key === "Escape") { event.stopPropagation(); closeConfirmation(); }
@@ -2501,7 +2494,7 @@ return (
                         <button type="button" disabled={saving} onClick={closeConfirmation} aria-label="กลับไปแก้ไข"
                             className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 disabled:opacity-50"><X size={16} /></button>
                     </header>
-                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5 text-xs">
+                    <div className="min-h-0 flex-auto space-y-4 overflow-y-auto overscroll-contain p-5 text-xs">
                         <section className="overflow-hidden rounded-xl border border-slate-200">
                             <h4 className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-semibold">ข้อมูลคำขอ</h4>
                             <dl className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">

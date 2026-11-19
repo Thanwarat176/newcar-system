@@ -736,7 +736,8 @@ function SidebarContent({
       const children: SubMenuItem[] = [
         {
           label: "รถออกใหม่/ทดแทน",
-          path: newReplacementPath,
+          // path: newReplacementPath,
+          path: PATHS.main.trackFleet,
           badge:
             summary.tcas.new_replacement,
         },
@@ -745,7 +746,8 @@ function SidebarContent({
       if (hasFullAccess || isFBP) {
         children.push({
           label: "รถเสริม",
-          path: supplementPath,
+          // path: supplementPath,
+          path: PATHS.main.supplement,
           badge: summary.tcas.supplement,
         });
       }

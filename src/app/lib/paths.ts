@@ -13,6 +13,7 @@ export const PATHS = {
     trackFleet: "/main/trackFleet",
     manageProcess: "/main/manageProcess",
     manageUser: "/main/manageUser",
+    supplement: "/main/supplement",
   },
   home: "/",
 };

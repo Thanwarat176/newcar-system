@@ -2,7 +2,6 @@
 
 import { Suspense, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { Calendar, DateRange } from "react-date-range";
 import type { RangeKeyDict } from "react-date-range";
@@ -563,29 +562,18 @@ const remainingUsage = (value?: string) => {
 };
 const vehicleCode = (vehicle: RequestItem, index: number) =>
   vehicle.unit_code || vehicle.running_doc_vehicle_no || textValue(vehicle.vehicle_no) || `คันที่ ${index + 1}`;
-// จัดกลุ่ม -N01, -N02 เป็นเอกสารเดียวกัน และแยกเลขท้าย -005, -006
 const getDocumentGroupInfo = (
   vehicle: RequestItem,
   index: number,
 ): { key: string; displayDocument: string } => {
-  const runningDoc = textValue(vehicle.running_doc);
-
-  if (runningDoc) {
-    const documentNo = runningDoc.replace(/-N\d+$/i, "");
-
-    return {
-      key: `document:${documentNo.toUpperCase()}`,
-      displayDocument: documentNo,
-    };
-  }
-
-  const requestId = textValue(vehicle.request_id);
-
+  const documentNo = textValue(vehicle.running_doc_vehicle_no)
+    || textValue(vehicle.unit_code)
+    || textValue(vehicle.running_doc);
   return {
-    key: requestId
-      ? `request:${requestId}`
-      : `missing:${vehicle.incoming_truck_id ?? vehicle.id ?? index}`,
-    displayDocument: "",
+    key: documentNo
+      ? `vehicle-doc:${documentNo.toUpperCase()}`
+      : `incoming:${vehicle.incoming_truck_id ?? vehicle.id ?? index}`,
+    displayDocument: documentNo,
   };
 };
 const vehicleKey = (vehicle: RequestItem, index: number) =>
@@ -681,23 +669,16 @@ type FleetGroup = "new-replacement" | "supplement";
 export default function TrackFleetPage() {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-slate-500">กำลังโหลดหน้าติดตามกองรถ…</div>}>
-      <TrackFleetRoute />
+      <TrackFleetContent />
     </Suspense>
   );
 }
 
-function TrackFleetRoute() {
-  const searchParams = useSearchParams();
-  const fleetGroup: FleetGroup = searchParams?.get("fleet_group") === "supplement"
-    ? "supplement"
-    : "new-replacement";
+const TRACK_FLEET_GROUP = "replace";
+const TCAS_EXCEL_GROUP: FleetGroup = "new-replacement";
 
-  // เปลี่ยนกลุ่มแล้วเริ่มหน้าแรกและล้างข้อมูล/ตัวกรอง/Modal ของกลุ่มก่อนหน้า
-  return <TrackFleetContent key={fleetGroup} fleetGroup={fleetGroup} />;
-}
-
-function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
-  const fleetGroupLabel = fleetGroup === "supplement" ? "รถเสริม" : "รถออกใหม่/ทดแทน";
+function TrackFleetContent() {
+  const fleetGroupLabel = "รถทดแทน";
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [selectedDC, setSelectedDC] = useState<SelectedDC | null>(null);
@@ -794,7 +775,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams({ fleet_group: fleetGroup, group_mode: "document", page: String(currentPage), limit: String(pageSize) });
+      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, group_mode: "document", page: String(currentPage), limit: String(pageSize) });
       if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
       const userType = textValue(userInfo?.team || userInfo?.TEAM);
       if (userType) params.set("user_type", userType);
@@ -873,7 +854,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       clearTimeout(timeout);
       if (sequence === sequenceRef.current) setLoading(false);
     }
-  }, [fleetGroup, contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, debouncedSearchText, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
+  }, [contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, debouncedSearchText, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
   useEffect(() => {
     void fetchRequests();
     return () => { ++sequenceRef.current; controllerRef.current?.abort(); };
@@ -896,7 +877,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     const controller = new AbortController();
     const loadDateOptions = async () => {
       setDateOptionsError(false);
-      const params = new URLSearchParams({ fleet_group: fleetGroup, group_mode: "incoming", limit: "100" });
+      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, group_mode: "incoming", limit: "100" });
       if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
       const userType = textValue(userInfo?.team || userInfo?.TEAM);
       if (userType) params.set("user_type", userType);
@@ -927,7 +908,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
     };
     void loadDateOptions();
     return () => controller.abort();
-  }, [contextReady, showRequestDatePicker, requestDateOptions, loading, fleetGroup, activeWarehouse, userInfo?.team, userInfo?.TEAM]);
+  }, [contextReady, showRequestDatePicker, requestDateOptions, loading, activeWarehouse, userInfo?.team, userInfo?.TEAM]);
 
   // กรอง warehouse ที่ใช้แสดงและส่งออกให้ตรงกัน; backend ยังต้องตรวจสิทธิ์เอง
   const visibleRequests = useMemo(() => {
@@ -1090,7 +1071,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       const issues: string[] = [];
       try {
         const codes = eligible.map(vehicle => ({ unit_code: textValue(vehicle.unit_code) }));
-        const result = await tcasExcelApi(fleetGroup, activeWarehouse, "read", codes);
+        const result = await tcasExcelApi(TCAS_EXCEL_GROUP, activeWarehouse, "read", codes);
         originals = new Map((result.data || []).map(row => [row.unit_code, row.values]));
         issues.push(...(result.issues || []));
       } catch (error) {
@@ -1106,7 +1087,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `track-fleet-${fleetGroup}-${dateKey(new Date())}.xlsx`;
+      link.download = `track-fleet-${TRACK_FLEET_GROUP}-${dateKey(new Date())}.xlsx`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       if (vehicles.length > eligible.length) issues.push(`ข้าม ${vehicles.length - eligible.length} คันที่ไม่มี unit_code หรือรหัสซ้ำ`);
@@ -1132,7 +1113,7 @@ function TrackFleetContent({ fleetGroup }: { fleetGroup: FleetGroup }) {
         return;
       }
       if (!window.confirm(`พบการแก้ไข ${rows.length} แถว ต้องการบันทึกข้อมูลจาก Excel หรือไม่?`)) return;
-      const result = await tcasExcelApi(fleetGroup, activeWarehouse, "save", rows);
+      const result = await tcasExcelApi(TCAS_EXCEL_GROUP, activeWarehouse, "save", rows);
       setExcelResult({ summary: `บันทึกแล้ว ${result.updated ?? 0} คำขอ`, issues: [] });
       void fetchRequests();
     } catch (error) {
