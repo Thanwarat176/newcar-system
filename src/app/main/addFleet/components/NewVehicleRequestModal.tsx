@@ -102,7 +102,7 @@ export default function NewVehicleRequestModal(
 
 function RequestSourceSwitch(props: Props) {
   const [source, setSource] =
-    useState<"DC" | "CT">("DC");
+    useState<"DC" | "center">("DC");
 
   const [isCenter, setIsCenter] = useState(false);
 
@@ -160,7 +160,7 @@ function RequestSourceSwitch(props: Props) {
               label: "คำขอจากคลัง",
             },
             {
-              value: "CT",
+              value: "center",
               label: "คำขอจากส่วนกลาง",
             },
           ] as const
@@ -185,7 +185,7 @@ function RequestSourceSwitch(props: Props) {
     );
   };
 
-  if (isCenter && source === "CT") {
+  if (isCenter && source === "center") {
     return (
       <CenterVehicleRequestModal
         {...props}

@@ -469,7 +469,7 @@ export default function CenterVehicleRequestModal({
             setGradeMessage(error instanceof Error ? error.message : "บันทึกเกรดไม่สำเร็จ");
         } finally { gradeBusyRef.current = false; setGradeSaving(false); }
     };
-    const requestSource = "CT";
+    const requestSource = "center";
     const endDateButtonRef = useRef<HTMLButtonElement | null>(null);
     const [calendarTarget, setCalendarTarget] = useState<"usage_date" | "usage_end_date">("usage_date");
     const [hasUsageEndDate, setHasUsageEndDate] = useState(false);
@@ -661,7 +661,7 @@ export default function CenterVehicleRequestModal({
 
                 return (
                     item.type.trim() === formData.fleet_type.trim() &&
-                    roles.includes(requestSource)
+                    roles.includes(normalizeText(requestSource))
                 );
             }),
         [masterTypes, formData.fleet_type, requestSource]
@@ -1058,9 +1058,9 @@ export default function CenterVehicleRequestModal({
                     role.trim().toUpperCase()
                 );
 
-                return roles.includes(requestSource);
+                return roles.includes(normalizeText(requestSource));
             }),
-        [masterTypes]
+        [masterTypes, requestSource]
     );
 
     useEffect(() => {

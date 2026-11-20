@@ -1386,6 +1386,7 @@ function AddFleetContent() {
 
     if (
       value === "gm_pending" ||
+      value === "gm_checking" ||
       value === "gm กำลังอนุมัติ"
     ) {
       return "gm_pending";
@@ -2120,6 +2121,7 @@ function AddFleetContent() {
 
     const textMap: Record<string, string> = {
       gm_pending: "รอการอนุมัติจาก GM",
+      gm_checking: "GM กำลังตรวจสอบ",
       fbp_pending: "กำลังสรรหาผู้ประกอบการ (FBP)",
 
       process: "อยู่ระหว่างดำเนินการ",

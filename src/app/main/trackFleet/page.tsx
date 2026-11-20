@@ -111,7 +111,7 @@ const EMPTY_SUMMARY: Summary = {
 };
 const normalizeStatus = (value?: string) => {
   const status = String(value || "").trim().toLowerCase();
-  return ["reject_by_gm", "reject_by_fbp"].includes(status) ? "cancel" : status;
+  return status === "process" ? "progress" : status;
 };
 const textValue = (value: unknown) => String(value ?? "").trim();
 const EXCEL_FIELDS = [
@@ -250,7 +250,7 @@ function excelReportValues(vehicle: ExcelVehicle, warehouse: WarehouseRecord | n
     sequence,
     request_date: dateOnly(vehicle.request_date || vehicle.date),
     fleet_type: vehicle.fleet_type,
-    status: status === "progress" ? "คำขอรอพิจารณา (TCAS)" : status,
+    status: normalizeStatus(status) === "progress" ? "คำขอรอพิจารณา (TCAS)" : status,
     running_doc: vehicle.running_doc,
     dc_type: vehicle.dc_type,
     dc_name: vehicle.dc_name || vehicle.dc_code,
@@ -394,7 +394,7 @@ async function readTcasExportRequests(vehicles: ExcelVehicle[]) {
   for (const vehicle of vehicles) {
     const code = textValue(vehicle.unit_code);
     const request = requests.get(textValue(vehicle.request_id));
-    if (!request || textValue(request.status).toLowerCase() !== "progress"
+    if (!request || normalizeStatus(request.status) !== "progress"
       || textValue(request.dc_code).toUpperCase() !== textValue(vehicle.dc_code).toUpperCase()) {
       issues.push(`${code}: สถานะหรือคลังเปลี่ยนแล้ว กรุณารีเฟรชหน้า TCAS`);
       continue;
@@ -775,7 +775,7 @@ function TrackFleetContent() {
     const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, group_mode: "document", page: String(currentPage), limit: String(pageSize) });
+      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, status_scope: "tracking", group_mode: "document", page: String(currentPage), limit: String(pageSize) });
       if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
       const userType = textValue(userInfo?.team || userInfo?.TEAM);
       if (userType) params.set("user_type", userType);
@@ -877,7 +877,7 @@ function TrackFleetContent() {
     const controller = new AbortController();
     const loadDateOptions = async () => {
       setDateOptionsError(false);
-      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, group_mode: "incoming", limit: "100" });
+      const params = new URLSearchParams({ fleet_group: TRACK_FLEET_GROUP, status_scope: "tracking", group_mode: "incoming", limit: "100" });
       if (activeWarehouse && activeWarehouse !== "CENTER") params.set("warehouse", activeWarehouse);
       const userType = textValue(userInfo?.team || userInfo?.TEAM);
       if (userType) params.set("user_type", userType);
@@ -1146,8 +1146,6 @@ function TrackFleetContent() {
               {
                 key: "all",
                 label: "ทั้งหมด",
-                count: summary.all.items,
-                sub: "จำนวนเอกสารทั้งหมด",
                 activeClass:
                   "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white ring-slate-400/30",
                 inactiveClass:
@@ -1163,8 +1161,6 @@ function TrackFleetContent() {
               {
                 key: "progress",
                 label: "คำขอรอพิจารณา (TCAS)",
-                count: summary.progress.items,
-                sub: "เอกสารที่รอการพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
                 inactiveClass:
@@ -1180,8 +1176,6 @@ function TrackFleetContent() {
               {
                 key: "cancel",
                 label: "ไม่ผ่านกระบวนการ",
-                count: summary.cancel.items,
-                sub: "เอกสารที่ไม่ผ่านกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-rose-600 via-red-600 to-pink-600 text-white ring-rose-300/40",
                 inactiveClass:
@@ -1197,8 +1191,6 @@ function TrackFleetContent() {
               {
                 key: "success",
                 label: "เสร็จสิ้นกระบวนการ",
-                count: summary.success.items,
-                sub: "เอกสารที่เสร็จสิ้นกระบวนการ",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1216,8 +1208,6 @@ function TrackFleetContent() {
             ({
               key,
               label,
-              count,
-              sub,
               activeClass,
               inactiveClass,
               iconClass,
@@ -1277,7 +1267,7 @@ function TrackFleetContent() {
                         className={`mt-1 truncate text-[11px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
                           }`}
                       >
-                        {sub}
+                        {loading ? "…" : formatNumber(summary[key].items)} เอกสาร
                       </p>
                     </div>
 
@@ -1294,10 +1284,10 @@ function TrackFleetContent() {
                       className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {loading ? "…" : formatNumber(count)}
+                      {loading ? "…" : formatNumber(summary[key].qty)}
 
                       <span className="ml-1 text-xs font-semibold opacity-60">
-                        เอกสาร
+                        คัน
                       </span>
                     </p>
                   </div>

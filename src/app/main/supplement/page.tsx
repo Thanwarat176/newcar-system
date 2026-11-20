@@ -1191,7 +1191,7 @@ export default function SupplementPage() {
                 countClass: "text-blue-900",
                 activeCountClass: "text-white",
                 dotClass: "bg-blue-500",
-                shortLabel: "CT",
+                shortLabel: "center",
                 backgroundIcon: Truck,
               },
               {
