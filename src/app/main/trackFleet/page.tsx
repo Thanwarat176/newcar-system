@@ -111,7 +111,7 @@ const EMPTY_SUMMARY: Summary = {
 };
 const normalizeStatus = (value?: string) => {
   const status = String(value || "").trim().toLowerCase();
-  return status === "process" ? "progress" : status;
+  return ["partial_approved", "process"].includes(status) ? "progress" : status;
 };
 const textValue = (value: unknown) => String(value ?? "").trim();
 const EXCEL_FIELDS = [

@@ -421,7 +421,6 @@ export default function CenterVehicleRequestModal({
     onClose,
     onSuccess,
     existingRequests,
-    providerOptions,
     renderSourceTabs,
 }: VehicleRequestModalProps) {
     const [historySupplier, setHistorySupplier] = useState<HistorySupplier | null>(null);
@@ -531,14 +530,9 @@ export default function CenterVehicleRequestModal({
         providerSubsidiary,
         setProviderSubsidiary,
     ] = useState("");
-    const [
-        subsidiaryOptions,
-        setSubsidiaryOptions,
-    ] = useState<string[]>([]);
-    const [
-        loadingSubsidiaries,
-        setLoadingSubsidiaries,
-    ] = useState(false);
+    const [availableProviders, setAvailableProviders] = useState<ProviderOption[]>([]);
+    const [loadingProviders, setLoadingProviders] = useState(false);
+    const [providerLoadError, setProviderLoadError] = useState(false);
 
     const [providerPdf, setProviderPdf] =
         useState<File | null>(null);
@@ -1067,54 +1061,64 @@ export default function CenterVehicleRequestModal({
         setNewSupplierGrade(""); setGradeMessage(""); setGradeError(false);
     }, [selectedProviderId, open]);
 
-    const availableProviders =
-        useMemo<ProviderOption[]>(() => {
-            const options =
-                providerOptions ??
-                matchedTrucksByDcCode.map(
-                    (item) => ({
-                        id: getFirstText(
-                            getValueIgnoreCase(
-                                item,
-                                "COMPANY_ID"
-                            )
-                        ),
-                        name: getFirstText(
-                            getValueIgnoreCase(
-                                item,
-                                "ONLY_COMPANY_NAME"
-                            ),
-                            getValueIgnoreCase(
-                                item,
-                                "COMPANY_NAME"
-                            )
-                        ),
-                        rating: getFirstText(
-                            getValueIgnoreCase(
-                                item,
-                                "COMPANY_RATING"
-                            )
-                        ),
-                    })
-                );
+    useEffect(() => {
+        if (!open) return;
 
-            return [
-                ...new Map(
-                    options
-                        .filter(
-                            (item) =>
-                                item.id && item.name
-                        )
-                        .map((item) => [
-                            item.id,
-                            item,
-                        ])
-                ).values(),
-            ];
-        }, [
-            providerOptions,
-            matchedTrucksByDcCode,
-        ]);
+        const controller = new AbortController();
+        setAvailableProviders([]);
+        setLoadingProviders(true);
+        setProviderLoadError(false);
+
+        void (async () => {
+            try {
+                const response = await fetch(`${API_BASE}/suppliers.php`, {
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error("โหลดผู้ให้บริการไม่สำเร็จ");
+
+                const result: unknown = await response.json();
+                if (isRecord(result) && result.success === false) {
+                    throw new Error("โหลดผู้ให้บริการไม่สำเร็จ");
+                }
+
+                const providers = new Map<string, ProviderOption>();
+                for (const row of extractList(result)) {
+                    const id = getFirstText(
+                        getValueIgnoreCase(row, "company_id"),
+                        getValueIgnoreCase(row, "supplier_id"),
+                        getValueIgnoreCase(row, "code"),
+                        getValueIgnoreCase(row, "id"),
+                    );
+                    if (!id || providers.has(id)) continue;
+
+                    providers.set(id, {
+                        id,
+                        name: getFirstText(
+                            getValueIgnoreCase(row, "only_company_name"),
+                            getValueIgnoreCase(row, "company_name"),
+                            getValueIgnoreCase(row, "name"),
+                        ) || id,
+                        rating: getFirstText(
+                            getValueIgnoreCase(row, "company_rating"),
+                            getValueIgnoreCase(row, "rating"),
+                        ),
+                        subsidiary: parseSubsidiaries(getValueIgnoreCase(row, "subsidiary")),
+                    });
+                }
+
+                if (!controller.signal.aborted) {
+                    setAvailableProviders([...providers.values()]);
+                }
+            } catch {
+                if (!controller.signal.aborted) setProviderLoadError(true);
+            } finally {
+                if (!controller.signal.aborted) setLoadingProviders(false);
+            }
+        })();
+
+        return () => controller.abort();
+    }, [open]);
 
     const providerGradeIds = JSON.stringify(availableProviders.map(item => item.id).sort());
     useEffect(() => {
@@ -1777,125 +1781,8 @@ export default function CenterVehicleRequestModal({
         loadingMasterTypes,
     ]);
 
-    useEffect(() => {
-        if (!open || !isAllNowProvider) {
-            return;
-        }
-
-        const controller =
-            new AbortController();
-
-        setSubsidiaryOptions(
-            parseSubsidiaries(
-                selectedProvider?.subsidiary
-            )
-        );
-        setLoadingSubsidiaries(true);
-
-        void (async () => {
-            try {
-                const response = await fetch(
-                    `${API_BASE}/suppliers.php`,
-                    {
-                        signal: controller.signal,
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error("suppliers");
-                }
-
-                const result: unknown =
-                    await response.json();
-
-                const names = extractList(
-                    result
-                ).flatMap((row) => {
-                    const id = getFirstText(
-                        getValueIgnoreCase(
-                            row,
-                            "company_id"
-                        ),
-                        getValueIgnoreCase(
-                            row,
-                            "supplier_id"
-                        ),
-                        getValueIgnoreCase(
-                            row,
-                            "code"
-                        ),
-                        getValueIgnoreCase(row, "id")
-                    );
-
-                    const name = getFirstText(
-                        getValueIgnoreCase(
-                            row,
-                            "only_company_name"
-                        ),
-                        getValueIgnoreCase(
-                            row,
-                            "company_name"
-                        ),
-                        getValueIgnoreCase(
-                            row,
-                            "name"
-                        )
-                    );
-
-                    const isAllNow =
-                        id === "40900" ||
-                        [
-                            "40900",
-                            "บจ.ออลล์ นาว โลจิสติกส์",
-                            "ออลล์ นาว โลจิสติกส์",
-                        ].some(
-                            (value) =>
-                                normalizeText(
-                                    value
-                                ).replace(/\s+/g, "") ===
-                                normalizeText(
-                                    name
-                                ).replace(/\s+/g, "")
-                        );
-
-                    return isAllNow
-                        ? parseSubsidiaries(
-                            getValueIgnoreCase(
-                                row,
-                                "subsidiary"
-                            )
-                        )
-                        : [];
-                });
-
-                if (!controller.signal.aborted) {
-                    setSubsidiaryOptions(
-                        (previous) =>
-                            [
-                                ...new Set([
-                                    ...previous,
-                                    ...names,
-                                ]),
-                            ].sort((a, b) =>
-                                a.localeCompare(b, "th")
-                            )
-                    );
-                }
-            } catch {
-                // ยังพิมพ์ชื่อบริษัทภายใต้เองได้
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoadingSubsidiaries(false);
-                }
-            }
-        })();
-
-        return () => controller.abort();
-    }, [
-        open,
-        isAllNowProvider,
-        selectedProvider,
-    ]);
+    const subsidiaryOptions = [...new Set(parseSubsidiaries(selectedProvider?.subsidiary))]
+        .sort((a, b) => a.localeCompare(b, "th"));
 
     useEffect(() => {
         if (
@@ -3317,7 +3204,7 @@ export default function CenterVehicleRequestModal({
                                                     )
                                                 }
                                                 placeholder={
-                                                    loadingSubsidiaries
+                                                    loadingProviders
                                                         ? "กำลังโหลดบริษัทภายใต้..."
                                                         : "พิมพ์หรือเลือกบริษัทภายใต้"
                                                 }
@@ -3337,7 +3224,7 @@ export default function CenterVehicleRequestModal({
                                                 )}
                                             </datalist>
 
-                                            {!loadingSubsidiaries &&
+                                            {!loadingProviders &&
                                                 !subsidiaryOptions.length && (
                                                     <p className="mt-1 text-[11px] text-slate-500">
                                                         สามารถพิมพ์ชื่อบริษัทภายใต้ได้
@@ -3380,8 +3267,11 @@ export default function CenterVehicleRequestModal({
 
                                 {!filteredProviders.length && (
                                     <p className="py-3 text-slate-500">
-                                        ไม่พบผู้ให้บริการ
-                                        กรุณาตรวจสอบคลังหรือรายการผู้ให้บริการ
+                                        {loadingProviders
+                                            ? "กำลังโหลดรายชื่อผู้ให้บริการ..."
+                                            : providerLoadError
+                                                ? "โหลดรายชื่อผู้ให้บริการไม่สำเร็จ กรุณาปิดแล้วเปิดหน้าต่างอีกครั้ง"
+                                                : "ไม่พบผู้ให้บริการ"}
                                     </p>
                                 )}
 

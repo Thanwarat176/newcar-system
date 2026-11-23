@@ -15,7 +15,6 @@ import {
     AlertCircle,
     CloudUpload,
     ChevronDown,
-    RefreshCw,
     Download,
     FileSpreadsheet,
     LoaderCircle,
@@ -591,7 +590,7 @@ export default function ExportRequestModal({
     const importInput = useRef<HTMLInputElement>(null);
     const importReadVersion = useRef(0);
     const importSaveInFlight = useRef(false);
-    const [showImport, setShowImport] = useState(false);
+    const [showExportTable, setShowExportTable] = useState(false);
     const [isDraggingImport, setIsDraggingImport] = useState(false);
     const [importFileName, setImportFileName] = useState("");
     const [importPreview, setImportPreview] = useState<Record<string, unknown>[]>([]);
@@ -1205,103 +1204,103 @@ export default function ExportRequestModal({
                 request_id: entry.request_id ?? request.id ?? undefined,
             }))
         );
-                const historyByRequest = historyRows.reduce<
-                    Record<string, RequestStatusHistoryItem[]>
-                >((groups, historyItem) => {
-                    if (
-                        historyItem.request_id === null ||
-                        historyItem.request_id === undefined
-                    ) {
-                        return groups;
-                    }
+        const historyByRequest = historyRows.reduce<
+            Record<string, RequestStatusHistoryItem[]>
+        >((groups, historyItem) => {
+            if (
+                historyItem.request_id === null ||
+                historyItem.request_id === undefined
+            ) {
+                return groups;
+            }
 
-                    const requestId = String(historyItem.request_id);
+            const requestId = String(historyItem.request_id);
 
-                    if (!groups[requestId]) {
-                        groups[requestId] = [];
-                    }
+            if (!groups[requestId]) {
+                groups[requestId] = [];
+            }
 
-                    groups[requestId].push(historyItem);
+            groups[requestId].push(historyItem);
 
-                    return groups;
-                }, {});
+            return groups;
+        }, {});
 
-                const approvalByRequest = Object.fromEntries(
-                    Object.entries(historyByRequest).map(
-                        ([requestId, history]) => [
-                            requestId,
-                            getGmApprovalFromHistory(history),
-                        ]
-                    )
-                );
+        const approvalByRequest = Object.fromEntries(
+            Object.entries(historyByRequest).map(
+                ([requestId, history]) => [
+                    requestId,
+                    getGmApprovalFromHistory(history),
+                ]
+            )
+        );
 
-                const fbpApprovalByRequestData = Object.fromEntries(
-                    Object.entries(historyByRequest).map(
-                        ([requestId, history]) => {
-                            const latestFbpHistory = [...history]
-                                .filter((historyItem) => {
-                                    const status = String(
-                                        historyItem.status || ""
-                                    )
-                                        .trim()
-                                        .toLowerCase();
-
-                                    return (
-                                        status === "progress" ||
-                                        status === "fbp_pending" ||
-                                        status === "reject_by_fbp"
-                                    );
-                                })
-                                .sort((a, b) => {
-                                    const timeA = new Date(
-                                        String(a.changed_at || "")
-                                            .replace(" ", "T")
-                                    ).getTime();
-
-                                    const timeB = new Date(
-                                        String(b.changed_at || "")
-                                            .replace(" ", "T")
-                                    ).getTime();
-
-                                    return timeB - timeA;
-                                })[0];
-
-                            if (!latestFbpHistory) {
-                                return [
-                                    requestId,
-                                    {
-                                        status: "",
-                                        statusText: "",
-                                        changedAt: "",
-                                    } satisfies FbpApprovalInfo,
-                                ];
-                            }
-
+        const fbpApprovalByRequestData = Object.fromEntries(
+            Object.entries(historyByRequest).map(
+                ([requestId, history]) => {
+                    const latestFbpHistory = [...history]
+                        .filter((historyItem) => {
                             const status = String(
-                                latestFbpHistory.status || ""
+                                historyItem.status || ""
                             )
                                 .trim()
-                                .toLowerCase() as FbpApprovalInfo["status"];
+                                .toLowerCase();
 
-                            const statusTextMap: Record<string, string> = {
-                                progress: "ผ่านการอนุมัติ",
-                                fbp_pending: "รอดำเนินการ",
-                                reject_by_fbp: "ไม่ผ่านการอนุมัติ",
-                            };
+                            return (
+                                status === "progress" ||
+                                status === "fbp_pending" ||
+                                status === "reject_by_fbp"
+                            );
+                        })
+                        .sort((a, b) => {
+                            const timeA = new Date(
+                                String(a.changed_at || "")
+                                    .replace(" ", "T")
+                            ).getTime();
 
-                            return [
-                                requestId,
-                                {
-                                    status,
-                                    statusText: statusTextMap[status] || "",
-                                    changedAt: String(
-                                        latestFbpHistory.changed_at || ""
-                                    ).trim(),
-                                } satisfies FbpApprovalInfo,
-                            ];
-                        }
+                            const timeB = new Date(
+                                String(b.changed_at || "")
+                                    .replace(" ", "T")
+                            ).getTime();
+
+                            return timeB - timeA;
+                        })[0];
+
+                    if (!latestFbpHistory) {
+                        return [
+                            requestId,
+                            {
+                                status: "",
+                                statusText: "",
+                                changedAt: "",
+                            } satisfies FbpApprovalInfo,
+                        ];
+                    }
+
+                    const status = String(
+                        latestFbpHistory.status || ""
                     )
-                ) as Record<string, FbpApprovalInfo>;
+                        .trim()
+                        .toLowerCase() as FbpApprovalInfo["status"];
+
+                    const statusTextMap: Record<string, string> = {
+                        progress: "ผ่านการอนุมัติ",
+                        fbp_pending: "รอดำเนินการ",
+                        reject_by_fbp: "ไม่ผ่านการอนุมัติ",
+                    };
+
+                    return [
+                        requestId,
+                        {
+                            status,
+                            statusText: statusTextMap[status] || "",
+                            changedAt: String(
+                                latestFbpHistory.changed_at || ""
+                            ).trim(),
+                        } satisfies FbpApprovalInfo,
+                    ];
+                }
+            )
+        ) as Record<string, FbpApprovalInfo>;
 
         setGmApprovalByRequest(approvalByRequest);
         setFbpApprovalByRequest(fbpApprovalByRequestData);
@@ -1462,292 +1461,403 @@ export default function ExportRequestModal({
             exportRows,
         ]);
 
-        // The export layout follows the requested column order. Missing API fields stay blank.
-        const field = (item: ExportRequestItem, ...names: string[]) => {
-            const data = item as unknown as Record<string, unknown>;
-            const vehicle = data.vehicle_info as Record<string, unknown> | undefined;
-            const warehouse = data.warehouse_info as Record<string, unknown> | undefined;
-            const vehicleList = data.vehicle_warehouse_info as Record<string, unknown>[] | undefined;
-            const matchingVehicle = vehicleList?.find(
-                (entry) => String(entry?.vehicle_no ?? "") === String(item.vehicle_no ?? "")
-            );
-            for (const name of names) {
-                const value = vehicle?.[name] ?? warehouse?.[name] ?? matchingVehicle?.[name] ?? data[name];
-                if (value !== null && value !== undefined && value !== "") {
-                    return typeof value === "string" || typeof value === "number"
-                        ? value : "";
-                }
+    // The export layout follows the requested column order. Missing API fields stay blank.
+    const field = (item: ExportRequestItem, ...names: string[]) => {
+        const data = item as unknown as Record<string, unknown>;
+        const vehicle = data.vehicle_info as Record<string, unknown> | undefined;
+        const warehouse = data.warehouse_info as Record<string, unknown> | undefined;
+        const vehicleList = data.vehicle_warehouse_info as Record<string, unknown>[] | undefined;
+        const matchingVehicle = vehicleList?.find(
+            (entry) => String(entry?.vehicle_no ?? "") === String(item.vehicle_no ?? "")
+        );
+        for (const name of names) {
+            const value = vehicle?.[name] ?? warehouse?.[name] ?? matchingVehicle?.[name] ?? data[name];
+            if (value !== null && value !== undefined && value !== "") {
+                return typeof value === "string" || typeof value === "number"
+                    ? value : "";
             }
-            return "";
-        };
-        const dateField = (item: ExportRequestItem, name: keyof FlowDates) => {
-            const currentDate = getTrackProcessDate(item.trackProcess, name);
-            if (currentDate !== undefined) return currentDate ? formatThaiDate(currentDate) : "";
+        }
+        return "";
+    };
+    const dateField = (item: ExportRequestItem, name: keyof FlowDates) => {
+        const currentDate = getTrackProcessDate(item.trackProcess, name);
+        if (currentDate !== undefined) return currentDate ? formatThaiDate(currentDate) : "";
 
-            const key = String(item.vehicle_no ?? "").trim();
-            const dates = item.flow_dates_by_vehicle?.[key];
-            const matchingVehicle = item.vehicle_warehouse_info?.find(
-                (entry) => String(entry?.vehicle_no ?? "") === key
-            );
-            let value: string | null | undefined;
-            if (dates) {
-                value = dates[name];
-            } else if (item.flow_dates_by_vehicle && key) {
-                // A missing vehicle entry means no flow dates for this car.
-                value = null;
-            } else {
-                value = item.vehicle_info?.[name] ?? matchingVehicle?.[name] ?? item[name];
+        const key = String(item.vehicle_no ?? "").trim();
+        const dates = item.flow_dates_by_vehicle?.[key];
+        const matchingVehicle = item.vehicle_warehouse_info?.find(
+            (entry) => String(entry?.vehicle_no ?? "") === key
+        );
+        let value: string | null | undefined;
+        if (dates) {
+            value = dates[name];
+        } else if (item.flow_dates_by_vehicle && key) {
+            // A missing vehicle entry means no flow dates for this car.
+            value = null;
+        } else {
+            value = item.vehicle_info?.[name] ?? matchingVehicle?.[name] ?? item[name];
+        }
+        return value && String(value).trim() ? formatThaiDate(String(value)) : "";
+    };
+    const warehouseDate = (item: ExportRequestItem) => {
+        const value = field(item, "warehouse_plan_date");
+        return value ? formatThaiDate(String(value)) : "";
+    };
+    const exportDate = (value: unknown): string =>
+        value ? formatThaiDate(String(value)) : "";
+    const toExportRow = (item: ExportRequestItem, index: number) => ({
+        "ลำดับ": index + 1,
+        "วันที่สร้างคำขอ": exportDate(getRequestDateKey(item)),
+        "ประเภทคำขอ": item.fleet_type || "",
+        "สถานะปัจจุบัน": formatCurrentProcess(item),
+        "เลขที่เอกสาร": formatRunningDoc(item),
+        "ประเภทคลัง": item.dc_type || "",
+        "ชื่อคลัง": item.dc_code || "",
+        "ประเภทรถ": item.fleet_truck_type || "",
+        "จำนวนรถที่ขอ (คัน) *": Number(item.export_qty ?? item.qty ?? 0) || 0,
+        "รอรับ Workload": item.workload ?? "",
+        "จำนวน truckturn": item.truckturn ?? "",
+        "ทะเบียนทดแทน1(ระบุทะเบียน)": String(
+            item.export_detail?.license || item.export_license ||
+            (item.export_row_index != null ? item.details?.[item.export_row_index]?.license : "") ||
+            (!item.export_detail && item.export_row_index != null
+                ? (Array.isArray(item.license_replace) ? item.license_replace
+                    : String(item.license_replace ?? "").split(/[,;\n]+/))
+                    .map((license) => String(license).trim()).filter(Boolean)[item.export_row_index]
+                : "") || ""
+        ).trim(),
+        "หมายเหตุที่แจ้งขอ": item.remark || "",
+        "วันที่ใช้งาน": exportDate(item.usage_date),
+        "ผู้แจ้งขอ": item.request_by || "",
+        "สถานะอนุมัติจาก GM": gmApprovalByRequest[String(item.id ?? "")]?.statusText || item.gm_status || "",
+        "วันที่ GM อนุมัติ": gmApprovalByRequest[String(item.id ?? "")]?.changedAt || "",
+        "ผู้อนุมัติ GM": gmApprovalByRequest[String(item.id ?? "")]?.changedBy || "",
+        "ประเภทรถที่อนุมัติ": item.approved_truck_type || "",
+        "จำนวนรถที่อนุมัติ": item.approved_qty ?? "",
+        "ชื่อบริษัทขนส่ง (ย่อ)2": item.export_detail?.company_short_name_replace ?? "",
+        "VENDOR CODE": item.approved_company_id ?? "",
+        "ชื่อบริษัทขนส่ง": item.approved_company_name || "",
+        "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "",
+        "บริษัทขนส่งที่ถูกทดแทน": item.export_detail?.company_name ?? "",
+        "หมายเหตุการสรรหาผู้ประกอบการ": item.fbp_remark || "",
+        "สถานะการสรรหาผู้ประกอบการ": item.fbp_status || "",
+        "วันที่สรรหาผู้ประกอบการ": exportDate(item.fbp_approved_date),
+        "คาดการณ์วันเข้าคลัง": exportDate(field(item, "warehouse_plan_date")),
+        "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
+        "จัดสรรผู้ผลิต": field(item, "supplier_alloc"),
+        "จัดสรรรุ่นรถ": field(item, "car_model"),
+        "เลขเครื่อง": field(item, "car_engine"),
+        "เลข Chassis": field(item, "car_chassis"),
+        "ทะเบียน": field(item, "car_license"),
+        "เลขบันทึก FBP": field(item, "number_feb"),
+        "วันที่เข้ามากรอกเลขบันทึก FBP": exportDate(field(item, "date_number_feb")),
+        "เลขบันทึกแจ้ง TIS": field(item, "number_tis"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": exportDate(field(item, "date_number_tis")),
+        "เลขบันทึกแจ้ง TIL": field(item, "number_til"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": exportDate(field(item, "date_number_til")),
+        "เลขบันทึกแจ้ง ASK": field(item, "number_ask"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": exportDate(field(item, "date_number_ask")),
+        "เลขบันทึกแจ้ง Kleasing": field(item, "number_kleasing"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": exportDate(field(item, "date_number_kleasing")),
+        "เลขบันทึกแจ้ง TTB2": field(item, "number_ttb"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": exportDate(field(item, "date_number_ttb")),
+        "เลขบันทึกแจ้ง THAIOLIX": field(item, "number_thaiolix"),
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": exportDate(field(item, "date_number_thaiolix")),
+        "วันที่เริ่มรอจัดสรรตามโควต้า": dateField(item, "quota_wait_start_date"),
+        "วันที่สิ้นสุดรอจัดสรรตามโควต้า": dateField(item, "quota_wait_end_date"),
+        "วันที่เริ่มรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_start_date"),
+        "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_end_date"),
+        "วันที่เริ่มรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_start_date"),
+        "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_end_date"),
+        "วันที่เริ่มรอส่งรถเข้าอู่": dateField(item, "garage_delivery_start_date"),
+        "วันที่สิ้นสุดรอส่งรถเข้าอู่": dateField(item, "garage_delivery_end_date"),
+        "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_start_date"),
+        "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_end_date"),
+        "วันที่เริ่มรอจดทะเบียนรถ": dateField(item, "registration_wait_start_date"),
+        "วันที่สิ้นสุดรอจดทะเบียนรถ": dateField(item, "registration_wait_end_date"),
+        "วันที่เริ่มส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_start_date"),
+        "วันที่สิ้นสุดหนังสือหมดอายุ": dateField(item, "document_expiry_end_date"),
+        "วันที่ยกเลิกหนังสือ": dateField(item, "document_cancel_date"),
+        "Remark": field(item, "remark"),
+    });
+
+    const excludedUpdateColumns = new Set([
+        "หมายเหตุที่แจ้งขอ", "สถานะอนุมัติจาก GM", "วันที่ GM อนุมัติ", "ผู้อนุมัติ GM",
+        "หมายเหตุการสรรหาผู้ประกอบการ",
+    ]);
+    const allColumns = Object.keys(toExportRow({} as ExportRequestItem, 0));
+    const previewColumns = exportMode === "update"
+        ? allColumns.filter((column) => !excludedUpdateColumns.has(column)) : allColumns;
+    const editableStart = previewColumns.indexOf("คาดการณ์วันเข้าคลัง");
+    const selectedExportRow = (item: ExportRequestItem, index: number) => {
+        const row = toExportRow(item, index);
+        return Object.fromEntries(previewColumns.map((column) => [column, row[column as keyof typeof row]]));
+    };
+
+
+    const updateColumnFields: Record<string, string> = {
+        "คาดการณ์วันเข้าคลัง": "warehouse_plan_date",
+        "จัดสรรยี่ห้อรถ": "car_brand",
+        "จัดสรรผู้ผลิต": "supplier_alloc",
+        "จัดสรรรุ่นรถ": "car_model",
+        "เลขเครื่อง": "car_engine",
+        "เลข Chassis": "car_chassis",
+        "ทะเบียน": "car_license",
+        "เลขบันทึก FBP": "number_feb",
+        "วันที่เข้ามากรอกเลขบันทึก FBP": "date_number_feb",
+        "เลขบันทึกแจ้ง TIS": "number_tis",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": "date_number_tis",
+        "เลขบันทึกแจ้ง TIL": "number_til",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": "date_number_til",
+        "เลขบันทึกแจ้ง ASK": "number_ask",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": "date_number_ask",
+        "เลขบันทึกแจ้ง Kleasing": "number_kleasing",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": "date_number_kleasing",
+        "เลขบันทึกแจ้ง TTB2": "number_ttb",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": "date_number_ttb",
+        "เลขบันทึกแจ้ง THAIOLIX": "number_thaiolix",
+        "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": "date_number_thaiolix",
+        "วันที่เริ่มรอจัดสรรตามโควต้า": "quota_wait_start_date",
+        "วันที่สิ้นสุดรอจัดสรรตามโควต้า": "quota_wait_end_date",
+        "วันที่เริ่มรอลงนามหนังสือจัดสรร": "allocation_sign_start_date",
+        "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": "allocation_sign_end_date",
+        "วันที่เริ่มรอไฟแนนซ์อนุมัติ": "finance_approval_start_date",
+        "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": "finance_approval_end_date",
+        "วันที่เริ่มรอส่งรถเข้าอู่": "garage_delivery_start_date",
+        "วันที่สิ้นสุดรอส่งรถเข้าอู่": "garage_delivery_end_date",
+        "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": "body_installation_start_date",
+        "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": "body_installation_end_date",
+        "วันที่เริ่มรอจดทะเบียนรถ": "registration_wait_start_date",
+        "วันที่สิ้นสุดรอจดทะเบียนรถ": "registration_wait_end_date",
+        "วันที่เริ่มส่งมอบคลังแล้ว": "warehouse_delivery_start_date",
+        "วันที่สิ้นสุดหนังสือหมดอายุ": "document_expiry_end_date",
+        "วันที่ยกเลิกหนังสือ": "document_cancel_date",
+        "Remark": "remark",
+    };
+    const importColumns = allColumns.filter((column) => !excludedUpdateColumns.has(column));
+    const normalizeImportValue = (value: unknown) => String(value ?? "").trim();
+    const parseImportDate = (value: unknown): string | null => {
+        const text = normalizeImportValue(value);
+        if (!text || text === "-") return null;
+        let year: number, month: number, day: number;
+        const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (match) { day = +match[1]; month = +match[2]; year = +match[3]; }
+        else if (iso) { year = +iso[1]; month = +iso[2]; day = +iso[3]; }
+        else throw new Error(`วันที่ “${text}” ต้องเป็น DD/MM/YYYY หรือ YYYY-MM-DD`);
+        if (year > 2400) year -= 543;
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (year < 1900 || year > 9999 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+            throw new Error(`วันที่ “${text}” ไม่ถูกต้อง`);
+        }
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    };
+    const formatExcelDateSerial = (serial: number, date1904: boolean): string => {
+        const days = Math.floor(serial);
+        if (!Number.isFinite(days) || days < (date1904 ? 0 : 1) || (!date1904 && days === 60)) {
+            throw new Error("เลขวันที่ Excel ไม่ถูกต้อง");
+        }
+
+        // Excel's 1900 calendar reserves serial 60 for the nonexistent 29 February.
+        const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 31);
+        const elapsedDays = !date1904 && days > 60 ? days - 1 : days;
+        return new Date(epoch + elapsedDays * 86_400_000).toISOString().slice(0, 10);
+    };
+    const readImportFile = async (file?: File) => {
+        if (!file || savingImport) return;
+        const version = ++importReadVersion.current;
+        console.info("[Track Fleet Import] เริ่มตรวจไฟล์", file.name);
+        setImportError(""); setImportMessage(""); setImportUpdates([]); setImportPreview([]);
+        setImportFileName(file.name); setReadingImport(true);
+        try {
+            if (!/\.xlsx$/i.test(file.name)) throw new Error("กรุณาเลือกไฟล์ .xlsx ที่ส่งออกจากแท็บสำหรับอัปเดตงาน");
+            if (file.size > 10 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 10 MB");
+            const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
+            const sheet = book.Sheets["รายการคำขอ"];
+            if (!sheet) throw new Error("ไม่พบ Sheet รายการคำขอ กรุณาใช้ไฟล์สำหรับอัปเดตงาน");
+            const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false, blankrows: true });
+            const headers = (matrix[0] ?? []).map(normalizeImportValue);
+            if (headers.length !== importColumns.length || headers.some((header, index) => header !== importColumns[index])) {
+                throw new Error("หัวคอลัมน์ไม่ตรงกับไฟล์สำหรับอัปเดตงาน กรุณาส่งออกไฟล์ใหม่และไม่แก้ไขหัวคอลัมน์");
             }
-            return value && String(value).trim() ? formatThaiDate(String(value)) : "";
-        };
-        const warehouseDate = (item: ExportRequestItem) => {
-            const value = field(item, "warehouse_plan_date");
-            return value ? formatThaiDate(String(value)) : "";
-        };
-        const exportDate = (value: unknown): string =>
-            value ? formatThaiDate(String(value)) : "";
-        const toExportRow = (item: ExportRequestItem, index: number) => ({
-            "ลำดับ": index + 1,
-            "วันที่สร้างคำขอ": exportDate(getRequestDateKey(item)),
-            "ประเภทคำขอ": item.fleet_type || "",
-            "สถานะปัจจุบัน": formatCurrentProcess(item),
-            "เลขที่เอกสาร": formatRunningDoc(item),
-            "ประเภทคลัง": item.dc_type || "",
-            "ชื่อคลัง": item.dc_code || "",
-            "ประเภทรถ": item.fleet_truck_type || "",
-            "จำนวนรถที่ขอ (คัน) *": Number(item.export_qty ?? item.qty ?? 0) || 0,
-            "รอรับ Workload": item.workload ?? "",
-            "จำนวน truckturn": item.truckturn ?? "",
-            "ทะเบียนทดแทน1(ระบุทะเบียน)": String(
-                item.export_detail?.license || item.export_license ||
-                (item.export_row_index != null ? item.details?.[item.export_row_index]?.license : "") ||
-                (!item.export_detail && item.export_row_index != null
-                    ? (Array.isArray(item.license_replace) ? item.license_replace
-                        : String(item.license_replace ?? "").split(/[,;\n]+/))
-                        .map((license) => String(license).trim()).filter(Boolean)[item.export_row_index]
-                    : "") || ""
-            ).trim(),
-            "หมายเหตุที่แจ้งขอ": item.remark || "",
-            "วันที่ใช้งาน": exportDate(item.usage_date),
-            "ผู้แจ้งขอ": item.request_by || "",
-            "สถานะอนุมัติจาก GM": gmApprovalByRequest[String(item.id ?? "")]?.statusText || item.gm_status || "",
-            "วันที่ GM อนุมัติ": gmApprovalByRequest[String(item.id ?? "")]?.changedAt || "",
-            "ผู้อนุมัติ GM": gmApprovalByRequest[String(item.id ?? "")]?.changedBy || "",
-            "ประเภทรถที่อนุมัติ": item.approved_truck_type || "",
-            "จำนวนรถที่อนุมัติ": item.approved_qty ?? "",
-            "ชื่อบริษัทขนส่ง (ย่อ)2": item.export_detail?.company_short_name_replace ?? "",
-            "VENDOR CODE": item.approved_company_id ?? "",
-            "ชื่อบริษัทขนส่ง": item.approved_company_name || "",
-            "ประเภทรถที่ถูกทดแทน": item.truck_type_replace || "",
-            "บริษัทขนส่งที่ถูกทดแทน": item.export_detail?.company_name ?? "",
-            "หมายเหตุการสรรหาผู้ประกอบการ": item.fbp_remark || "",
-            "สถานะการสรรหาผู้ประกอบการ": item.fbp_status || "",
-            "วันที่สรรหาผู้ประกอบการ": exportDate(item.fbp_approved_date),
-            "คาดการณ์วันเข้าคลัง": exportDate(field(item, "warehouse_plan_date")),
-            "จัดสรรยี่ห้อรถ": field(item, "car_brand"),
-            "จัดสรรผู้ผลิต": field(item, "supplier_alloc"),
-            "จัดสรรรุ่นรถ": field(item, "car_model"),
-            "เลขเครื่อง": field(item, "car_engine"),
-            "เลข Chassis": field(item, "car_chassis"),
-            "ทะเบียน": field(item, "car_license"),
-            "เลขบันทึก FBP": field(item, "number_feb"),
-            "วันที่เข้ามากรอกเลขบันทึก FBP": exportDate(field(item, "date_number_feb")),
-            "เลขบันทึกแจ้ง TIS": field(item, "number_tis"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": exportDate(field(item, "date_number_tis")),
-            "เลขบันทึกแจ้ง TIL": field(item, "number_til"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": exportDate(field(item, "date_number_til")),
-            "เลขบันทึกแจ้ง ASK": field(item, "number_ask"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": exportDate(field(item, "date_number_ask")),
-            "เลขบันทึกแจ้ง Kleasing": field(item, "number_kleasing"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": exportDate(field(item, "date_number_kleasing")),
-            "เลขบันทึกแจ้ง TTB2": field(item, "number_ttb"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": exportDate(field(item, "date_number_ttb")),
-            "เลขบันทึกแจ้ง THAIOLIX": field(item, "number_thaiolix"),
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": exportDate(field(item, "date_number_thaiolix")),
-            "วันที่เริ่มรอจัดสรรตามโควต้า": dateField(item, "quota_wait_start_date"),
-            "วันที่สิ้นสุดรอจัดสรรตามโควต้า": dateField(item, "quota_wait_end_date"),
-            "วันที่เริ่มรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_start_date"),
-            "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": dateField(item, "allocation_sign_end_date"),
-            "วันที่เริ่มรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_start_date"),
-            "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": dateField(item, "finance_approval_end_date"),
-            "วันที่เริ่มรอส่งรถเข้าอู่": dateField(item, "garage_delivery_start_date"),
-            "วันที่สิ้นสุดรอส่งรถเข้าอู่": dateField(item, "garage_delivery_end_date"),
-            "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_start_date"),
-            "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": dateField(item, "body_installation_end_date"),
-            "วันที่เริ่มรอจดทะเบียนรถ": dateField(item, "registration_wait_start_date"),
-            "วันที่สิ้นสุดรอจดทะเบียนรถ": dateField(item, "registration_wait_end_date"),
-            "วันที่เริ่มส่งมอบคลังแล้ว": dateField(item, "warehouse_delivery_start_date"),
-            "วันที่สิ้นสุดหนังสือหมดอายุ": dateField(item, "document_expiry_end_date"),
-            "วันที่ยกเลิกหนังสือ": dateField(item, "document_cancel_date"),
-            "Remark": field(item, "remark"),
-        });
+            const values = matrix.slice(1)
+                .map((row, index) => ({ row, rowIndex: index }))
+                .filter(({ row }) => row.some((value) => normalizeImportValue(value)));
+            const sheetStart = XLSX.utils.decode_range(sheet["!ref"] ?? "A1").s;
+            const requestDateColumn = sheetStart.c + headers.indexOf("วันที่สร้างคำขอ");
+            if (!values.length || values.length > 500) throw new Error("รองรับข้อมูล 1–500 แถวต่อครั้ง");
+            const seen = new Set<number>();
+            const updates: FleetImportUpdate[] = [];
+            const preview: Record<string, unknown>[] = [];
+            for (const { row: valuesRow, rowIndex } of values) {
+                const record = Object.fromEntries(headers.map((header, i) => [header, valuesRow[i] ?? ""]));
+                const sequence = Number(record["ลำดับ"]);
+                if (!Number.isInteger(sequence) || sequence < 1 || seen.has(sequence)) throw new Error(`แถว ${rowIndex + 2}: ลำดับไม่ถูกต้องหรือซ้ำ`);
+                seen.add(sequence);
+                const originalItem = exportRows[sequence - 1];
+                if (!originalItem) throw new Error(`แถว ${rowIndex + 2}: ไม่พบรถในผลค้นหาปัจจุบัน กรุณาใช้ตัวกรองเดิมตอนส่งออก`);
+                const original = toExportRow(originalItem, sequence - 1);
 
-        const excludedUpdateColumns = new Set([
-            "หมายเหตุที่แจ้งขอ", "สถานะอนุมัติจาก GM", "วันที่ GM อนุมัติ", "ผู้อนุมัติ GM",
-            "หมายเหตุการสรรหาผู้ประกอบการ",
-        ]);
-        const allColumns = Object.keys(toExportRow({} as ExportRequestItem, 0));
-        const previewColumns = exportMode === "update"
-            ? allColumns.filter((column) => !excludedUpdateColumns.has(column)) : allColumns;
-        const editableStart = previewColumns.indexOf("คาดการณ์วันเข้าคลัง");
-        const selectedExportRow = (item: ExportRequestItem, index: number) => {
-            const row = toExportRow(item, index);
-            return Object.fromEntries(previewColumns.map((column) => [column, row[column as keyof typeof row]]));
-        };
+                for (const column of importColumns.filter((column) => !(column in updateColumnFields))) {
+                    const excelRaw = record[column];
+                    const systemRaw = original[column as keyof typeof original];
+                    const excelValue = normalizeImportValue(excelRaw);
+                    const systemValue = normalizeImportValue(systemRaw);
 
-
-        const updateColumnFields: Record<string, string> = {
-            "คาดการณ์วันเข้าคลัง": "warehouse_plan_date",
-            "จัดสรรยี่ห้อรถ": "car_brand",
-            "จัดสรรผู้ผลิต": "supplier_alloc",
-            "จัดสรรรุ่นรถ": "car_model",
-            "เลขเครื่อง": "car_engine",
-            "เลข Chassis": "car_chassis",
-            "ทะเบียน": "car_license",
-            "เลขบันทึก FBP": "number_feb",
-            "วันที่เข้ามากรอกเลขบันทึก FBP": "date_number_feb",
-            "เลขบันทึกแจ้ง TIS": "number_tis",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIS": "date_number_tis",
-            "เลขบันทึกแจ้ง TIL": "number_til",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TIL": "date_number_til",
-            "เลขบันทึกแจ้ง ASK": "number_ask",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง ASK": "date_number_ask",
-            "เลขบันทึกแจ้ง Kleasing": "number_kleasing",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง Kleasing": "date_number_kleasing",
-            "เลขบันทึกแจ้ง TTB2": "number_ttb",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง TTB2": "date_number_ttb",
-            "เลขบันทึกแจ้ง THAIOLIX": "number_thaiolix",
-            "วันที่เข้ามากรอกเลขบันทึกแจ้ง THAIOLIX": "date_number_thaiolix",
-            "วันที่เริ่มรอจัดสรรตามโควต้า": "quota_wait_start_date",
-            "วันที่สิ้นสุดรอจัดสรรตามโควต้า": "quota_wait_end_date",
-            "วันที่เริ่มรอลงนามหนังสือจัดสรร": "allocation_sign_start_date",
-            "วันที่สิ้นสุดรอลงนามหนังสือจัดสรร": "allocation_sign_end_date",
-            "วันที่เริ่มรอไฟแนนซ์อนุมัติ": "finance_approval_start_date",
-            "วันที่สิ้นสุดรอไฟแนนซ์อนุมัติ": "finance_approval_end_date",
-            "วันที่เริ่มรอส่งรถเข้าอู่": "garage_delivery_start_date",
-            "วันที่สิ้นสุดรอส่งรถเข้าอู่": "garage_delivery_end_date",
-            "วันที่เริ่มประกอบตู้/เครื่องทำความเย็น": "body_installation_start_date",
-            "วันที่สิ้นสุดประกอบตู้/เครื่องทำความเย็น": "body_installation_end_date",
-            "วันที่เริ่มรอจดทะเบียนรถ": "registration_wait_start_date",
-            "วันที่สิ้นสุดรอจดทะเบียนรถ": "registration_wait_end_date",
-            "วันที่เริ่มส่งมอบคลังแล้ว": "warehouse_delivery_start_date",
-            "วันที่สิ้นสุดหนังสือหมดอายุ": "document_expiry_end_date",
-            "วันที่ยกเลิกหนังสือ": "document_cancel_date",
-            "Remark": "remark",
-        };
-        const importColumns = allColumns.filter((column) => !excludedUpdateColumns.has(column));
-        const normalizeImportValue = (value: unknown) => String(value ?? "").trim();
-        const parseImportDate = (value: unknown): string | null => {
-            const text = normalizeImportValue(value);
-            if (!text || text === "-") return null;
-            let year: number, month: number, day: number;
-            const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (match) { day = +match[1]; month = +match[2]; year = +match[3]; }
-            else if (iso) { year = +iso[1]; month = +iso[2]; day = +iso[3]; }
-            else throw new Error(`วันที่ “${text}” ต้องเป็น DD/MM/YYYY หรือ YYYY-MM-DD`);
-            if (year > 2400) year -= 543;
-            const date = new Date(Date.UTC(year, month - 1, day));
-            if (year < 1900 || year > 9999 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-                throw new Error(`วันที่ “${text}” ไม่ถูกต้อง`);
-            }
-            return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        };
-        const readImportFile = async (file?: File) => {
-            if (!file || savingImport) return;
-            const version = ++importReadVersion.current;
-            setImportError(""); setImportMessage(""); setImportUpdates([]); setImportPreview([]);
-            setImportFileName(file.name); setReadingImport(true);
-            try {
-                if (!/\.xlsx$/i.test(file.name)) throw new Error("กรุณาเลือกไฟล์ .xlsx ที่ส่งออกจากแท็บสำหรับอัปเดตงาน");
-                if (file.size > 10 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 10 MB");
-                const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
-                const sheet = book.Sheets["รายการคำขอ"];
-                if (!sheet) throw new Error("ไม่พบ Sheet รายการคำขอ กรุณาใช้ไฟล์สำหรับอัปเดตงาน");
-                const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
-                const headers = (matrix[0] ?? []).map(normalizeImportValue);
-                if (headers.length !== importColumns.length || headers.some((header, index) => header !== importColumns[index])) {
-                    throw new Error("หัวคอลัมน์ไม่ตรงกับไฟล์สำหรับอัปเดตงาน กรุณาส่งออกไฟล์ใหม่และไม่แก้ไขหัวคอลัมน์");
-                }
-                const values = matrix.slice(1).filter((row) => row.some((value) => normalizeImportValue(value)));
-                if (!values.length || values.length > 500) throw new Error("รองรับข้อมูล 1–500 แถวต่อครั้ง");
-                const seen = new Set<number>();
-                const updates: FleetImportUpdate[] = [];
-                const preview: Record<string, unknown>[] = [];
-                for (const [rowIndex, valuesRow] of values.entries()) {
-                    const record = Object.fromEntries(headers.map((header, i) => [header, valuesRow[i] ?? ""]));
-                    const sequence = Number(record["ลำดับ"]);
-                    if (!Number.isInteger(sequence) || sequence < 1 || seen.has(sequence)) throw new Error(`แถว ${rowIndex + 2}: ลำดับไม่ถูกต้องหรือซ้ำ`);
-                    seen.add(sequence);
-                    const originalItem = exportRows[sequence - 1];
-                    if (!originalItem) throw new Error(`แถว ${rowIndex + 2}: ไม่พบรถในผลค้นหาปัจจุบัน กรุณาใช้ตัวกรองเดิมตอนส่งออก`);
-                    const original = toExportRow(originalItem, sequence - 1);
-                    for (const column of importColumns.filter((column) => !(column in updateColumnFields))) {
-                        if (normalizeImportValue(record[column]) !== normalizeImportValue(original[column as keyof typeof original])) {
-                            throw new Error(`แถว ${rowIndex + 2}: ข้อมูล “${column}” ถูกแก้ไขหรือข้อมูลระบบเปลี่ยนแล้ว กรุณาส่งออกไฟล์ใหม่`);
+                    if (column === "วันที่สร้างคำขอ") {
+                        const address = XLSX.utils.encode_cell({
+                            r: sheetStart.r + rowIndex + 1,
+                            c: requestDateColumn,
+                        });
+                        const cell = sheet[address];
+                        let excelDate = excelValue;
+                        let excelDateKey: string | null | undefined;
+                        let systemDateKey: string | null | undefined;
+                        let dateError: string | undefined;
+                        try {
+                            if (cell?.t === "n" && typeof cell.v === "number") {
+                                excelDate = formatExcelDateSerial(
+                                    cell.v,
+                                    book.Workbook?.WBProps?.date1904 === true,
+                                );
+                            }
+                            excelDateKey = parseImportDate(excelDate);
+                            systemDateKey = parseImportDate(systemValue);
+                            if (excelDateKey === systemDateKey) continue;
+                        } catch (error) {
+                            dateError = error instanceof Error ? error.message : String(error);
                         }
+                        console.table([{
+                            "แถว Excel": sheetStart.r + rowIndex + 2,
+                            "เซลล์": address,
+                            "คอลัมน์": column,
+                            "ค่าดิบในเซลล์": JSON.stringify(cell?.v),
+                            "ค่าที่อ่านจาก Excel": JSON.stringify(excelValue),
+                            "ค่าปัจจุบันจากระบบ": JSON.stringify(systemValue),
+                            "วันที่ Excel ที่ใช้เทียบ": excelDateKey,
+                            "วันที่ระบบที่ใช้เทียบ": systemDateKey,
+                            "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
+                            "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                            "ข้อผิดพลาดการแปลงวันที่": dateError,
+                        }]);
+                        throw new Error(
+                            `แถว ${rowIndex + 2} • วันที่สร้างคำขอ • Excel ${JSON.stringify(excelValue)}` +
+                            ` • วันที่อ่านได้ ${JSON.stringify(excelDate)} • ระบบ ${JSON.stringify(systemValue)}` +
+                            ` • เลขเอกสาร Excel ${record["เลขที่เอกสาร"]} • ระบบ ${original["เลขที่เอกสาร"]}`
+                        );
                     }
-                    const fields: Record<string, string | null> = {};
-                    for (const [column, fieldName] of Object.entries(updateColumnFields)) {
-                        if (normalizeImportValue(record[column]) === normalizeImportValue(original[column as keyof typeof original])) continue;
-                        const isDate = /date/.test(fieldName);
-                        try { fields[fieldName] = isDate ? parseImportDate(record[column]) : normalizeImportValue(record[column]) || null; }
-                        catch (error) { throw new Error(`แถว ${rowIndex + 2} / ${column}: ${error instanceof Error ? error.message : "ข้อมูลไม่ถูกต้อง"}`); }
-                    }
-                    if (Object.keys(fields).length) {
-                        const requestId = String(originalItem.id ?? "");
-                        const vehicleNo = String(originalItem.vehicle_no ?? "");
-                        if (!requestId || !vehicleNo) throw new Error(`แถว ${rowIndex + 2}: ไม่พบรหัสคำขอหรือลำดับรถ`);
-                        updates.push({ request_id: requestId, vehicle_no: vehicleNo,
-                            unit_code: String(originalItem.unit_code ?? originalItem.running_doc_vehicle_no ?? ""), fields });
-                        preview.push(record);
+
+                    if (excelValue === systemValue) continue;
+
+                    console.table([{
+                        "แถว Excel": rowIndex + 2,
+                        "ลำดับ": sequence,
+                        "คอลัมน์ที่ไม่เท่ากัน": column,
+                        "ค่าที่อ่านจาก Excel": JSON.stringify(excelRaw),
+                        "ค่าปัจจุบันจากระบบ": JSON.stringify(systemRaw),
+                        "ค่า Excel ที่ใช้เทียบ": JSON.stringify(excelValue),
+                        "ค่าระบบที่ใช้เทียบ": JSON.stringify(systemValue),
+                        "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
+                        "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                    }]);
+
+                    throw new Error(
+                        `แถว ${rowIndex + 2}: ข้อมูล “${column}” ถูกแก้ไขหรือข้อมูลระบบเปลี่ยนแล้ว กรุณาส่งออกไฟล์ใหม่`
+                    );
+                }
+                const fields: Record<string, string | null> = {};
+                const changes: { column: string; oldValue: string; newValue: string }[] = [];
+
+                for (const [column, fieldName] of Object.entries(updateColumnFields)) {
+                    const excelValue = normalizeImportValue(record[column]);
+                    const systemValue = normalizeImportValue(original[column as keyof typeof original]);
+
+                    const sameValue = fieldName === "remark"
+                        ? excelValue.replace(/\s+/g, " ") === systemValue.replace(/\s+/g, " ")
+                        : excelValue === systemValue;
+
+                    if (sameValue) continue;
+
+                    try {
+                        const newValue = /date/.test(fieldName)
+                            ? parseImportDate(record[column])
+                            : excelValue || null;
+
+                        fields[fieldName] = newValue;
+                        changes.push({ column, oldValue: systemValue, newValue: newValue ?? "" });
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : "ข้อมูลไม่ถูกต้อง";
+                        throw new Error(`แถว ${rowIndex + 2} / ${column}: ${message}`);
                     }
                 }
-                const keys = updates.map((item) => JSON.stringify([item.request_id, item.vehicle_no]));
-                if (new Set(keys).size !== keys.length) throw new Error("พบหลายแถวอัปเดตรถคันเดียวกัน กรุณาเหลือหนึ่งแถวต่อรถ");
-                if (version !== importReadVersion.current) return;
-                setImportUpdates(updates); setImportPreview(preview);
-                setImportMessage(updates.length ? `ตรวจสอบผ่าน ${updates.length} รายการที่มีการแก้ไข` : "ไม่มีข้อมูลที่เปลี่ยนแปลง");
-            } catch (error) {
-                if (version === importReadVersion.current) setImportError(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
-            } finally { if (version === importReadVersion.current) setReadingImport(false); }
-        };
-        const saveImportedUpdates = async () => {
-            if (!importUpdates.length || savingImport || readingImport || isLoading || importSaveInFlight.current) return;
-            importSaveInFlight.current = true;
-            setSavingImport(true); setImportError("");
-            try {
-                if (onImportUpdates) {
-                    // Preserve callers that already provide their own save implementation.
-                    await onImportUpdates(importUpdates);
-                } else {
-                    const endpoint = importApiUrl
-                        ? new URL(importApiUrl, window.location.href)
-                        : new URL("track_fleet_import_update.php", new URL(requestApiUrl, window.location.href));
-                    endpoint.search = "";
-                    endpoint.hash = "";
-                    const response = await fetch(endpoint.toString(), {
-                        method: "POST",
-                        credentials: "include",
-                        headers: { "Content-Type": "application/json", Accept: "application/json" },
-                        body: JSON.stringify({ updates: importUpdates }),
+
+                if (changes.length > 0) {
+                    const requestId = String(originalItem.id ?? "");
+                    const vehicleNo = String(originalItem.vehicle_no ?? "");
+
+                    if (!requestId || !vehicleNo) {
+                        throw new Error(`แถว ${rowIndex + 2}: ไม่พบรหัสคำขอหรือลำดับรถ`);
+                    }
+
+                    updates.push({
+                        request_id: requestId,
+                        vehicle_no: vehicleNo,
+                        unit_code: String(originalItem.unit_code ?? originalItem.running_doc_vehicle_no ?? ""),
+                        fields,
                     });
-                    let result: { status?: string; message?: string };
-                    try { result = await response.json(); }
-                    catch { throw new Error(`API บันทึกตอบกลับไม่ใช่ JSON (HTTP ${response.status}) กรุณาตรวจสอบไฟล์ PHP`); }
-                    if (!response.ok || result?.status !== "success") {
-                        throw new Error(result?.message || `บันทึกข้อมูลไม่สำเร็จ (HTTP ${response.status})`);
-                    }
+
+                    preview.push({
+                        document: original["เลขที่เอกสาร"],
+                        changes,
+                    });
                 }
-                setImportMessage(`Import สำเร็จ ${importUpdates.length} รายการ`);
-                setImportUpdates([]); setImportPreview([]);
-                setImportFileName("");
-                if (importInput.current) importInput.current.value = "";
-                setLoadingTrackRows(true);
-                setLoadAttempt((attempt) => attempt + 1);
-            } catch (error) { setImportError(error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ"); }
-            finally { importSaveInFlight.current = false; setSavingImport(false); }
-        };
+            }
+            const keys = updates.map((item) => JSON.stringify([item.request_id, item.vehicle_no]));
+            if (new Set(keys).size !== keys.length) throw new Error("พบหลายแถวอัปเดตรถคันเดียวกัน กรุณาเหลือหนึ่งแถวต่อรถ");
+            if (version !== importReadVersion.current) return;
+            setImportUpdates(updates); setImportPreview(preview);
+            setImportMessage(updates.length ? `ตรวจสอบผ่าน ${updates.length} รายการที่มีการแก้ไข` : "ไม่มีข้อมูลที่เปลี่ยนแปลง");
+        } catch (error) {
+            console.error("[Track Fleet Import] ตรวจไฟล์ไม่ผ่าน", file.name, error);
+            if (version === importReadVersion.current) setImportError(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
+        } finally { if (version === importReadVersion.current) setReadingImport(false); }
+    };
+    const saveImportedUpdates = async () => {
+        if (!importUpdates.length || savingImport || readingImport || isLoading || importSaveInFlight.current) return;
+        importSaveInFlight.current = true;
+        setSavingImport(true); setImportError("");
+        try {
+            if (onImportUpdates) {
+                // Preserve callers that already provide their own save implementation.
+                await onImportUpdates(importUpdates);
+            } else {
+                const endpoint = importApiUrl
+                    ? new URL(importApiUrl, window.location.href)
+                    : new URL("track_fleet_import_update.php", new URL(requestApiUrl, window.location.href));
+                endpoint.search = "";
+                endpoint.hash = "";
+                const response = await fetch(endpoint.toString(), {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json", Accept: "application/json" },
+                    body: JSON.stringify({ updates: importUpdates }),
+                });
+                let result: { status?: string; message?: string };
+                try { result = await response.json(); }
+                catch { throw new Error(`API บันทึกตอบกลับไม่ใช่ JSON (HTTP ${response.status}) กรุณาตรวจสอบไฟล์ PHP`); }
+                if (!response.ok || result?.status !== "success") {
+                    throw new Error(result?.message || `บันทึกข้อมูลไม่สำเร็จ (HTTP ${response.status})`);
+                }
+            }
+            setImportMessage(`Import สำเร็จ ${importUpdates.length} รายการ`);
+            setImportUpdates([]); setImportPreview([]);
+            setImportFileName("");
+            if (importInput.current) importInput.current.value = "";
+            setLoadingTrackRows(true);
+            setLoadAttempt((attempt) => attempt + 1);
+        } catch (error) { setImportError(error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ"); }
+        finally { importSaveInFlight.current = false; setSavingImport(false); }
+    };
 
     // Export Excel
     const handleExport = () => {
@@ -1757,161 +1867,166 @@ export default function ExportRequestModal({
 
         setExportError("");
         try {
-        const excelData = exportRows.map(selectedExportRow);
+            const excelData = exportRows.map(selectedExportRow);
 
-        const worksheet = XLSX.utils.json_to_sheet(excelData);
+            const worksheet = XLSX.utils.json_to_sheet(excelData);
 
-        const excelHeaders = Object.keys(excelData[0]);
-        const columnWidths = excelHeaders.map((header, index) => {
-            if (index === 0) return 8;
-            const longestValue = excelData.reduce((max, row) =>
-                Math.max(max, String(row[header as keyof typeof row] ?? "").length), 0);
-            return Math.min(38, Math.max(14, Math.min(header.length + 2, 30), longestValue + 2));
-        });
-        worksheet["!cols"] = columnWidths.map((wch) => ({ wch }));
+            const excelHeaders = Object.keys(excelData[0]);
+            const columnWidths = excelHeaders.map((header, index) => {
+                if (index === 0) return 8;
+                const longestValue = excelData.reduce((max, row) =>
+                    Math.max(max, String(row[header as keyof typeof row] ?? "").length), 0);
+                return Math.min(38, Math.max(14, Math.min(header.length + 2, 30), longestValue + 2));
+            });
+            worksheet["!cols"] = columnWidths.map((wch) => ({ wch }));
 
-        const sheetRange = worksheet["!ref"];
+            const sheetRange = worksheet["!ref"];
 
-        if (sheetRange) {
-            const range = XLSX.utils.decode_range(sheetRange);
+            if (sheetRange) {
+                const range = XLSX.utils.decode_range(sheetRange);
 
-            const lightGrayBorder = {
-                top: {
-                    style: "thin",
-                    color: { rgb: "D1D5DB" },
-                },
-                bottom: {
-                    style: "thin",
-                    color: { rgb: "D1D5DB" },
-                },
-                left: {
-                    style: "thin",
-                    color: { rgb: "D1D5DB" },
-                },
-                right: {
-                    style: "thin",
-                    color: { rgb: "D1D5DB" },
-                },
-            };
+                const lightGrayBorder = {
+                    top: {
+                        style: "thin",
+                        color: { rgb: "D1D5DB" },
+                    },
+                    bottom: {
+                        style: "thin",
+                        color: { rgb: "D1D5DB" },
+                    },
+                    left: {
+                        style: "thin",
+                        color: { rgb: "D1D5DB" },
+                    },
+                    right: {
+                        style: "thin",
+                        color: { rgb: "D1D5DB" },
+                    },
+                };
 
-            for (
-                let rowIndex = range.s.r;
-                rowIndex <= range.e.r;
-                rowIndex++
-            ) {
                 for (
-                    let columnIndex = range.s.c;
-                    columnIndex <= range.e.c;
-                    columnIndex++
+                    let rowIndex = range.s.r;
+                    rowIndex <= range.e.r;
+                    rowIndex++
                 ) {
-                    const cellAddress = XLSX.utils.encode_cell({
-                        r: rowIndex,
-                        c: columnIndex,
-                    });
+                    for (
+                        let columnIndex = range.s.c;
+                        columnIndex <= range.e.c;
+                        columnIndex++
+                    ) {
+                        const cellAddress = XLSX.utils.encode_cell({
+                            r: rowIndex,
+                            c: columnIndex,
+                        });
 
-                    const cell = worksheet[cellAddress];
+                        const cell = worksheet[cellAddress];
 
-                    if (!cell) {
-                        continue;
-                    }
+                        if (!cell) {
+                            continue;
+                        }
 
-                    cell.s = {
-                        ...(cell.s || {}),
-                        border: lightGrayBorder,
-                        alignment: {
-                            vertical: "center",
-                            horizontal:
-                                columnIndex === 0 ||
-                                    columnIndex === 8
-                                    ? "center"
-                                    : "left",
-                            wrapText: true,
-                        },
-                    };
-
-                    if (rowIndex === 0) {
                         cell.s = {
-                            ...cell.s,
-                            fill: {
-                                patternType: "solid",
-                                fgColor: {
-                                    rgb: "1E40AF",
-                                },
-                            },
-                            font: {
-                                bold: true,
-                                color: {
-                                    rgb: "FFFFFF",
-                                },
-                            },
+                            ...(cell.s || {}),
+                            border: lightGrayBorder,
                             alignment: {
                                 vertical: "center",
-                                horizontal: "center",
+                                horizontal:
+                                    columnIndex === 0 ||
+                                        columnIndex === 8
+                                        ? "center"
+                                        : "left",
                                 wrapText: true,
                             },
-                            border: lightGrayBorder,
                         };
+
+                        if (rowIndex === 0) {
+                            cell.s = {
+                                ...cell.s,
+                                fill: {
+                                    patternType: "solid",
+                                    fgColor: {
+                                        rgb: "1E40AF",
+                                    },
+                                },
+                                font: {
+                                    bold: true,
+                                    color: {
+                                        rgb: "FFFFFF",
+                                    },
+                                },
+                                alignment: {
+                                    vertical: "center",
+                                    horizontal: "center",
+                                    wrapText: true,
+                                },
+                                border: lightGrayBorder,
+                            };
+                        }
                     }
                 }
+
+                if (exportMode === "update") {
+                    for (let r = 0; r <= range.e.r; r++) {
+                        for (let c = editableStart; c <= range.e.c; c++) {
+                            const address = XLSX.utils.encode_cell({ r, c });
+                            const cell = worksheet[address] ?? (worksheet[address] = { t: "s", v: "" });
+                            cell.s = { ...cell.s, fill: { fgColor: { rgb: r === 0 ? "047857" : "ECFDF5" }, patternType: "solid" } };
+                        }
+                    }
+                }
+
+                worksheet["!rows"] = [
+                    { hpt: 48 },
+                    ...excelData.map((row) => {
+                        const lines = excelHeaders.reduce((max, header, index) => {
+                            const value = String(row[header as keyof typeof row] ?? "");
+                            return Math.max(max, Math.ceil(value.length / Math.max(1, columnWidths[index] - 2)));
+                        }, 1);
+                        return { hpt: Math.min(90, Math.max(22, lines * 16)) };
+                    }),
+                ];
+
+                worksheet["!autofilter"] = {
+                    ref: sheetRange,
+                };
             }
+
+            const workbook = XLSX.utils.book_new();
+
+            XLSX.utils.book_append_sheet(
+                workbook,
+                worksheet,
+                "รายการคำขอ"
+            );
 
             if (exportMode === "update") {
-                for (let r = 0; r <= range.e.r; r++) {
-                    for (let c = editableStart; c <= range.e.c; c++) {
-                        const address = XLSX.utils.encode_cell({ r, c });
-                        const cell = worksheet[address] ?? (worksheet[address] = { t: "s", v: "" });
-                        cell.s = { ...cell.s, fill: { fgColor: { rgb: r === 0 ? "047857" : "ECFDF5" }, patternType: "solid" } };
-                    }
-                }
+                const raw = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: false });
+                const protectedBytes = protectUpdateWorkbook(new Uint8Array(raw), editableStart);
+                const blob = new Blob([protectedBytes as BlobPart], {
+                    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url; link.download = "Truck_Request_Update.xlsx";
+                document.body.appendChild(link); link.click(); link.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } else {
+                XLSX.writeFile(workbook, "Truck_Request.xlsx");
             }
-
-            worksheet["!rows"] = [
-                { hpt: 48 },
-                ...excelData.map((row) => {
-                    const lines = excelHeaders.reduce((max, header, index) => {
-                        const value = String(row[header as keyof typeof row] ?? "");
-                        return Math.max(max, Math.ceil(value.length / Math.max(1, columnWidths[index] - 2)));
-                    }, 1);
-                    return { hpt: Math.min(90, Math.max(22, lines * 16)) };
-                }),
-            ];
-
-            worksheet["!autofilter"] = {
-                ref: sheetRange,
-            };
-        }
-
-        const workbook = XLSX.utils.book_new();
-
-        XLSX.utils.book_append_sheet(
-            workbook,
-            worksheet,
-            "รายการคำขอ"
-        );
-
-        if (exportMode === "update") {
-            const raw = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: false });
-            const protectedBytes = protectUpdateWorkbook(new Uint8Array(raw), editableStart);
-            const blob = new Blob([protectedBytes as BlobPart], {
-                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url; link.download = "Truck_Request_Update.xlsx";
-            document.body.appendChild(link); link.click(); link.remove();
-            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } else {
-            XLSX.writeFile(workbook, "Truck_Request.xlsx");
-        }
         } catch (error) {
             setExportError(error instanceof Error ? error.message : "ส่งออก Excel ไม่สำเร็จ");
         }
     };
 
+    useEffect(() => {
+        if (!open) setShowExportTable(false);
+    }, [open]);
+
     if (!open) {
         return null;
     }
 
+    const showPreview = exportMode === "report" || showExportTable;
     const ready = !isLoading && !loadError && exportRows.length > 0;
     const loadingTitle = loadingTrackRows
         ? reportProgress ? "กำลังดึงรายละเอียดรายงาน" : usesTrackFleetSearch ? "กำลังค้นหารายการรถจาก Track Fleet" : "กำลังโหลดรายการคำขอรถ"
@@ -1929,7 +2044,7 @@ export default function ExportRequestModal({
                         </div>
                         <div className="min-w-0">
                             <h2 id="export-track-fleet-title" className="text-base font-bold text-slate-900">
-                                {exportMode === "update" ? "ส่งออกไฟล์สำหรับอัปเดตงาน" : "ส่งออกรายงานคำขอรถ"}
+                                {exportMode === "update" ? "สำหรับอัปเดตงาน" : "ส่งออกรายงานคำขอรถ"}
                             </h2>
                             <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
                                 {dcLabel || "ข้อมูลคำขอทั้งหมดที่สามารถเข้าถึงได้"}
@@ -1949,43 +2064,23 @@ export default function ExportRequestModal({
 
                 <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-3">
                     <div role="group" aria-label="รูปแบบการส่งออก" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
-                        {([ ["report", "ส่งออกรายงาน"], ["update", "สำหรับอัปเดตงาน"] ] as const).map(([mode, label]) => (
+                        {([["report", "ส่งออกรายงาน"], ["update", "สำหรับอัปเดตงาน"]] as const).map(([mode, label]) => (
                             <button key={mode} type="button" aria-pressed={exportMode === mode}
-                                onClick={() => { setExportMode(mode); setExportError(""); }}
+                                onClick={() => {
+                                    if (mode === exportMode) return;
+                                    setExportMode(mode);
+                                    setShowExportTable(false);
+                                    setExportError("");
+                                }}
                                 className={`rounded-lg px-4 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${exportMode === mode ? "bg-blue-700 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}>
                                 {label}
                             </button>
                         ))}
                     </div>
-                    {exportMode === "update" && (
-                        <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
-                                    <RefreshCw className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <h3 className="text-sm font-bold text-slate-900">อัปเดตงานด้วย Excel</h3>
-                                    <p className="mt-1 text-xs leading-5 text-slate-600">ดาวน์โหลด → แก้ไขคอลัมน์สีเขียวอ่อน → Import กลับเพื่ออัปเดตงาน</p>
-                                </div>
-                            </div>
-                            <div className="grid w-full shrink-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
-                                <button type="button" onClick={handleExport} disabled={!ready}
-                                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:opacity-40">
-                                    {isLoading && !loadError ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" /> : <Download className="h-4 w-4 text-emerald-600" />}
-                                    ดาวน์โหลด Excel
-                                </button>
-                                <button type="button" onClick={() => setShowImport((shown) => !shown)} aria-expanded={showImport} aria-controls="fleet-import-panel"
-                                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
-                                    <CloudUpload className="h-4 w-4" /> Import อัปเดตงาน
-                                    <ChevronDown className={`h-4 w-4 motion-safe:transition-transform ${showImport ? "rotate-180" : ""}`} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
                     {exportError && <p role="alert" className="mt-2 text-xs text-rose-700">{exportError}</p>}
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                    {exportMode === "update" && showImport && <section id="fleet-import-panel" aria-label="Import อัปเดตงาน" className="m-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    {exportMode === "update" && <section id="fleet-import-panel" aria-label="Import อัปเดตงาน" className="m-4 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
                             <div className="flex items-center gap-3">
                                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -1998,192 +2093,247 @@ export default function ExportRequestModal({
                             </div>
                         </div>
                         <div className="p-5 sm:p-6">
-                        <p className="text-xs leading-5 text-slate-500">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน ระบบจะนำเข้าเฉพาะช่องที่อนุญาตให้แก้ไข</p>
-                        <input ref={importInput} type="file" accept=".xlsx" className="sr-only" aria-label="เลือกไฟล์ Excel สำหรับอัปเดตงาน"
-                            disabled={readingImport || savingImport} onChange={(event) => { void readImportFile(event.target.files?.[0]); event.target.value = ""; }} />
-                        <div onDragOver={(event) => { event.preventDefault(); if (!readingImport && !savingImport) setIsDraggingImport(true); }}
-                            onDragLeave={() => setIsDraggingImport(false)}
-                            onDrop={(event) => { event.preventDefault(); setIsDraggingImport(false); if (!readingImport && !savingImport) void readImportFile(event.dataTransfer.files[0]); }}
-                            className={`mt-4 flex min-h-[180px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 text-center ${isDraggingImport ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"}`}>
-                            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600"><CloudUpload className="h-7 w-7" /></div>
-                            <p className="mt-3 text-sm font-semibold text-slate-800">{isDraggingImport ? "วางไฟล์ตรงนี้" : "ลากไฟล์มาวางที่นี่"}</p>
-                            <p className="mt-1 text-xs text-slate-500">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 500 แถว</p>
-                            <button type="button" disabled={readingImport || savingImport || isLoading} onClick={() => importInput.current?.click()}
-                                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-blue-50 disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" />เลือกไฟล์ Excel</button>
-                        </div>
-                        {importFileName && <p className="mt-3 break-all text-xs text-slate-600">ไฟล์: {importFileName}</p>}
-                        {readingImport && <p role="status" className="mt-2 text-xs text-blue-700">กำลังอ่านและตรวจสอบไฟล์…</p>}
-                        {importError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{importError}</p>}
-                        {importMessage && <p role="status" className="mt-3 text-xs text-emerald-800">{importMessage}</p>}
-                        {importPreview.length > 0 && <div className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-200">
-                            <table className="w-max min-w-full text-xs"><thead className="sticky top-0 bg-blue-800 text-white"><tr>{importColumns.map((column) => <th key={column} className="max-w-[200px] border-r border-blue-700 px-3 py-2 text-left">{column}</th>)}</tr></thead>
-                                <tbody>{importPreview.slice(0, 20).map((row, index) => <tr key={index}>{importColumns.map((column) => <td key={column} className={`max-w-[220px] break-words border border-slate-100 px-3 py-2 ${column in updateColumnFields ? "bg-emerald-50" : "bg-slate-50"}`}>{String(row[column] ?? "")}</td>)}</tr>)}</tbody>
-                            </table>
-                        </div>}
-                        {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-500">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
-                        <p className="mt-3 text-xs leading-5 text-slate-500">ยืนยันเพื่อนำเฉพาะข้อมูลที่แก้ไขไปบันทึกในระบบ ช่องที่ลบข้อมูลออกจะถูกบันทึกเป็นค่าว่าง</p>
-                        <button type="button" onClick={() => void saveImportedUpdates()} disabled={!importUpdates.length || readingImport || savingImport || isLoading}
-                            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
-                            {savingImport ? <LoaderCircle size={15} className="animate-spin" /> : <Upload size={15} />}
-                            {savingImport ? "กำลัง Import…" : `ยืนยัน Import${importUpdates.length ? ` ${importUpdates.length} รายการ` : ""}`}
-                        </button>
-                        </div>
-                    </section>}
-
-                    <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                            {trackFilters.length > 0 && (
-                                <section aria-label="ตัวกรองจากหน้าหลัก" className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
-                                    <p className="mb-1.5 text-[11px] font-semibold text-blue-800">ตัวกรองที่ส่งมาจากหน้าหลัก</p>
-                                    <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
-                                        {trackFilters.map(({ key, label, value }) => (
-                                            <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
-                                                <dt className="mr-1.5 inline font-medium text-slate-500">{label}</dt>
-                                                <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
-                                            </div>
-                                        ))}
-                                    </dl>
-                                </section>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="flex min-h-[260px] flex-1 flex-col bg-slate-50 px-3 py-3 sm:px-5">
-                        <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}
-                            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-                                <div>
-                                    <h3 id="export-preview-title" className="text-sm font-semibold text-slate-900">ตัวอย่างรายงาน</h3>
-                                    {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
-                                </div>
-                                {ready && (
-                                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                                        <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{exportRows.length.toLocaleString("th-TH")} รายการ</span>
-                                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{totalQty.toLocaleString("th-TH")} คัน</span>
-                                    </div>
-                                )}
+                            <p className="text-xs leading-5 text-slate-500">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน ระบบจะนำเข้าเฉพาะช่องที่อนุญาตให้แก้ไข</p>
+                            <input ref={importInput} type="file" accept=".xlsx" className="sr-only" aria-label="เลือกไฟล์ Excel สำหรับอัปเดตงาน"
+                                disabled={readingImport || savingImport} onChange={(event) => { void readImportFile(event.target.files?.[0]); event.target.value = ""; }} />
+                            <div onDragOver={(event) => { event.preventDefault(); if (!readingImport && !savingImport) setIsDraggingImport(true); }}
+                                onDragLeave={() => setIsDraggingImport(false)}
+                                onDrop={(event) => { event.preventDefault(); setIsDraggingImport(false); if (!readingImport && !savingImport) void readImportFile(event.dataTransfer.files[0]); }}
+                                className={`mt-4 flex min-h-[180px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 text-center ${isDraggingImport ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"}`}>
+                                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600"><CloudUpload className="h-7 w-7" /></div>
+                                <p className="mt-3 text-sm font-semibold text-slate-800">{isDraggingImport ? "วางไฟล์ตรงนี้" : "ลากไฟล์มาวางที่นี่"}</p>
+                                <p className="mt-1 text-xs text-slate-500">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 500 แถว</p>
+                                <button type="button" disabled={readingImport || savingImport || isLoading} onClick={() => importInput.current?.click()}
+                                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-blue-50 disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" />เลือกไฟล์ Excel</button>
                             </div>
-
-                            {loadError ? (
-                                <div role="alert" className="m-4 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
-                                    <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
-                                    <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
-                                    <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
-                                    <button type="button" onClick={() => {
-                                        setTrackError("");
-                                        setFbpError("");
-                                        setReportProgress(null);
-                                        setLoadingTrackRows(true);
-                                        setLoadingFbp(true);
-                                        setLoadAttempt((attempt) => attempt + 1);
-                                    }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
-                                        ลองโหลดอีกครั้ง
-                                    </button>
-                                </div>
-                            ) : isLoading ? (
-                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
-                                    <LoaderCircle aria-hidden="true" size={26} className="mb-1 text-blue-600 motion-safe:animate-spin" />
-                                    <p className="text-sm font-semibold text-slate-900">{loadingTitle}</p>
-                                    {loadingTrackRows && reportProgress ? (
-                                        <>
-                                            <progress aria-label="จำนวนคำขอที่โหลดรายละเอียดแล้ว" max={reportProgress.total} value={reportProgress.loaded}
-                                                className="h-2 w-52 max-w-full accent-blue-600" />
-                                            <p className="text-xs tabular-nums text-slate-600">โหลดแล้ว {reportProgress.loaded.toLocaleString("th-TH")} จาก {reportProgress.total.toLocaleString("th-TH")} คำขอ</p>
-                                        </>
-                                    ) : (
-                                        <p className="text-xs text-slate-600">ตัวอย่างรายงานจะแสดงเมื่อโหลดเสร็จ</p>
-                                    )}
-                                </div>
-                            ) : !ready ? (
-                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
-                                    <Search aria-hidden="true" size={25} className="mb-1 text-slate-400" />
-                                    <p className="text-sm font-semibold text-slate-900">ไม่พบรายการที่จะส่งออก</p>
-                                    <p className="max-w-md text-xs text-slate-600">{emptyDescription}</p>
-                                </div>
-                            ) : (
-                                <>
-                                <div
-                                    className="min-h-0 w-full flex-1 overflow-auto overscroll-contain"
-                                    style={{
-                                        scrollbarGutter: "stable both-edges",
-                                        WebkitOverflowScrolling: "touch",
-                                        touchAction: "pan-x pan-y",
-                                    }}
-                                >
-                                    <table className="w-max min-w-full table-fixed border-collapse text-left">
-                                        <thead className="sticky top-0 z-10 bg-blue-800 text-[11px] font-semibold text-white">
+                            {importFileName && <p className="mt-3 break-all text-xs text-slate-600">ไฟล์: {importFileName}</p>}
+                            {readingImport && <p role="status" className="mt-2 text-xs text-blue-700">กำลังอ่านและตรวจสอบไฟล์…</p>}
+                            {importError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{importError}</p>}
+                            {importMessage && <p role="status" className="mt-3 text-xs text-emerald-800">{importMessage}</p>}
+                            {importPreview.length > 0 && (
+                                <div className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-200">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="sticky top-0 bg-blue-800 text-white">
                                             <tr>
-                                                {previewColumns.map((column) => (
-                                                    <th key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-700" : ""} border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                        {column}
-                                                    </th>
-                                                ))}
+                                                <th className="px-3 py-2">เลขที่เอกสาร</th>
+                                                <th className="px-3 py-2">ช่องที่แก้ไข</th>
+                                                <th className="px-3 py-2">ค่าเดิม</th>
+                                                <th className="px-3 py-2">ค่าใหม่</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {paginatedRows.map((item, index) => {
-                                                const row = toExportRow(
-                                                    item,
-                                                    (currentPage - 1) * ROWS_PER_PAGE + index
-                                                );
-                                                return (
-                                                    <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
-                                                        className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
-                                                        {previewColumns.map((column) => (
-                                                            <td key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-50/70" : ""} border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                                {row[column as keyof typeof row] ?? "-"}
-                                                            </td>
-                                                        ))}
+                                            {importPreview.slice(0, 20).map((row, index) => {
+                                                const changes = row.changes as {
+                                                    column: string;
+                                                    oldValue: string;
+                                                    newValue: string;
+                                                }[];
+
+                                                return changes.map((change) => (
+                                                    <tr key={`${index}-${change.column}`} className="border-t border-slate-200">
+                                                        <td className="px-3 py-2">{String(row.document ?? "")}</td>
+                                                        <td className="px-3 py-2">{change.column}</td>
+                                                        <td className="whitespace-pre-wrap break-words px-3 py-2">
+                                                            {change.oldValue || "—"}
+                                                        </td>
+                                                        <td className="whitespace-pre-wrap break-words bg-emerald-50 px-3 py-2">
+                                                            {change.newValue || "—"}
+                                                        </td>
                                                     </tr>
-                                                );
+                                                ));
                                             })}
                                         </tbody>
                                     </table>
                                 </div>
-
-                                <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <p className="text-[11px] font-bold text-slate-500">
-                                        แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
-                                        {" - "}
-                                        {Math.min(currentPage * ROWS_PER_PAGE, exportRows.length)}
-                                        {" จาก "}
-                                        {exportRows.length.toLocaleString("en-US")} รายการ
-                                    </p>
-
-                                    <div className="flex items-center justify-end gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                setCurrentPage((page) => Math.max(1, page - 1))
-                                            }
-                                            disabled={currentPage === 1}
-                                            className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            ก่อนหน้า
-                                        </button>
-
-                                        <span className="min-w-[90px] text-center text-xs font-black text-slate-700">
-                                            หน้า {currentPage} / {totalPages}
-                                        </span>
-
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                setCurrentPage((page) =>
-                                                    Math.min(totalPages, page + 1)
-                                                )
-                                            }
-                                            disabled={currentPage === totalPages}
-                                            className="h-9 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            ถัดไป
-                                        </button>
-                                    </div>
-                                </div>
-                                </>
                             )}
-                        </section>
-                    </div>
+                            {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-500">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
+                            <p className="mt-3 text-xs leading-5 text-slate-500">ยืนยันเพื่อนำเฉพาะข้อมูลที่แก้ไขไปบันทึกในระบบ ช่องที่ลบข้อมูลออกจะถูกบันทึกเป็นค่าว่าง</p>
+                            <button type="button" onClick={() => void saveImportedUpdates()} disabled={!importUpdates.length || readingImport || savingImport || isLoading}
+                                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                                {savingImport ? <LoaderCircle size={15} className="animate-spin" /> : <Upload size={15} />}
+                                {savingImport ? "กำลัง Import…" : `ยืนยัน Import${importUpdates.length ? ` ${importUpdates.length} รายการ` : ""}`}
+                            </button>
+                        </div>
+                    </section>}
+
+                    {exportMode === "update" && (
+                        <div className="mx-4 mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <button type="button" aria-expanded={showExportTable}
+                                aria-controls={showExportTable ? "fleet-export-table" : undefined}
+                                onClick={() => setShowExportTable((shown) => !shown)}
+                                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-blue-50">
+                                {showExportTable ? "ซ่อนตาราง" : "ดูตารางสำหรับส่งออก"}
+                                <ChevronDown className={`h-4 w-4 motion-safe:transition-transform ${showExportTable ? "rotate-180" : ""}`} />
+                            </button>
+                            {showExportTable && (
+                                <button type="button" onClick={handleExport} disabled={!ready}
+                                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                                    <Download aria-hidden="true" size={15} /> ดาวน์โหลด Excel
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {showPreview && (
+                        <>
+                            <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                    {trackFilters.length > 0 && (
+                                        <section aria-label="ตัวกรองจากหน้าหลัก" className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+                                            <p className="mb-1.5 text-[11px] font-semibold text-blue-800">ตัวกรองที่ส่งมาจากหน้าหลัก</p>
+                                            <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
+                                                {trackFilters.map(({ key, label, value }) => (
+                                                    <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
+                                                        <dt className="mr-1.5 inline font-medium text-slate-500">{label}</dt>
+                                                        <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
+                                                    </div>
+                                                ))}
+                                            </dl>
+                                        </section>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div id="fleet-export-table" className={`flex flex-1 flex-col bg-slate-50 px-3 py-3 sm:px-5 ${exportMode === "update" ? "min-h-[420px]" : "min-h-[260px]"}`}>
+                                <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}
+                                    className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+                                        <div>
+                                            <h3 id="export-preview-title" className="text-sm font-semibold text-slate-900">
+                                                {exportMode === "update" ? "ตารางสำหรับส่งออก" : "ตัวอย่างรายงาน"}
+                                            </h3>
+                                            {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
+                                        </div>
+                                        {ready && (
+                                            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                                                <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{exportRows.length.toLocaleString("th-TH")} รายการ</span>
+                                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{totalQty.toLocaleString("th-TH")} คัน</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {loadError ? (
+                                        <div role="alert" className="m-4 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
+                                            <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
+                                            <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
+                                            <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
+                                            <button type="button" onClick={() => {
+                                                setTrackError("");
+                                                setFbpError("");
+                                                setReportProgress(null);
+                                                setLoadingTrackRows(true);
+                                                setLoadingFbp(true);
+                                                setLoadAttempt((attempt) => attempt + 1);
+                                            }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
+                                                ลองโหลดอีกครั้ง
+                                            </button>
+                                        </div>
+                                    ) : isLoading ? (
+                                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                            <LoaderCircle aria-hidden="true" size={26} className="mb-1 text-blue-600 motion-safe:animate-spin" />
+                                            <p className="text-sm font-semibold text-slate-900">{loadingTitle}</p>
+                                            {loadingTrackRows && reportProgress ? (
+                                                <>
+                                                    <progress aria-label="จำนวนคำขอที่โหลดรายละเอียดแล้ว" max={reportProgress.total} value={reportProgress.loaded}
+                                                        className="h-2 w-52 max-w-full accent-blue-600" />
+                                                    <p className="text-xs tabular-nums text-slate-600">โหลดแล้ว {reportProgress.loaded.toLocaleString("th-TH")} จาก {reportProgress.total.toLocaleString("th-TH")} คำขอ</p>
+                                                </>
+                                            ) : (
+                                                <p className="text-xs text-slate-600">ตัวอย่างรายงานจะแสดงเมื่อโหลดเสร็จ</p>
+                                            )}
+                                        </div>
+                                    ) : !ready ? (
+                                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                            <Search aria-hidden="true" size={25} className="mb-1 text-slate-400" />
+                                            <p className="text-sm font-semibold text-slate-900">ไม่พบรายการที่จะส่งออก</p>
+                                            <p className="max-w-md text-xs text-slate-600">{emptyDescription}</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div
+                                                className="min-h-0 w-full flex-1 overflow-auto overscroll-contain"
+                                                style={{
+                                                    scrollbarGutter: "stable both-edges",
+                                                    WebkitOverflowScrolling: "touch",
+                                                    touchAction: "pan-x pan-y",
+                                                }}
+                                            >
+                                                <table className="w-max min-w-full table-fixed border-collapse text-left">
+                                                    <thead className="sticky top-0 z-10 bg-blue-800 text-[11px] font-semibold text-white">
+                                                        <tr>
+                                                            {previewColumns.map((column) => (
+                                                                <th key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-700" : ""} border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                                    {column}
+                                                                </th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {paginatedRows.map((item, index) => {
+                                                            const row = toExportRow(
+                                                                item,
+                                                                (currentPage - 1) * ROWS_PER_PAGE + index
+                                                            );
+                                                            return (
+                                                                <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
+                                                                    className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
+                                                                    {previewColumns.map((column) => (
+                                                                        <td key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-50/70" : ""} border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                                            {row[column as keyof typeof row] ?? "-"}
+                                                                        </td>
+                                                                    ))}
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <p className="text-[11px] font-bold text-slate-500">
+                                                    แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
+                                                    {" - "}
+                                                    {Math.min(currentPage * ROWS_PER_PAGE, exportRows.length)}
+                                                    {" จาก "}
+                                                    {exportRows.length.toLocaleString("en-US")} รายการ
+                                                </p>
+
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setCurrentPage((page) => Math.max(1, page - 1))
+                                                        }
+                                                        disabled={currentPage === 1}
+                                                        className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        ก่อนหน้า
+                                                    </button>
+
+                                                    <span className="min-w-[90px] text-center text-xs font-black text-slate-700">
+                                                        หน้า {currentPage} / {totalPages}
+                                                    </span>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setCurrentPage((page) =>
+                                                                Math.min(totalPages, page + 1)
+                                                            )
+                                                        }
+                                                        disabled={currentPage === totalPages}
+                                                        className="h-9 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        ถัดไป
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </section>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2205,17 +2355,17 @@ export default function ExportRequestModal({
                             ยกเลิก
                         </button>
                         {exportMode === "report" && (
-                        <button
-                            type="button"
-                            onClick={handleExport}
-                            disabled={!ready}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
-                        >
-                            {isLoading && !loadError
-                                ? <LoaderCircle aria-hidden="true" size={15} className="motion-safe:animate-spin" />
-                                : <Download aria-hidden="true" size={15} />}
-                            ดาวน์โหลด Excel
-                        </button>
+                            <button
+                                type="button"
+                                onClick={handleExport}
+                                disabled={!ready}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                            >
+                                {isLoading && !loadError
+                                    ? <LoaderCircle aria-hidden="true" size={15} className="motion-safe:animate-spin" />
+                                    : <Download aria-hidden="true" size={15} />}
+                                ดาวน์โหลด Excel
+                            </button>
                         )}
                     </div>
                 </div>

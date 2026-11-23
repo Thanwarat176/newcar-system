@@ -14,7 +14,7 @@ import XLSX from "xlsx-js-style";
 import {
     AlertCircle,
     CloudUpload,
-    RefreshCw,
+    ChevronDown,
     Download,
     FileSpreadsheet,
     LoaderCircle,
@@ -577,6 +577,18 @@ function protectUpdateWorkbook(bytes: Uint8Array, editableStart: number): Uint8A
     return result;
 }
 
+type ImportPreviewChange = {
+    column: string;
+    oldValue: string;
+    newValue: string;
+};
+
+type ImportPreviewRow = {
+    excelRowNumber: number;
+    document: string;
+    changes: ImportPreviewChange[];
+};
+
 export default function ExportRequestModal({
     open,
     onClose,
@@ -590,23 +602,13 @@ export default function ExportRequestModal({
     const importInput = useRef<HTMLInputElement>(null);
     const importReadVersion = useRef(0);
     const importSaveInFlight = useRef(false);
+    const [showExportTable, setShowExportTable] = useState(false);
     const [isDraggingImport, setIsDraggingImport] = useState(false);
     const [importFileName, setImportFileName] = useState("");
-    const [importPreview, setImportPreview] = useState<Record<string, unknown>[]>([]);
+    const [importPreview, setImportPreview] = useState<ImportPreviewRow[]>([]);
     const [importUpdates, setImportUpdates] = useState<FleetImportUpdate[]>([]);
     const [importError, setImportError] = useState("");
     const [importMessage, setImportMessage] = useState("");
-    const [uploadStatus, setUploadStatus] = useState<"idle" | "reading" | "ready" | "unchanged" | "saving" | "success" | "error">("idle");
-    const [uploadChanges, setUploadChanges] = useState<Array<{ vehicle: string; column: string; before: string; after: string }>>([]);
-    const horizontalChanges = useMemo(() => {
-        const columns = [...new Set(uploadChanges.map(change => change.column))];
-        const vehicles = new Map<string, Map<string, typeof uploadChanges[number]>>();
-        for (const change of uploadChanges) {
-            if (!vehicles.has(change.vehicle)) vehicles.set(change.vehicle, new Map());
-            vehicles.get(change.vehicle)!.set(change.column, change);
-        }
-        return { columns, rows: [...vehicles].map(([vehicle, fields]) => ({ vehicle, fields })) };
-    }, [uploadChanges]);
     const [readingImport, setReadingImport] = useState(false);
     const [savingImport, setSavingImport] = useState(false);
     const [trackRows, setTrackRows] = useState<ExportRequestItem[]>([]);
@@ -1646,20 +1648,9 @@ export default function ExportRequestModal({
     };
     const importColumns = allColumns.filter((column) => !excludedUpdateColumns.has(column));
     const normalizeImportValue = (value: unknown) => String(value ?? "").trim();
-    const isDateColumn = (column: string) => column.startsWith("วันที่") || column === "คาดการณ์วันเข้าคลัง";
-    const parseImportDate = (value: unknown, date1904 = false): string | null => {
+    const parseImportDate = (value: unknown): string | null => {
         const text = normalizeImportValue(value);
         if (!text || text === "-") return null;
-        if (/^\d+(?:\.\d+)?$/.test(text)) {
-            const serial = Number(text);
-            // Excel's 1900 calendar contains the fictitious 29 February 1900.
-            if (!Number.isFinite(serial) || serial < 1 || (!date1904 && Math.floor(serial) === 60)) {
-                throw new Error(`วันที่ “${text}” ไม่ถูกต้อง`);
-            }
-            const parsed = XLSX.SSF.parse_date_code(serial, { date1904 });
-            if (!parsed || parsed.y < 1900 || parsed.y > 9999) throw new Error(`วันที่ “${text}” ไม่ถูกต้อง`);
-            return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
-        }
         let year: number, month: number, day: number;
         const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1673,142 +1664,208 @@ export default function ExportRequestModal({
         }
         return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     };
+    const formatExcelDateSerial = (serial: number, date1904: boolean): string => {
+        const days = Math.floor(serial);
+        if (!Number.isFinite(days) || days < (date1904 ? 0 : 1) || (!date1904 && days === 60)) {
+            throw new Error("เลขวันที่ Excel ไม่ถูกต้อง");
+        }
+
+        // Excel's 1900 calendar reserves serial 60 for the nonexistent 29 February.
+        const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 31);
+        const elapsedDays = !date1904 && days > 60 ? days - 1 : days;
+        return new Date(epoch + elapsedDays * 86_400_000).toISOString().slice(0, 10);
+    };
     const readImportFile = async (file?: File) => {
-        if (!file || savingImport || readingImport || isLoading) return;
-        setUploadStatus("reading"); setUploadChanges([]);
+        if (!file || savingImport) return;
         const version = ++importReadVersion.current;
+        console.info("[Track Fleet Import] เริ่มตรวจไฟล์", file.name);
         setImportError(""); setImportMessage(""); setImportUpdates([]); setImportPreview([]);
         setImportFileName(file.name); setReadingImport(true);
         try {
             if (!/\.xlsx$/i.test(file.name)) throw new Error("กรุณาเลือกไฟล์ .xlsx ที่ส่งออกจากแท็บสำหรับอัปเดตงาน");
             if (file.size > 10 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 10 MB");
-            const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false, dateNF: "dd/mm/yyyy" });
+            const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
             const sheet = book.Sheets["รายการคำขอ"];
             if (!sheet) throw new Error("ไม่พบ Sheet รายการคำขอ กรุณาใช้ไฟล์สำหรับอัปเดตงาน");
-            const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+            const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false, blankrows: true });
             const headers = (matrix[0] ?? []).map(normalizeImportValue);
             if (headers.length !== importColumns.length || headers.some((header, index) => header !== importColumns[index])) {
                 throw new Error("หัวคอลัมน์ไม่ตรงกับไฟล์สำหรับอัปเดตงาน กรุณาส่งออกไฟล์ใหม่และไม่แก้ไขหัวคอลัมน์");
             }
-            const values = matrix.slice(1).filter((row) => row.some((value) => normalizeImportValue(value)));
+            const values = matrix.slice(1)
+                .map((row, index) => ({ row, rowIndex: index }))
+                .filter(({ row }) => row.some((value) => normalizeImportValue(value)));
+            const sheetStart = XLSX.utils.decode_range(sheet["!ref"] ?? "A1").s;
+            const requestDateColumn = sheetStart.c + headers.indexOf("วันที่สร้างคำขอ");
             if (!values.length || values.length > 500) throw new Error("รองรับข้อมูล 1–500 แถวต่อครั้ง");
+            const rowsByDocument = new Map<string, ExportRequestItem[]>();
+            for (const item of exportRows) {
+                const document = formatRunningDoc(item);
+                if (!document) continue;
+                const matches = rowsByDocument.get(document);
+                if (matches) matches.push(item);
+                else rowsByDocument.set(document, [item]);
+            }
+
             const seen = new Set<number>();
             const updates: FleetImportUpdate[] = [];
-            const updateSources: Array<{ excelRow: number; sequence: number; document: string }> = [];
-            const preview: Record<string, unknown>[] = [];
-            const changes: typeof uploadChanges = [];
-            for (const [rowIndex, valuesRow] of values.entries()) {
+            const preview: ImportPreviewRow[] = [];
+            for (const { row: valuesRow, rowIndex } of values) {
                 const record = Object.fromEntries(headers.map((header, i) => [header, valuesRow[i] ?? ""]));
-                // Normalize typed dates and numeric Excel dates before comparison.
-                for (const column of headers.filter(isDateColumn)) {
-                    try {
-                        const iso = parseImportDate(record[column], !!book.Workbook?.WBProps?.date1904);
-                        record[column] = iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "";
-                    } catch (error) {
-                        throw new Error(`แถว ${rowIndex + 2} / ${column}: ${error instanceof Error ? error.message : "วันที่ไม่ถูกต้อง"}`);
-                    }
-                }
                 const sequence = Number(record["ลำดับ"]);
                 if (!Number.isInteger(sequence) || sequence < 1 || seen.has(sequence)) throw new Error(`แถว ${rowIndex + 2}: ลำดับไม่ถูกต้องหรือซ้ำ`);
                 seen.add(sequence);
-                const originalItem = exportRows[sequence - 1];
-                if (!originalItem) throw new Error(`แถว ${rowIndex + 2}: ไม่พบรถในผลค้นหาปัจจุบัน กรุณาใช้ตัวกรองเดิมตอนส่งออก`);
-                const original = toExportRow(originalItem, sequence - 1);
-                for (const column of headers.filter(isDateColumn)) {
-                    const key = column as keyof typeof original;
-                    const text = String(original[key] ?? "").trim();
-                    const iso = parseImportDate(/^\d{4}-\d{2}-\d{2}[T ]/.test(text) ? text.slice(0, 10) : text);
-                    Object.assign(original, { [column]: iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "" });
+                const excelRowNumber = sheetStart.r + rowIndex + 2;
+                const document = normalizeImportValue(record["เลขที่เอกสาร"]);
+                const documentMatches = rowsByDocument.get(document) ?? [];
+                const matches = documentMatches.length > 1
+                    ? documentMatches.filter((item) => {
+                        const candidate = toExportRow(item, sequence - 1);
+                        const identityColumns = ["ชื่อคลัง", "ทะเบียนทดแทน1(ระบุทะเบียน)"] as const;
+                        return identityColumns.every((column) =>
+                            normalizeImportValue(candidate[column]) === normalizeImportValue(record[column])
+                        );
+                    })
+                    : documentMatches;
+                if (matches.length !== 1) {
+                    const message = documentMatches.length > 1
+                        ? `เลขที่เอกสาร “${document}” ซ้ำและระบุรถจากชื่อคลังกับทะเบียนทดแทนไม่ได้`
+                        : `ไม่พบเลขที่เอกสาร “${document || "(ว่าง)"}” ในผลค้นหาปัจจุบัน กรุณาตรวจตัวกรอง Track Fleet`;
+                    throw new Error(`แถว ${excelRowNumber}: ${message}`);
                 }
+                const [originalItem] = matches;
+                const original = toExportRow(originalItem, sequence - 1);
+
                 for (const column of importColumns.filter((column) => !(column in updateColumnFields))) {
-                    if (normalizeImportValue(record[column]) !== normalizeImportValue(original[column as keyof typeof original])) {
-                        throw new Error(`แถว ${rowIndex + 2}: ข้อมูล “${column}” ถูกแก้ไขหรือข้อมูลระบบเปลี่ยนแล้ว กรุณาส่งออกไฟล์ใหม่`);
+                    const excelRaw = record[column];
+                    const systemRaw = original[column as keyof typeof original];
+                    const excelValue = normalizeImportValue(excelRaw);
+                    const systemValue = normalizeImportValue(systemRaw);
+
+                    if (column === "วันที่สร้างคำขอ") {
+                        const address = XLSX.utils.encode_cell({
+                            r: sheetStart.r + rowIndex + 1,
+                            c: requestDateColumn,
+                        });
+                        const cell = sheet[address];
+                        let excelDate = excelValue;
+                        let excelDateKey: string | null | undefined;
+                        let systemDateKey: string | null | undefined;
+                        let dateError: string | undefined;
+                        try {
+                            if (cell?.t === "n" && typeof cell.v === "number") {
+                                excelDate = formatExcelDateSerial(
+                                    cell.v,
+                                    book.Workbook?.WBProps?.date1904 === true,
+                                );
+                            }
+                            excelDateKey = parseImportDate(excelDate);
+                            systemDateKey = parseImportDate(systemValue);
+                            if (excelDateKey === systemDateKey) continue;
+                        } catch (error) {
+                            dateError = error instanceof Error ? error.message : String(error);
+                        }
+                        console.table([{
+                            "แถว Excel": sheetStart.r + rowIndex + 2,
+                            "เซลล์": address,
+                            "คอลัมน์": column,
+                            "ค่าดิบในเซลล์": JSON.stringify(cell?.v),
+                            "ค่าที่อ่านจาก Excel": JSON.stringify(excelValue),
+                            "ค่าปัจจุบันจากระบบ": JSON.stringify(systemValue),
+                            "วันที่ Excel ที่ใช้เทียบ": excelDateKey,
+                            "วันที่ระบบที่ใช้เทียบ": systemDateKey,
+                            "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
+                            "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                            "ข้อผิดพลาดการแปลงวันที่": dateError,
+                        }]);
+                        throw new Error(
+                            `แถว ${rowIndex + 2} • วันที่สร้างคำขอ • Excel ${JSON.stringify(excelValue)}` +
+                            ` • วันที่อ่านได้ ${JSON.stringify(excelDate)} • ระบบ ${JSON.stringify(systemValue)}` +
+                            ` • เลขเอกสาร Excel ${record["เลขที่เอกสาร"]} • ระบบ ${original["เลขที่เอกสาร"]}`
+                        );
                     }
+
+                    if (excelValue === systemValue) continue;
+
+                    console.table([{
+                        "แถว Excel": rowIndex + 2,
+                        "ลำดับ": sequence,
+                        "คอลัมน์ที่ไม่เท่ากัน": column,
+                        "ค่าที่อ่านจาก Excel": JSON.stringify(excelRaw),
+                        "ค่าปัจจุบันจากระบบ": JSON.stringify(systemRaw),
+                        "ค่า Excel ที่ใช้เทียบ": JSON.stringify(excelValue),
+                        "ค่าระบบที่ใช้เทียบ": JSON.stringify(systemValue),
+                        "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
+                        "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                    }]);
+
+                    throw new Error(
+                        `แถว ${rowIndex + 2}: ข้อมูล “${column}” ถูกแก้ไขหรือข้อมูลระบบเปลี่ยนแล้ว กรุณาส่งออกไฟล์ใหม่`
+                    );
                 }
                 const fields: Record<string, string | null> = {};
+                const changes: ImportPreviewChange[] = [];
+
                 for (const [column, fieldName] of Object.entries(updateColumnFields)) {
-                    if (normalizeImportValue(record[column]) === normalizeImportValue(original[column as keyof typeof original])) continue;
-                    const isDate = /date/.test(fieldName);
-                    try { fields[fieldName] = isDate ? parseImportDate(record[column]) : normalizeImportValue(record[column]) || null; }
-                    catch (error) { throw new Error(`แถว ${rowIndex + 2} / ${column}: ${error instanceof Error ? error.message : "ข้อมูลไม่ถูกต้อง"}`); }
-                    changes.push({
-                        vehicle: `${formatRunningDoc(originalItem)} / คันที่ ${originalItem.vehicle_no ?? ""}`, column,
-                        before: normalizeImportValue(original[column as keyof typeof original]) || "(ว่าง)",
-                        after: normalizeImportValue(record[column]) || "(ล้างค่า)"
-                    });
+                    const excelValue = normalizeImportValue(record[column]);
+                    const systemValue = normalizeImportValue(original[column as keyof typeof original]);
+
+                    const sameValue = fieldName === "remark"
+                        ? excelValue.replace(/\s+/g, " ") === systemValue.replace(/\s+/g, " ")
+                        : excelValue === systemValue;
+
+                    if (sameValue) continue;
+
+                    try {
+                        const newValue = /date/.test(fieldName)
+                            ? parseImportDate(record[column])
+                            : excelValue || null;
+
+                        fields[fieldName] = newValue;
+                        changes.push({ column, oldValue: systemValue, newValue: newValue ?? "" });
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : "ข้อมูลไม่ถูกต้อง";
+                        throw new Error(`แถว ${rowIndex + 2} / ${column}: ${message}`);
+                    }
                 }
-                if (Object.keys(fields).length) {
+
+                if (changes.length > 0) {
                     const requestId = String(originalItem.id ?? "");
                     const vehicleNo = String(originalItem.vehicle_no ?? "");
-                    if (!requestId || !vehicleNo) throw new Error(`แถว ${rowIndex + 2}: ไม่พบรหัสคำขอหรือลำดับรถ`);
+
+                    if (!requestId || !vehicleNo) {
+                        throw new Error(`แถว ${rowIndex + 2}: ไม่พบรหัสคำขอหรือลำดับรถ`);
+                    }
+
                     updates.push({
-                        request_id: requestId, vehicle_no: vehicleNo,
-                        unit_code: String(originalItem.unit_code ?? originalItem.running_doc_vehicle_no ?? ""), fields
+                        request_id: requestId,
+                        vehicle_no: vehicleNo,
+                        unit_code: String(originalItem.unit_code ?? originalItem.running_doc_vehicle_no ?? ""),
+                        fields,
                     });
-                    updateSources.push({
-                        excelRow: matrix.indexOf(valuesRow) + 1, sequence,
-                        document: String(record["เลขที่เอกสาร"] ?? formatRunningDoc(originalItem))
+
+                    preview.push({
+                        excelRowNumber,
+                        document: original["เลขที่เอกสาร"],
+                        changes,
                     });
-                    preview.push(record);
                 }
             }
-            // Several outgoing-license rows may refer to one incoming vehicle.
-            // Merge compatible edits, never choose between conflicting values.
-            const merged = new Map<string, FleetImportUpdate>();
-            const sources = new Map<string, number[]>();
-            updates.forEach((update, index) => {
-                const key = JSON.stringify([update.request_id, update.vehicle_no]);
-                const prior = merged.get(key);
-                if (!prior) {
-                    merged.set(key, { ...update, fields: { ...update.fields } });
-                    sources.set(key, [index]);
-                    return;
-                }
-                const priorIndices = sources.get(key)!;
-                const rowLabel = (i: number) => `แถว Excel ${updateSources[i].excelRow} (ลำดับ ${updateSources[i].sequence})`;
-                if (prior.unit_code && update.unit_code && prior.unit_code !== update.unit_code) {
-                    throw new Error(`รหัสรถไม่ตรงกัน: request_id=${update.request_id}, vehicle_no=${update.vehicle_no}\n${rowLabel(priorIndices[0])}: ${prior.unit_code}\n${rowLabel(index)}: ${update.unit_code}\nยังไม่ได้บันทึก กรุณาตรวจสอบการจับคู่รถ`);
-                }
-                for (const [field, value] of Object.entries(update.fields)) {
-                    if (Object.prototype.hasOwnProperty.call(prior.fields, field) && prior.fields[field] !== value) {
-                        const previous = priorIndices.find(i => Object.prototype.hasOwnProperty.call(updates[i].fields, field))!;
-                        const column = Object.keys(updateColumnFields).find(label => updateColumnFields[label] === field) ?? field;
-                        console.error("[Upload งาน] ค่าขัดแย้งของรถคันเดียวกัน", {
-                            request_id: update.request_id, vehicle_no: update.vehicle_no, unit_code: update.unit_code,
-                            field, previous_row: updateSources[previous].excelRow, previous_value: prior.fields[field],
-                            current_row: updateSources[index].excelRow, current_value: value,
-                        });
-                        throw new Error(`รถ ${update.unit_code || update.request_id} / คันที่ ${update.vehicle_no} กรอก “${column}” ไม่ตรงกัน\n${rowLabel(previous)}: ${prior.fields[field] ?? "(ล้างค่า)"}\n${rowLabel(index)}: ${value ?? "(ล้างค่า)"}\nยังไม่ได้บันทึก กรุณาแก้ช่องนี้ให้ตรงกันแล้ว Upload อีกครั้ง`);
-                    }
-                    prior.fields[field] = value;
-                }
-                if (!prior.unit_code) prior.unit_code = update.unit_code;
-                priorIndices.push(index);
-            });
-            const mergedGroups = [...sources.values()].filter(indices => indices.length > 1);
-            if (mergedGroups.length) console.table(mergedGroups.map(indices => ({
-                request_id: updates[indices[0]].request_id,
-                vehicle_no: updates[indices[0]].vehicle_no,
-                unit_code: updates[indices[0]].unit_code,
-                excel_rows: indices.map(i => updateSources[i].excelRow).join(", "),
-                result: "รวมรายการที่มีค่าตรงกัน ก่อนส่งบันทึกหนึ่งครั้งต่อรถ",
-            })));
-            updates.splice(0, updates.length, ...merged.values());
-            const uniqueChanges = [...new Map(changes.map(change => [JSON.stringify(change), change])).values()];
+            const keys = updates.map((item) => JSON.stringify([item.request_id, item.vehicle_no]));
+            if (new Set(keys).size !== keys.length) throw new Error("พบหลายแถวอัปเดตรถคันเดียวกัน กรุณาเหลือหนึ่งแถวต่อรถ");
             if (version !== importReadVersion.current) return;
-            setImportUpdates(updates); setImportPreview(preview); setUploadChanges(uniqueChanges);
-            setUploadStatus(updates.length ? "ready" : "unchanged");
-            setImportMessage(updates.length ? `พบการเปลี่ยนแปลง ${updates.length} คัน รวม ${uniqueChanges.length} ช่อง${mergedGroups.length ? ` (รวมแถวซ้ำ ${mergedGroups.length} กลุ่มแล้ว)` : ""} — ยังไม่ได้บันทึก กรุณากดปุ่มยืนยันบันทึกด้านล่าง` : "ตรวจสอบไฟล์แล้ว ไม่มีข้อมูลต่างจากระบบ จึงไม่มีรายการให้บันทึก");
+            setImportUpdates(updates); setImportPreview(preview);
+            setImportMessage(updates.length ? `ตรวจสอบผ่าน ${updates.length} รายการที่มีการแก้ไข` : "ไม่มีข้อมูลที่เปลี่ยนแปลง");
         } catch (error) {
-            if (version === importReadVersion.current) { setUploadStatus("error"); setImportError(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ"); }
+            console.error("[Track Fleet Import] ตรวจไฟล์ไม่ผ่าน", file.name, error);
+            if (version === importReadVersion.current) setImportError(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
         } finally { if (version === importReadVersion.current) setReadingImport(false); }
     };
     const saveImportedUpdates = async () => {
         if (!importUpdates.length || savingImport || readingImport || isLoading || importSaveInFlight.current) return;
         importSaveInFlight.current = true;
-        setSavingImport(true); setImportError(""); setImportMessage(""); setUploadStatus("saving");
+        setSavingImport(true); setImportError("");
         try {
-            let savedCount = importUpdates.length;
             if (onImportUpdates) {
                 // Preserve callers that already provide their own save implementation.
                 await onImportUpdates(importUpdates);
@@ -1824,21 +1881,20 @@ export default function ExportRequestModal({
                     headers: { "Content-Type": "application/json", Accept: "application/json" },
                     body: JSON.stringify({ updates: importUpdates }),
                 });
-                let result: { status?: string; message?: string; updated_count?: number };
+                let result: { status?: string; message?: string };
                 try { result = await response.json(); }
                 catch { throw new Error(`API บันทึกตอบกลับไม่ใช่ JSON (HTTP ${response.status}) กรุณาตรวจสอบไฟล์ PHP`); }
                 if (!response.ok || result?.status !== "success") {
                     throw new Error(result?.message || `บันทึกข้อมูลไม่สำเร็จ (HTTP ${response.status})`);
                 }
-                if (typeof result.updated_count === "number") savedCount = result.updated_count;
             }
-            setUploadStatus("success");
-            setImportMessage(`เซิร์ฟเวอร์แจ้งบันทึกสำเร็จ ${savedCount} คัน จากที่ส่ง ${importUpdates.length} คัน (${uploadChanges.length} ช่องที่ส่งแก้ไข) ดูรายละเอียดด้านล่าง${savedCount !== importUpdates.length ? " — จำนวนที่บันทึกไม่ตรงกับที่ส่ง กรุณาตรวจสอบข้อมูลก่อนส่งซ้ำ" : ""}`);
+            setImportMessage(`Import สำเร็จ ${importUpdates.length} รายการ`);
             setImportUpdates([]); setImportPreview([]);
+            setImportFileName("");
             if (importInput.current) importInput.current.value = "";
             setLoadingTrackRows(true);
             setLoadAttempt((attempt) => attempt + 1);
-        } catch (error) { setUploadStatus("error"); setImportError(error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ"); }
+        } catch (error) { setImportError(error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ"); }
         finally { importSaveInFlight.current = false; setSavingImport(false); }
     };
 
@@ -1958,29 +2014,6 @@ export default function ExportRequestModal({
                     }
                 }
 
-                // Date formats also apply to empty cells so newly typed dates stay readable.
-                for (let c = 0; c < excelHeaders.length; c++) {
-                    if (!isDateColumn(excelHeaders[c])) continue;
-                    for (let r = 1; r <= range.e.r; r++) {
-                        const address = XLSX.utils.encode_cell({ r, c });
-                        const cell = worksheet[address] ?? (worksheet[address] = { t: "s", v: "" });
-                        const text = String(cell.v ?? "").trim();
-                        if (text && text !== "-") {
-                            const dateText = /^\d{4}-\d{2}-\d{2}[T ]/.test(text) ? text.slice(0, 10) : text;
-                            const iso = parseImportDate(dateText);
-                            if (iso) {
-                                const [y, m, d] = iso.split("-").map(Number);
-                                const utc = Date.UTC(y, m - 1, d);
-                                cell.t = "n";
-                                cell.v = (utc - Date.UTC(1899, 11, 31)) / 86400000 + (utc >= Date.UTC(1900, 2, 1) ? 1 : 0);
-                            }
-                        } else { cell.t = "s"; cell.v = ""; }
-                        cell.z = "dd/mm/yyyy";
-                        cell.s = { ...cell.s, numFmt: "dd/mm/yyyy" };
-                        delete cell.w;
-                    }
-                }
-
                 worksheet["!rows"] = [
                     { hpt: 48 },
                     ...excelData.map((row) => {
@@ -2024,10 +2057,15 @@ export default function ExportRequestModal({
         }
     };
 
+    useEffect(() => {
+        if (!open) setShowExportTable(false);
+    }, [open]);
+
     if (!open) {
         return null;
     }
 
+    const showPreview = exportMode === "report" || showExportTable;
     const ready = !isLoading && !loadError && exportRows.length > 0;
     const loadingTitle = loadingTrackRows
         ? reportProgress ? "กำลังดึงรายละเอียดรายงาน" : usesTrackFleetSearch ? "กำลังค้นหารายการรถจาก Track Fleet" : "กำลังโหลดรายการคำขอรถ"
@@ -2037,17 +2075,17 @@ export default function ExportRequestModal({
     return (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm sm:p-5">
             <div role="dialog" aria-modal="true" aria-labelledby="export-track-fleet-title"
-                className="flex h-full min-h-0 max-h-[960px] w-full max-w-[1400px] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/70 bg-white text-black shadow-2xl sm:rounded-3xl">
+                className="flex h-full max-h-[960px] w-full max-w-[1400px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl sm:rounded-3xl">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50 to-slate-50 px-5 py-4">
                     <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
                             <FileSpreadsheet size={20} />
                         </div>
                         <div className="min-w-0">
-                            <h2 id="export-track-fleet-title" className="text-base font-bold text-black">
-                                {exportMode === "update" ? "ส่งออกไฟล์สำหรับอัปเดตงาน" : "ส่งออกรายงานคำขอรถ"}
+                            <h2 id="export-track-fleet-title" className="text-base font-bold text-slate-900">
+                                {exportMode === "update" ? "สำหรับอัปเดตงาน" : "ส่งออกรายงานคำขอรถ"}
                             </h2>
-                            <p className="mt-0.5 truncate text-[11px] font-semibold text-black">
+                            <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
                                 {dcLabel || "ข้อมูลคำขอทั้งหมดที่สามารถเข้าถึงได้"}
                             </p>
                         </div>
@@ -2057,7 +2095,7 @@ export default function ExportRequestModal({
                         type="button"
                         onClick={onClose}
                         aria-label="ปิดหน้าต่างส่งออกรายงาน"
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-black shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                     >
                         <X size={17} />
                     </button>
@@ -2067,255 +2105,276 @@ export default function ExportRequestModal({
                     <div role="group" aria-label="รูปแบบการส่งออก" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
                         {([["report", "ส่งออกรายงาน"], ["update", "สำหรับอัปเดตงาน"]] as const).map(([mode, label]) => (
                             <button key={mode} type="button" aria-pressed={exportMode === mode}
-                                onClick={() => { setExportMode(mode); setExportError(""); }}
-                                className={`rounded-lg px-4 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${exportMode === mode ? "bg-blue-700 text-white shadow-sm" : "text-black hover:bg-white"}`}>
+                                onClick={() => {
+                                    if (mode === exportMode) return;
+                                    setExportMode(mode);
+                                    setShowExportTable(false);
+                                    setExportError("");
+                                }}
+                                className={`rounded-lg px-4 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${exportMode === mode ? "bg-blue-700 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}>
                                 {label}
                             </button>
                         ))}
                     </div>
-                    <input ref={importInput} type="file" accept=".xlsx" className="sr-only text-black" aria-label="เลือกไฟล์ Excel สำหรับ Upload งาน"
-                        disabled={readingImport || savingImport || isLoading}
-                        onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            event.target.value = "";
-                            if (file) { void readImportFile(file); }
-                        }} />
                     {exportError && <p role="alert" className="mt-2 text-xs text-rose-700">{exportError}</p>}
                 </div>
-                <div className="flex min-h-0 shrink-0 flex-col">
-                    {exportMode === "update" && <section id="fleet-import-panel" aria-label="Upload อัปเดตงาน" className="m-4 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
-                                    <RefreshCw className="h-5 w-5" />
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                    {exportMode === "update" && <section id="fleet-import-panel" aria-label="Import อัปเดตงาน" className="m-4 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                                    <CloudUpload className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <h3 className="text-sm font-bold text-black">อัปเดตงานด้วย Excel</h3>
-                                    <p className="mt-1 text-xs leading-5 text-black">ดาวน์โหลด → แก้ไขคอลัมน์สีเขียวอ่อน → Upload กลับเพื่ออัปเดตงาน</p>
-                                    <p className="mt-2 text-xs leading-5 text-amber-800">
-                                        เพื่อความแม่นยำในการตรวจสอบข้อมูล แนะนำให้อัปโหลดครั้งละไม่เกิน{" "}
-                                        <strong>100 แถวข้อมูล</strong> หากมีมากกว่านี้ ให้แบ่งอัปโหลดหลายไฟล์
-                                    </p>
+                                    <h2 className="text-sm font-black text-slate-900">อัปโหลดไฟล์</h2>
+                                    <p className="mt-0.5 text-xs text-slate-500">เลือกไฟล์หรือลากไฟล์มาวาง</p>
                                 </div>
-                            </div>
-                            <div className="grid w-full shrink-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
-                                <button type="button" onClick={handleExport} disabled={!ready}
-                                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-black shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:opacity-40">
-                                    {isLoading && !loadError ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" /> : <Download className="h-4 w-4 text-emerald-600" />}
-                                    ดาวน์โหลด Excel
-                                </button>
-                                <button type="button" onClick={() => { importInput.current?.click(); }} disabled={readingImport || savingImport || isLoading} aria-controls="fleet-import-panel"
-                                    style={{ backgroundColor: "#2563eb", color: "#ffffff" }}
-                                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-40">
-                                    <CloudUpload className="h-4 w-4" /> {readingImport ? "กำลังตรวจสอบไฟล์…" : savingImport ? "กำลังบันทึก…" : "Upload งาน"}
-                                </button>
                             </div>
                         </div>
                         <div className="p-5 sm:p-6">
-                            {exportMode === "update" && uploadStatus !== "idle" && (
-                                <div role={uploadStatus === "error" ? "alert" : "status"} aria-live="polite"
-                                    className={`mt-3 rounded-xl border p-4 ${uploadStatus === "error" ? "border-rose-200 bg-rose-50 text-rose-900" : uploadStatus === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-900"}`}>
-                                    <p className="text-sm font-bold text-black">{({ reading: "กำลังตรวจสอบไฟล์", ready: "ตรวจสอบผ่าน — รอยืนยันบันทึก", unchanged: "ไม่มีข้อมูลเปลี่ยนแปลง", saving: "กำลังส่งข้อมูลไปบันทึก", success: "บันทึกสำเร็จ", error: "ดำเนินการไม่สำเร็จ" } as const)[uploadStatus]}</p>
-                                    <p className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-black">{uploadStatus === "reading" ? "กำลังอ่าน Excel และเปรียบเทียบกับข้อมูลระบบ…" : uploadStatus === "saving" ? "กำลังรอผลจากเซิร์ฟเวอร์ กรุณาอย่ากดส่งซ้ำ" : importError || importMessage}</p>
-                                    {uploadStatus === "ready" && <button type="button" onClick={() => void saveImportedUpdates()} disabled={isLoading || savingImport}
-                                        style={{ backgroundColor: "#047857", color: "#ffffff", border: "1px solid #065f46" }}
-                                        className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">ยืนยันบันทึก {importUpdates.length} คัน / {uploadChanges.length} ช่อง</button>}
-                                </div>
-                            )}
-                            <p className="text-xs leading-5 text-black">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน ระบบจะนำเข้าเฉพาะช่องที่อนุญาตให้แก้ไข</p>
+                            <p className="text-xs leading-5 text-slate-500">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน ระบบจะนำเข้าเฉพาะช่องที่อนุญาตให้แก้ไข</p>
+                            <input ref={importInput} type="file" accept=".xlsx" className="sr-only" aria-label="เลือกไฟล์ Excel สำหรับอัปเดตงาน"
+                                disabled={readingImport || savingImport} onChange={(event) => { void readImportFile(event.target.files?.[0]); event.target.value = ""; }} />
                             <div onDragOver={(event) => { event.preventDefault(); if (!readingImport && !savingImport) setIsDraggingImport(true); }}
                                 onDragLeave={() => setIsDraggingImport(false)}
                                 onDrop={(event) => { event.preventDefault(); setIsDraggingImport(false); if (!readingImport && !savingImport) void readImportFile(event.dataTransfer.files[0]); }}
-                                className={`mt-4 flex min-h-[110px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 text-center ${isDraggingImport ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"}`}>
+                                className={`mt-4 flex min-h-[180px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 text-center ${isDraggingImport ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"}`}>
                                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600"><CloudUpload className="h-7 w-7" /></div>
-                                <p className="mt-3 text-sm font-semibold text-black">{isDraggingImport ? "วางไฟล์ตรงนี้" : "ลากไฟล์มาวางที่นี่ หรือกด Upload งานด้านบน"}</p>
-                                <p className="mt-1 text-xs text-slate-500">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 100 แถว</p>
-
+                                <p className="mt-3 text-sm font-semibold text-slate-800">{isDraggingImport ? "วางไฟล์ตรงนี้" : "ลากไฟล์มาวางที่นี่"}</p>
+                                <p className="mt-1 text-xs text-slate-500">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 500 แถว</p>
+                                <button type="button" disabled={readingImport || savingImport || isLoading} onClick={() => importInput.current?.click()}
+                                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-blue-50 disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" />เลือกไฟล์ Excel</button>
                             </div>
-                            {importFileName && <p className="mt-3 break-all text-xs text-black">ไฟล์: {importFileName}</p>}
-                            {uploadChanges.length > 0 && <div className="mt-4">
-                                <h3 className="text-sm font-bold text-black">{uploadStatus === "success" ? "รายละเอียดที่ส่งและเซิร์ฟเวอร์ตอบรับแล้ว" : "รายละเอียดที่รอบันทึก"} ({uploadChanges.length} ช่อง)</h3>
-                                <p className="mt-1 text-xs text-slate-500">หนึ่งแถวต่อรถ เลื่อนซ้าย–ขวาเพื่อดูช่องที่แก้ไขทั้งหมด</p>
-                                <div tabIndex={0} aria-label="รายละเอียดการแก้ไขรายคัน เลื่อนซ้ายขวาได้" className="mt-2 max-h-[420px] overflow-auto rounded-xl border border-slate-200" style={{ scrollbarGutter: "stable" }}>
-                                    <table className="w-max min-w-full border-separate border-spacing-0 text-xs text-black">
-                                        <thead className="sticky top-0 z-20 text-white"><tr>
-                                            <th className="sticky left-0 z-30 min-w-[240px] max-w-[280px] border-b border-r border-blue-700 bg-blue-800 px-4 py-3 text-left text-white">เอกสาร / รถ</th>
-                                            {horizontalChanges.columns.map(column => <th key={column} className="min-w-[200px] max-w-[240px] whitespace-normal border-b border-r border-blue-700 bg-blue-800 px-4 py-3 text-left text-white">{column}</th>)}
-                                        </tr></thead>
-                                        <tbody>{horizontalChanges.rows.map(({ vehicle, fields }) => <tr key={vehicle}>
-                                            <th scope="row" className="sticky left-0 z-10 max-w-[280px] whitespace-normal break-words border-b border-r border-slate-200 bg-white px-4 py-4 text-left align-top font-semibold text-black">{vehicle}</th>
-                                            {horizontalChanges.columns.map(column => {
-                                                const change = fields.get(column);
-                                                return <td key={column} className={`max-w-[240px] whitespace-normal break-words border-b border-r border-slate-200 px-4 py-3 align-top text-black ${change ? "bg-emerald-50/60" : "bg-slate-50"}`}>
-                                                    {change ? <div className="space-y-2">
-                                                        <div><span className="block text-[10px] text-slate-500">ค่าเดิม</span><span className="text-black">{change.before}</span></div>
-                                                        <div className="border-t border-emerald-100 pt-2"><span className="block text-[10px] text-slate-500">ค่าใหม่</span><span className="font-semibold text-black">{change.after}</span></div>
-                                                    </div> : <span className="text-black">ไม่เปลี่ยนแปลง</span>}
-                                                </td>;
-                                            })}
-                                        </tr>)}</tbody>
-                                    </table>
+                            {importFileName && <p className="mt-3 break-all text-xs text-slate-600">ไฟล์: {importFileName}</p>}
+                            {readingImport && <p role="status" className="mt-2 text-xs text-blue-700">กำลังอ่านและตรวจสอบไฟล์…</p>}
+                            {importError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{importError}</p>}
+                            {importMessage && <p role="status" className="mt-3 text-xs text-emerald-800">{importMessage}</p>}
+                            {importPreview.length > 0 && (
+                                <div className="mt-4 space-y-3">
+                                    {importPreview.slice(0, 20).map((row) => (
+                                        <section key={row.excelRowNumber} aria-label={`แถว ${row.excelRowNumber} ${row.document}`}
+                                            className="min-w-0 rounded-xl border border-slate-200 bg-white">
+                                            <div className="border-b border-slate-200 bg-blue-50 px-4 py-2 text-xs">
+                                                <span className="font-bold text-blue-900">{row.document}</span>
+                                                <span className="ml-3 text-slate-600">แถว Excel {row.excelRowNumber}</span>
+                                            </div>
+                                            <ul className="flex gap-3 overflow-x-auto p-3 text-xs">
+                                                {row.changes.map((change) => (
+                                                    <li key={change.column} className="w-64 shrink-0 rounded-lg border border-slate-200">
+                                                        <h4 className="border-b border-slate-200 px-3 py-2 font-semibold text-blue-900">
+                                                            {change.column}
+                                                        </h4>
+                                                        <dl className="grid grid-cols-2">
+                                                            <div className="min-w-0 bg-rose-50 px-3 py-2 text-rose-800">
+                                                                <dt className="font-semibold">ค่าเดิม</dt>
+                                                                <dd className="mt-1 whitespace-pre-wrap break-words">{change.oldValue || "—"}</dd>
+                                                            </div>
+                                                            <div className="min-w-0 bg-emerald-50 px-3 py-2 text-emerald-900">
+                                                                <dt className="font-semibold">ค่าใหม่</dt>
+                                                                <dd className="mt-1 whitespace-pre-wrap break-words font-semibold">{change.newValue || "—"}</dd>
+                                                            </div>
+                                                        </dl>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </section>
+                                    ))}
                                 </div>
-                            </div>}
-                            {importPreview.length > 0 && <div tabIndex={0} aria-label="ตัวอย่างไฟล์อัปโหลด เลื่อนดูได้" className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-200">
-                                <table className="w-max min-w-full text-xs text-black"><thead className="sticky top-0 bg-blue-800 text-white"><tr>{importColumns.map((column) => <th key={column} className="max-w-[200px] border-r border-blue-700 px-3 py-2 text-left text-white">{column}</th>)}</tr></thead>
-                                    <tbody>{importPreview.slice(0, 20).map((row, index) => <tr key={index}>{importColumns.map((column) => <td key={column} className={`max-w-[220px] break-words border border-slate-100 px-3 py-2 text-black ${column in updateColumnFields ? "bg-emerald-50" : "bg-slate-50"}`}>{String(row[column] ?? "")}</td>)}</tr>)}</tbody>
-                                </table>
-                            </div>}
-                            {importPreview.length > 20 && <p className="mt-2 text-xs text-black">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
+                            )}
+                            {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-500">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
                             <p className="mt-3 text-xs leading-5 text-slate-500">ยืนยันเพื่อนำเฉพาะข้อมูลที่แก้ไขไปบันทึกในระบบ ช่องที่ลบข้อมูลออกจะถูกบันทึกเป็นค่าว่าง</p>
                             <button type="button" onClick={() => void saveImportedUpdates()} disabled={!importUpdates.length || readingImport || savingImport || isLoading}
-                                style={{ backgroundColor: "#047857", color: "#ffffff", border: "1px solid #065f46" }}
                                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
                                 {savingImport ? <LoaderCircle size={15} className="animate-spin" /> : <Upload size={15} />}
-                                {savingImport ? "กำลังบันทึก…" : uploadStatus === "success" ? "บันทึกแล้ว" : `ยืนยันบันทึก${importUpdates.length ? ` ${importUpdates.length} คัน` : ""}`}
+                                {savingImport ? "กำลัง Import…" : `ยืนยัน Import${importUpdates.length ? ` ${importUpdates.length} รายการ` : ""}`}
                             </button>
                         </div>
                     </section>}
 
-                    <div className="flex min-h-[260px] shrink-0 flex-col bg-slate-50 px-3 py-3 sm:px-5">
-                        <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}
-                            className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-                                <div>
-                                    <h3 id="export-preview-title" className="text-sm font-semibold text-black">ตัวอย่างรายงาน</h3>
-                                    {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
-                                </div>
-                                {ready && (
-                                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                                        <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{exportRows.length.toLocaleString("th-TH")} รายการ</span>
-                                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{totalQty.toLocaleString("th-TH")} คัน</span>
-                                    </div>
-                                )}
-                            </div>
+                    {exportMode === "update" && (
+                        <div className="mx-4 mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <button type="button" aria-expanded={showExportTable}
+                                aria-controls={showExportTable ? "fleet-export-table" : undefined}
+                                onClick={() => setShowExportTable((shown) => !shown)}
+                                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-blue-50">
+                                {showExportTable ? "ซ่อนตาราง" : "ดูตารางสำหรับส่งออก"}
+                                <ChevronDown className={`h-4 w-4 motion-safe:transition-transform ${showExportTable ? "rotate-180" : ""}`} />
+                            </button>
+                            {showExportTable && (
+                                <button type="button" onClick={handleExport} disabled={!ready}
+                                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                                    <Download aria-hidden="true" size={15} /> ดาวน์โหลด Excel
+                                </button>
+                            )}
+                        </div>
+                    )}
 
-                            {loadError ? (
-                                <div role="alert" className="m-4 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
-                                    <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
-                                    <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
-                                    <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
-                                    <button type="button" onClick={() => {
-                                        setTrackError("");
-                                        setFbpError("");
-                                        setReportProgress(null);
-                                        setLoadingTrackRows(true);
-                                        setLoadingFbp(true);
-                                        setLoadAttempt((attempt) => attempt + 1);
-                                    }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
-                                        ลองโหลดอีกครั้ง
-                                    </button>
-                                </div>
-                            ) : isLoading ? (
-                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
-                                    <LoaderCircle aria-hidden="true" size={26} className="mb-1 text-blue-600 motion-safe:animate-spin" />
-                                    <p className="text-sm font-semibold text-black">{loadingTitle}</p>
-                                    {loadingTrackRows && reportProgress ? (
-                                        <>
-                                            <progress aria-label="จำนวนคำขอที่โหลดรายละเอียดแล้ว" max={reportProgress.total} value={reportProgress.loaded}
-                                                className="h-2 w-52 max-w-full accent-blue-600" />
-                                            <p className="text-xs tabular-nums text-black">โหลดแล้ว {reportProgress.loaded.toLocaleString("th-TH")} จาก {reportProgress.total.toLocaleString("th-TH")} คำขอ</p>
-                                        </>
-                                    ) : (
-                                        <p className="text-xs text-black">ตัวอย่างรายงานจะแสดงเมื่อโหลดเสร็จ</p>
+                    {showPreview && (
+                        <>
+                            <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                    {trackFilters.length > 0 && (
+                                        <section aria-label="ตัวกรองจากหน้าหลัก" className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+                                            <p className="mb-1.5 text-[11px] font-semibold text-blue-800">ตัวกรองที่ส่งมาจากหน้าหลัก</p>
+                                            <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
+                                                {trackFilters.map(({ key, label, value }) => (
+                                                    <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
+                                                        <dt className="mr-1.5 inline font-medium text-slate-500">{label}</dt>
+                                                        <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
+                                                    </div>
+                                                ))}
+                                            </dl>
+                                        </section>
                                     )}
                                 </div>
-                            ) : !ready ? (
-                                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
-                                    <Search aria-hidden="true" size={25} className="mb-1 text-black" />
-                                    <p className="text-sm font-semibold text-black">ไม่พบรายการที่จะส่งออก</p>
-                                    <p className="max-w-md text-xs text-black">{emptyDescription}</p>
-                                </div>
-                            ) : (
-                                <>
-                                    <div
-                                        tabIndex={0} aria-label="ตารางรายงาน เลื่อนได้ทั้งแนวตั้งและแนวนอน"
-                                        className="min-h-[110px] max-h-[55vh] w-full overflow-auto overscroll-contain"
-                                        style={{
-                                            scrollbarGutter: "stable both-edges",
-                                            WebkitOverflowScrolling: "touch",
-                                            touchAction: "pan-x pan-y",
-                                        }}
-                                    >
-                                        <table className="w-max min-w-full table-fixed border-collapse text-left text-black">
-                                            <thead className="sticky top-0 z-10 bg-blue-800 text-[11px] font-semibold text-white">
-                                                <tr>
-                                                    {previewColumns.map((column) => (
-                                                        <th key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-700" : ""} border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                            {column}
-                                                        </th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {paginatedRows.map((item, index) => {
-                                                    const row = toExportRow(
-                                                        item,
-                                                        (currentPage - 1) * ROWS_PER_PAGE + index
-                                                    );
-                                                    return (
-                                                        <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
-                                                            className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
-                                                            {previewColumns.map((column) => (
-                                                                <td key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-50/70" : ""} border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-black ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
-                                                                    {row[column as keyof typeof row] ?? "-"}
-                                                                </td>
-                                                            ))}
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                            </div>
+
+                            <div id="fleet-export-table" className={`flex flex-1 flex-col bg-slate-50 px-3 py-3 sm:px-5 ${exportMode === "update" ? "min-h-[420px]" : "min-h-[260px]"}`}>
+                                <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}
+                                    className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+                                        <div>
+                                            <h3 id="export-preview-title" className="text-sm font-semibold text-slate-900">
+                                                {exportMode === "update" ? "ตารางสำหรับส่งออก" : "ตัวอย่างรายงาน"}
+                                            </h3>
+                                            {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
+                                        </div>
+                                        {ready && (
+                                            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                                                <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{exportRows.length.toLocaleString("th-TH")} รายการ</span>
+                                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{totalQty.toLocaleString("th-TH")} คัน</span>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                        <p className="text-[11px] font-bold text-black">
-                                            แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
-                                            {" - "}
-                                            {Math.min(currentPage * ROWS_PER_PAGE, exportRows.length)}
-                                            {" จาก "}
-                                            {exportRows.length.toLocaleString("en-US")} รายการ
-                                        </p>
-
-                                        <div className="flex items-center justify-end gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    setCurrentPage((page) => Math.max(1, page - 1))
-                                                }
-                                                disabled={currentPage === 1}
-                                                className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-black transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                            >
-                                                ก่อนหน้า
-                                            </button>
-
-                                            <span className="min-w-[90px] text-center text-xs font-black text-black">
-                                                หน้า {currentPage} / {totalPages}
-                                            </span>
-
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    setCurrentPage((page) =>
-                                                        Math.min(totalPages, page + 1)
-                                                    )
-                                                }
-                                                disabled={currentPage === totalPages}
-                                                className="h-9 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
-                                            >
-                                                ถัดไป
+                                    {loadError ? (
+                                        <div role="alert" className="m-4 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
+                                            <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
+                                            <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
+                                            <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
+                                            <button type="button" onClick={() => {
+                                                setTrackError("");
+                                                setFbpError("");
+                                                setReportProgress(null);
+                                                setLoadingTrackRows(true);
+                                                setLoadingFbp(true);
+                                                setLoadAttempt((attempt) => attempt + 1);
+                                            }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
+                                                ลองโหลดอีกครั้ง
                                             </button>
                                         </div>
-                                    </div>
-                                </>
-                            )}
-                        </section>
-                    </div>
+                                    ) : isLoading ? (
+                                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                            <LoaderCircle aria-hidden="true" size={26} className="mb-1 text-blue-600 motion-safe:animate-spin" />
+                                            <p className="text-sm font-semibold text-slate-900">{loadingTitle}</p>
+                                            {loadingTrackRows && reportProgress ? (
+                                                <>
+                                                    <progress aria-label="จำนวนคำขอที่โหลดรายละเอียดแล้ว" max={reportProgress.total} value={reportProgress.loaded}
+                                                        className="h-2 w-52 max-w-full accent-blue-600" />
+                                                    <p className="text-xs tabular-nums text-slate-600">โหลดแล้ว {reportProgress.loaded.toLocaleString("th-TH")} จาก {reportProgress.total.toLocaleString("th-TH")} คำขอ</p>
+                                                </>
+                                            ) : (
+                                                <p className="text-xs text-slate-600">ตัวอย่างรายงานจะแสดงเมื่อโหลดเสร็จ</p>
+                                            )}
+                                        </div>
+                                    ) : !ready ? (
+                                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
+                                            <Search aria-hidden="true" size={25} className="mb-1 text-slate-400" />
+                                            <p className="text-sm font-semibold text-slate-900">ไม่พบรายการที่จะส่งออก</p>
+                                            <p className="max-w-md text-xs text-slate-600">{emptyDescription}</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div
+                                                className="min-h-0 w-full flex-1 overflow-auto overscroll-contain"
+                                                style={{
+                                                    scrollbarGutter: "stable both-edges",
+                                                    WebkitOverflowScrolling: "touch",
+                                                    touchAction: "pan-x pan-y",
+                                                }}
+                                            >
+                                                <table className="w-max min-w-full table-fixed border-collapse text-left">
+                                                    <thead className="sticky top-0 z-10 bg-blue-800 text-[11px] font-semibold text-white">
+                                                        <tr>
+                                                            {previewColumns.map((column) => (
+                                                                <th key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-700" : ""} border-r border-blue-700 px-3 py-2.5 align-middle leading-4 whitespace-normal break-words ${column === "ลำดับ" ? "w-[64px] min-w-[64px]" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                                    {column}
+                                                                </th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {paginatedRows.map((item, index) => {
+                                                            const row = toExportRow(
+                                                                item,
+                                                                (currentPage - 1) * ROWS_PER_PAGE + index
+                                                            );
+                                                            return (
+                                                                <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
+                                                                    className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
+                                                                    {previewColumns.map((column) => (
+                                                                        <td key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-50/70" : ""} border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
+                                                                            {row[column as keyof typeof row] ?? "-"}
+                                                                        </td>
+                                                                    ))}
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <p className="text-[11px] font-bold text-slate-500">
+                                                    แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
+                                                    {" - "}
+                                                    {Math.min(currentPage * ROWS_PER_PAGE, exportRows.length)}
+                                                    {" จาก "}
+                                                    {exportRows.length.toLocaleString("en-US")} รายการ
+                                                </p>
+
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setCurrentPage((page) => Math.max(1, page - 1))
+                                                        }
+                                                        disabled={currentPage === 1}
+                                                        className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        ก่อนหน้า
+                                                    </button>
+
+                                                    <span className="min-w-[90px] text-center text-xs font-black text-slate-700">
+                                                        หน้า {currentPage} / {totalPages}
+                                                    </span>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setCurrentPage((page) =>
+                                                                Math.min(totalPages, page + 1)
+                                                            )
+                                                        }
+                                                        disabled={currentPage === totalPages}
+                                                        className="h-9 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        ถัดไป
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </section>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <p className="text-xs font-semibold text-black">{exportMode === "update" ? "สถานะข้อมูลอัปเดตงาน" : "สถานะรายงาน"}</p>
-                        <p role="status" className="mt-0.5 text-xs font-medium text-black">
+                        <p className="text-xs font-semibold text-slate-600">{exportMode === "update" ? "สถานะข้อมูลอัปเดตงาน" : "สถานะรายงาน"}</p>
+                        <p role="status" className="mt-0.5 text-xs font-medium text-slate-800">
                             {loadError ? "โหลดข้อมูลไม่สำเร็จ" : isLoading ? loadingTitle : ready
                                 ? `พร้อมส่งออก ${exportRows.length.toLocaleString("th-TH")} รายการ`
                                 : "ไม่มีรายการให้ส่งออก"}
@@ -2326,7 +2385,7 @@ export default function ExportRequestModal({
                         <button
                             type="button"
                             onClick={onClose}
-                            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-black transition hover:bg-slate-50"
+                            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50"
                         >
                             ยกเลิก
                         </button>

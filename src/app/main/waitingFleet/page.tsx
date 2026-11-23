@@ -67,7 +67,7 @@ const COLUMNS: { label: string; sort?: SortKey }[] = [
 function normalizeStatus(value: unknown): string {
   const status = text(value).toLowerCase();
 
-  if (["gm_checking", "partial_approved"].includes(status)) {
+  if (["gm_checking", "partial_approved", "process"].includes(status)) {
     return "fbp_pending";
   }
 
@@ -262,7 +262,8 @@ function SearchableFilter({ label, value, options, onChange, icon: Icon, classNa
 
 function QuantityCell({ row }: { row: Row }) {
   const { item } = row;
-  const approved = quantity(item.approved_qty ?? item.summary?.total_approved);
+  const approved = item.approved_trucks?.length
+    || quantity(item.approved_qty ?? item.summary?.total_approved);
   const rejected = quantity(item.not_approved_qty ?? item.summary?.total_rejected);
   const pending = Math.max(row.requestedQty - approved - rejected, 0);
   return <div className="space-y-2">
@@ -475,7 +476,7 @@ export default function WaitingFleetPage() {
             {sortConfig.key !== "request_date" ? <ArrowUpDown size={13} /> : sortConfig.direction === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {sortConfig.key === "request_date" && <span>{sortConfig.direction === "asc" ? "เก่าไปใหม่" : "ใหม่ไปเก่า"}</span>}
           </button><span className="text-slate-400">· {group.rows.length} รายการ</span></span></td></tr>
-          {group.rows.map((row, index) => { const { item } = row; const pending = row.status === "fbp_pending"; return <tr key={`${item.id ?? item.running_doc}-${group.offset + index}`} className="group hover:bg-blue-50/30">
+          {group.rows.map((row, index) => { const { item } = row; const pending = text(item.status).toLowerCase() === "fbp_pending"; return <tr key={`${item.id ?? item.running_doc}-${group.offset + index}`} className="group hover:bg-blue-50/30">
             <td className={`${CELL} sticky left-0 z-10 bg-white text-center group-hover:bg-blue-50`}>{pageStart + group.offset + index + 1}</td>
             <td className={CELL}><p className="font-semibold">{item.running_doc || "-"}</p><p className="mt-1 text-[11px] text-slate-400">ขอ: {formatDate(row.requestDate)}</p></td>
             <td className={CELL}><span className="rounded-md bg-blue-50 px-2 py-1 text-blue-600">{item.dc_type || "-"}</span></td>
