@@ -461,7 +461,7 @@ export default function FlowAssessmentModal({ open, requestId, vehicleNo, docume
                     subValue={remaining(request.usage_date)}
                   />
                 </div>
-                {documentMode && visibleOldLicenses.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle><ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{visibleOldLicenses.map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul><p className="mt-3 text-[10px] leading-5 text-slate-500">ใช้แบบประเมินชุดเดียว อ้างอิง {selectedCar?.unit_code || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`} การบันทึกขั้นตอนและรายละเอียดรถจะบันทึกที่รายการอ้างอิงนี้</p></section>}
+                {documentMode && visibleOldLicenses.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm text-black "><SectionTitle>ทดแทนทะเบียนเก่า</SectionTitle><ul style={{ margin: "12px 0 0", paddingLeft: 18, listStyleType: "disc" }}>{visibleOldLicenses.map(license => <li key={license} style={{ marginBottom: 6 }}>{license}</li>)}</ul><p className="mt-3 text-[10px] leading-5 text-slate-500">ใช้แบบประเมินชุดเดียว อ้างอิง {selectedCar?.unit_code || `รถคันที่ ${selectedCar?.vehicle_no || "-"}`} การบันทึกขั้นตอนและรายละเอียดรถจะบันทึกที่รายการอ้างอิงนี้</p></section>}
                 <section
                   aria-labelledby="request-information-title"
                   className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"

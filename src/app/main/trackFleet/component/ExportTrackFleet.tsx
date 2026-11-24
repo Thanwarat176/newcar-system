@@ -230,6 +230,40 @@ function formatRunningDoc(item: ExportRequestItem): string {
     return (code ?? item.running_doc?.trim() ?? "").replace(/-N\d+$/i, "");
 }
 
+function groupDocumentRows<T>(rows: T[], getDocument: (row: T) => string) {
+    const groups = new Map<string | number, T[]>();
+    rows.forEach((row, index) => {
+        const key = getDocument(row) || index;
+        const group = groups.get(key);
+        if (group) group.push(row);
+        else groups.set(key, [row]);
+    });
+    return Array.from(groups.values()).flat();
+}
+
+function documentRowSpans<T>(rows: T[], getDocument: (row: T) => string) {
+    const spans = rows.map(() => 1);
+    for (let index = rows.length - 2; index >= 0; index--) {
+        const document = getDocument(rows[index]);
+        if (document && document === getDocument(rows[index + 1])) {
+            spans[index] = spans[index + 1] + 1;
+            spans[index + 1] = 0;
+        }
+    }
+    return spans;
+}
+
+const BUTTON_COLORS = {
+    blue: { backgroundColor: "#1d4ed8", color: "#ffffff" },
+    lightBlue: { backgroundColor: "#dbeafe", color: "#172554" },
+    green: { backgroundColor: "#047857", color: "#ffffff" },
+    lightGreen: { backgroundColor: "#d1fae5", color: "#022c22" },
+    red: { backgroundColor: "#be123c", color: "#ffffff" },
+    amber: { backgroundColor: "#92400e", color: "#ffffff" },
+    indigo: { backgroundColor: "#4338ca", color: "#ffffff" },
+    slate: { backgroundColor: "#334155", color: "#ffffff" },
+};
+
 const TRACK_FILTER_LABELS = {
     search: "คำค้นหา",
     chassis: "เลขตัวถัง",
@@ -264,7 +298,10 @@ function getTrackFilterSummary(exportApiUrl?: string) {
     ]);
 
     for (const [key, label] of Object.entries(TRACK_FILTER_LABELS)) {
-        let value = params.get(key)?.trim();
+        const terms = key === "search"
+            ? params.getAll("search_terms[]").map((term) => term.trim()).filter(Boolean)
+            : [];
+        let value = terms.length ? terms.join(", ") : params.get(key)?.trim();
         if (!value || (value === "all" && !["search", "chassis", "old_license", "vehicle_search"].includes(key))) continue;
 
         if (key === "fleet_group") value = fleetGroups.get(value) ?? value;
@@ -487,95 +524,7 @@ async function loadTrackSearchExport(
 }
 
 
-// xlsx-js-style does not reliably serialize cell protection. Apply it to
-// the final uncompressed OOXML package so only update columns are editable.
-function protectUpdateWorkbook(bytes: Uint8Array, editableStart: number): Uint8Array {
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    let eocd = bytes.length - 22;
-    while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--;
-    if (eocd < 0) throw new Error("ไม่พบโครงสร้างไฟล์ Excel");
-    const entries: { name: string; data: Uint8Array }[] = [];
-    let cursor = view.getUint32(eocd + 16, true);
-    const count = view.getUint16(eocd + 10, true);
-    for (let i = 0; i < count; i++) {
-        if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("ไฟล์ Excel ไม่สมบูรณ์");
-        const method = view.getUint16(cursor + 10, true);
-        const size = view.getUint32(cursor + 20, true);
-        const nameLength = view.getUint16(cursor + 28, true);
-        const extraLength = view.getUint16(cursor + 30, true);
-        const commentLength = view.getUint16(cursor + 32, true);
-        const offset = view.getUint32(cursor + 42, true);
-        if (method !== 0) throw new Error("ต้องส่งออก Excel แบบไม่บีบอัดเพื่อกำหนดสิทธิ์แก้ไข");
-        const name = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
-        const start = offset + 30 + view.getUint16(offset + 26, true) + view.getUint16(offset + 28, true);
-        entries.push({ name, data: bytes.slice(start, start + size) });
-        cursor += 46 + nameLength + extraLength + commentLength;
-    }
-    const styleEntry = entries.find((entry) => entry.name === "xl/styles.xml");
-    const sheetEntry = entries.find((entry) => entry.name === "xl/worksheets/sheet1.xml");
-    if (!styleEntry || !sheetEntry) throw new Error("ไม่พบรูปแบบหรือตาราง Excel");
-    const styleXml = decoder.decode(styleEntry.data);
-    const group = styleXml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/);
-    const formats = group?.[1].match(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g);
-    if (!group || !formats) throw new Error("ไม่พบรูปแบบเซลล์ Excel");
-    const unlocked = formats.map((format) => {
-        let xf = format.replace(/\sapplyProtection="[^"]*"/g, "")
-            .replace(/<protection\b[^>]*(?:\/>|>[\s\S]*?<\/protection>)/g, "");
-        if (xf.endsWith("/>")) xf = xf.slice(0, -2) + "></xf>";
-        return xf.replace(/<xf\b/, '<xf applyProtection="1"')
-            .replace("</xf>", '<protection locked="0"/></xf>');
-    });
-    styleEntry.data = encoder.encode(styleXml.replace(group[0],
-        `<cellXfs count="${formats.length * 2}">${formats.join("")}${unlocked.join("")}</cellXfs>`));
-    let sheetXml = decoder.decode(sheetEntry.data).replace(/<c\b[^>]*>/g, (tag) => {
-        const address = tag.match(/\br="([A-Z]+)(\d+)"/);
-        if (!address || Number(address[2]) === 1) return tag;
-        const column = [...address[1]].reduce((value, letter) => value * 26 + letter.charCodeAt(0) - 64, 0) - 1;
-        if (column < editableStart) return tag;
-        const style = Number(tag.match(/\bs="(\d+)"/)?.[1] ?? 0);
-        const stripped = tag.replace(/\ss="\d+"/, "");
-        return stripped.replace(/\/?\>$/, (end) => ` s="${style + formats.length}"${end}`);
-    });
-    sheetXml = sheetXml.replace(/<sheetProtection\b[^>]*\/>/g, "")
-        .replace("</sheetData>", '</sheetData><sheetProtection sheet="1" objects="1" scenarios="1" autoFilter="0" selectLockedCells="0" selectUnlockedCells="0"/>');
-    sheetEntry.data = encoder.encode(sheetXml);
-    const crc32 = (data: Uint8Array) => {
-        let crc = 0xffffffff;
-        for (const byte of data) {
-            crc ^= byte;
-            for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-        }
-        return (crc ^ 0xffffffff) >>> 0;
-    };
-    const locals: Uint8Array[] = [];
-    const central: Uint8Array[] = [];
-    let offset = 0;
-    for (const entry of entries) {
-        const name = encoder.encode(entry.name);
-        const crc = crc32(entry.data);
-        const local = new Uint8Array(30 + name.length + entry.data.length);
-        const lv = new DataView(local.buffer);
-        lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x800, true);
-        lv.setUint32(14, crc, true); lv.setUint32(18, entry.data.length, true); lv.setUint32(22, entry.data.length, true);
-        lv.setUint16(26, name.length, true); local.set(name, 30); local.set(entry.data, 30 + name.length);
-        const header = new Uint8Array(46 + name.length);
-        const cv = new DataView(header.buffer);
-        cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x800, true);
-        cv.setUint32(16, crc, true); cv.setUint32(20, entry.data.length, true); cv.setUint32(24, entry.data.length, true);
-        cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true); header.set(name, 46);
-        locals.push(local); central.push(header); offset += local.length;
-    }
-    const centralSize = central.reduce((sum, part) => sum + part.length, 0);
-    const result = new Uint8Array(offset + centralSize + 22);
-    let position = 0;
-    for (const part of [...locals, ...central]) { result.set(part, position); position += part.length; }
-    const tail = new DataView(result.buffer, position, 22);
-    tail.setUint32(0, 0x06054b50, true); tail.setUint16(8, entries.length, true); tail.setUint16(10, entries.length, true);
-    tail.setUint32(12, centralSize, true); tail.setUint32(16, offset, true);
-    return result;
-}
+const MAX_EXPORT_ROWS = 100;
 
 type ImportPreviewChange = {
     column: string;
@@ -1425,14 +1374,13 @@ export default function ExportRequestModal({
         Math.ceil(exportRows.length / ROWS_PER_PAGE)
     );
 
-    const paginatedRows = useMemo(() => {
-        const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
-
-        return exportRows.slice(
-            startIndex,
-            startIndex + ROWS_PER_PAGE
-        );
-    }, [exportRows, currentPage]);
+    const previewRows = useMemo(() => groupDocumentRows(
+        exportRows.map((item, index) => ({ item, sequence: index + 1, document: formatRunningDoc(item) })),
+        (row) => row.document
+    ), [exportRows]);
+    const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
+    const paginatedRows = previewRows.slice(startIndex, startIndex + ROWS_PER_PAGE);
+    const previewDocumentSpans = documentRowSpans(paginatedRows, (row) => row.document);
 
     useEffect(() => { setCurrentPage(1); }, [open, exportApiUrl]);
 
@@ -1517,11 +1465,31 @@ export default function ExportRequestModal({
     };
     const exportDate = (value: unknown): string =>
         value ? formatThaiDate(String(value)) : "";
+    const getReplacementLicense = (item: ExportRequestItem) => String(
+        item.export_detail?.license || item.export_license ||
+        (item.export_row_index != null ? item.details?.[item.export_row_index]?.license : "") ||
+        (!item.export_detail && item.export_row_index != null
+            ? (Array.isArray(item.license_replace) ? item.license_replace
+                : String(item.license_replace ?? "").split(/[,;\n]+/))
+                .map((license) => String(license).trim()).filter(Boolean)[item.export_row_index]
+            : "") || ""
+    ).trim();
+    const firstStatusByDocument = useMemo(() => {
+        const statuses = new Map<string, string>();
+        for (const item of exportRows) {
+            const document = formatRunningDoc(item);
+            if (document && !statuses.has(document)) {
+                statuses.set(document, formatCurrentProcess(item));
+            }
+        }
+        return statuses;
+    }, [exportRows]);
+
     const toExportRow = (item: ExportRequestItem, index: number) => ({
         "ลำดับ": index + 1,
         "วันที่สร้างคำขอ": exportDate(getRequestDateKey(item)),
         "ประเภทคำขอ": item.fleet_type || "",
-        "สถานะปัจจุบัน": formatCurrentProcess(item),
+        "สถานะปัจจุบัน": firstStatusByDocument.get(formatRunningDoc(item)) ?? formatCurrentProcess(item),
         "เลขที่เอกสาร": formatRunningDoc(item),
         "ประเภทคลัง": item.dc_type || "",
         "ชื่อคลัง": item.dc_code || "",
@@ -1529,15 +1497,7 @@ export default function ExportRequestModal({
         "จำนวนรถที่ขอ (คัน) *": Number(item.export_qty ?? item.qty ?? 0) || 0,
         "รอรับ Workload": item.workload ?? "",
         "จำนวน truckturn": item.truckturn ?? "",
-        "ทะเบียนทดแทน1(ระบุทะเบียน)": String(
-            item.export_detail?.license || item.export_license ||
-            (item.export_row_index != null ? item.details?.[item.export_row_index]?.license : "") ||
-            (!item.export_detail && item.export_row_index != null
-                ? (Array.isArray(item.license_replace) ? item.license_replace
-                    : String(item.license_replace ?? "").split(/[,;\n]+/))
-                    .map((license) => String(license).trim()).filter(Boolean)[item.export_row_index]
-                : "") || ""
-        ).trim(),
+        "ทะเบียนทดแทน1(ระบุทะเบียน)": getReplacementLicense(item),
         "หมายเหตุที่แจ้งขอ": item.remark || "",
         "วันที่ใช้งาน": exportDate(item.usage_date),
         "ผู้แจ้งขอ": item.request_by || "",
@@ -1698,6 +1658,13 @@ export default function ExportRequestModal({
             const sheetStart = XLSX.utils.decode_range(sheet["!ref"] ?? "A1").s;
             const requestDateColumn = sheetStart.c + headers.indexOf("วันที่สร้างคำขอ");
             if (!values.length || values.length > 500) throw new Error("รองรับข้อมูล 1–500 แถวต่อครั้ง");
+            const vehicleKey = (item: ExportRequestItem) =>
+                JSON.stringify([String(item.id ?? ""), String(item.vehicle_no ?? "")]);
+            const serialFields = [
+                ["car_engine", "เลขเครื่อง"],
+                ["car_chassis", "เลข Chassis"],
+            ] as const;
+            const serialKey = (value: unknown) => normalizeImportValue(value).toUpperCase();
             const rowsByDocument = new Map<string, ExportRequestItem[]>();
             for (const item of exportRows) {
                 const document = formatRunningDoc(item);
@@ -1718,25 +1685,23 @@ export default function ExportRequestModal({
                 const excelRowNumber = sheetStart.r + rowIndex + 2;
                 const document = normalizeImportValue(record["เลขที่เอกสาร"]);
                 const documentMatches = rowsByDocument.get(document) ?? [];
+                const replacementLicense = normalizeImportValue(record["ทะเบียนทดแทน1(ระบุทะเบียน)"]);
                 const matches = documentMatches.length > 1
-                    ? documentMatches.filter((item) => {
-                        const candidate = toExportRow(item, sequence - 1);
-                        const identityColumns = ["ชื่อคลัง", "ทะเบียนทดแทน1(ระบุทะเบียน)"] as const;
-                        return identityColumns.every((column) =>
-                            normalizeImportValue(candidate[column]) === normalizeImportValue(record[column])
-                        );
-                    })
+                    ? documentMatches.filter((item) => replacementLicense && getReplacementLicense(item) === replacementLicense)
                     : documentMatches;
                 if (matches.length !== 1) {
-                    const message = documentMatches.length > 1
-                        ? `เลขที่เอกสาร “${document}” ซ้ำและระบุรถจากชื่อคลังกับทะเบียนทดแทนไม่ได้`
-                        : `ไม่พบเลขที่เอกสาร “${document || "(ว่าง)"}” ในผลค้นหาปัจจุบัน กรุณาตรวจตัวกรอง Track Fleet`;
+                    const identifier = `เลขที่เอกสาร “${document || "(ว่าง)"}”`;
+                    const message = documentMatches.length
+                        ? `${identifier} ซ้ำ ${documentMatches.length} รายการ และทะเบียนทดแทน “${replacementLicense || "(ว่าง)"}” จับคู่ได้ ${matches.length} รายการ จึงระบุรถคันเดียวไม่ได้`
+                        : `ไม่พบ${identifier} ในผลค้นหาปัจจุบัน กรุณาตรวจตัวกรอง Track Fleet`;
                     throw new Error(`แถว ${excelRowNumber}: ${message}`);
                 }
                 const [originalItem] = matches;
                 const original = toExportRow(originalItem, sequence - 1);
 
                 for (const column of importColumns.filter((column) => !(column in updateColumnFields))) {
+                    // สถานะอาจเดินหน้าได้หลังดาวน์โหลด Excel ใช้เพื่อแสดงข้อมูลเท่านั้น
+                    if (column === "สถานะปัจจุบัน") continue;
                     const excelRaw = record[column];
                     const systemRaw = original[column as keyof typeof original];
                     const excelValue = normalizeImportValue(excelRaw);
@@ -1774,14 +1739,13 @@ export default function ExportRequestModal({
                             "ค่าปัจจุบันจากระบบ": JSON.stringify(systemValue),
                             "วันที่ Excel ที่ใช้เทียบ": excelDateKey,
                             "วันที่ระบบที่ใช้เทียบ": systemDateKey,
-                            "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
-                            "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                            "เลขที่เอกสาร": document,
                             "ข้อผิดพลาดการแปลงวันที่": dateError,
                         }]);
                         throw new Error(
                             `แถว ${rowIndex + 2} • วันที่สร้างคำขอ • Excel ${JSON.stringify(excelValue)}` +
                             ` • วันที่อ่านได้ ${JSON.stringify(excelDate)} • ระบบ ${JSON.stringify(systemValue)}` +
-                            ` • เลขเอกสาร Excel ${record["เลขที่เอกสาร"]} • ระบบ ${original["เลขที่เอกสาร"]}`
+                            ` • เลขที่เอกสาร ${document}`
                         );
                     }
 
@@ -1795,8 +1759,7 @@ export default function ExportRequestModal({
                         "ค่าปัจจุบันจากระบบ": JSON.stringify(systemRaw),
                         "ค่า Excel ที่ใช้เทียบ": JSON.stringify(excelValue),
                         "ค่าระบบที่ใช้เทียบ": JSON.stringify(systemValue),
-                        "เลขเอกสารใน Excel": record["เลขที่เอกสาร"],
-                        "เลขเอกสารในระบบ": original["เลขที่เอกสาร"],
+                        "เลขที่เอกสาร": document,
                     }]);
 
                     throw new Error(
@@ -1853,6 +1816,29 @@ export default function ExportRequestModal({
             }
             const keys = updates.map((item) => JSON.stringify([item.request_id, item.vehicle_no]));
             if (new Set(keys).size !== keys.length) throw new Error("พบหลายแถวอัปเดตรถคันเดียวกัน กรุณาเหลือหนึ่งแถวต่อรถ");
+            const updatesByVehicle = new Map(updates.map((update, index) => [keys[index], update.fields]));
+            for (const [fieldName, label] of serialFields) {
+                const owners = new Map<string, Map<string, string>>();
+                for (const item of exportRows) {
+                    const key = vehicleKey(item);
+                    const pending = updatesByVehicle.get(key);
+                    const number = serialKey(pending && fieldName in pending ? pending[fieldName] : field(item, fieldName));
+                    if (!number) continue;
+                    const vehicles = owners.get(number) ?? new Map<string, string>();
+                    vehicles.set(key, formatRunningDoc(item) || key);
+                    owners.set(number, vehicles);
+                }
+
+                updates.forEach((update, index) => {
+                    const number = serialKey(update.fields[fieldName]);
+                    const vehicles = owners.get(number);
+                    if (!number || !vehicles) return;
+                    const conflicts = Array.from(vehicles).filter(([key]) => key !== keys[index]);
+                    if (!conflicts.length) return;
+                    const documents = conflicts.map(([, document]) => document).join(", ");
+                    throw new Error(`แถว ${preview[index].excelRowNumber}: ${label} “${update.fields[fieldName]}” ซ้ำกับรถอีกคัน (${documents})`);
+                });
+            }
             if (version !== importReadVersion.current) return;
             setImportUpdates(updates); setImportPreview(preview);
             setImportMessage(updates.length ? `ตรวจสอบผ่าน ${updates.length} รายการที่มีการแก้ไข` : "ไม่มีข้อมูลที่เปลี่ยนแปลง");
@@ -1861,6 +1847,29 @@ export default function ExportRequestModal({
             if (version === importReadVersion.current) setImportError(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
         } finally { if (version === importReadVersion.current) setReadingImport(false); }
     };
+
+    const removeImportRow = (excelRowNumber: number) => {
+        if (importSaveInFlight.current || savingImport || readingImport) return;
+
+        // ใช้ลำดับก่อนจัดกลุ่มตาราง เพื่อให้ตัดข้อมูลที่จะส่งตรงกับแถว Excel
+        const index = importPreview.findIndex(
+            (row) => row.excelRowNumber === excelRowNumber
+        );
+        if (index === -1) return;
+
+        const remaining = importUpdates.filter((_, i) => i !== index);
+        setImportUpdates(remaining);
+        setImportPreview((rows) =>
+            rows.filter((row) => row.excelRowNumber !== excelRowNumber)
+        );
+        setImportError("");
+        setImportMessage(
+            remaining.length
+                ? `เอาแถว ${excelRowNumber} ออกแล้ว เหลือ ${remaining.length} รายการ`
+                : "เอาออกครบแล้ว ไม่มีรายการให้บันทึก"
+        );
+    };
+
     const saveImportedUpdates = async () => {
         if (!importUpdates.length || savingImport || readingImport || isLoading || importSaveInFlight.current) return;
         importSaveInFlight.current = true;
@@ -1899,8 +1908,10 @@ export default function ExportRequestModal({
     };
 
     // Export Excel
+    const exceedsExportLimit = exportRows.length > MAX_EXPORT_ROWS;
+
     const handleExport = () => {
-        if (loadingTrackRows || loadingFbp || loadError || exportRows.length === 0) {
+        if (loadingTrackRows || loadingFbp || loadError || exportRows.length === 0 || exceedsExportLimit) {
             return;
         }
 
@@ -2038,20 +2049,7 @@ export default function ExportRequestModal({
                 "รายการคำขอ"
             );
 
-            if (exportMode === "update") {
-                const raw = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: false });
-                const protectedBytes = protectUpdateWorkbook(new Uint8Array(raw), editableStart);
-                const blob = new Blob([protectedBytes as BlobPart], {
-                    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url; link.download = "Truck_Request_Update.xlsx";
-                document.body.appendChild(link); link.click(); link.remove();
-                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-            } else {
-                XLSX.writeFile(workbook, "Truck_Request.xlsx");
-            }
+            XLSX.writeFile(workbook, exportMode === "update" ? "Truck_Request_Update.xlsx" : "Truck_Request.xlsx");
         } catch (error) {
             setExportError(error instanceof Error ? error.message : "ส่งออก Excel ไม่สำเร็จ");
         }
@@ -2065,8 +2063,16 @@ export default function ExportRequestModal({
         return null;
     }
 
+    const importTableRows = groupDocumentRows(importPreview.slice(0, 20), (row) => row.document);
+    const importDocumentSpans = documentRowSpans(importTableRows, (row) => row.document);
+    const importChangeColumns = Array.from(new Set([
+        "เลขเครื่อง",
+        "เลข Chassis",
+        ...importTableRows.flatMap((row) => row.changes.map((change) => change.column)),
+    ]));
     const showPreview = exportMode === "report" || showExportTable;
     const ready = !isLoading && !loadError && exportRows.length > 0;
+    const canExport = ready && !exceedsExportLimit;
     const loadingTitle = loadingTrackRows
         ? reportProgress ? "กำลังดึงรายละเอียดรายงาน" : usesTrackFleetSearch ? "กำลังค้นหารายการรถจาก Track Fleet" : "กำลังโหลดรายการคำขอรถ"
         : "กำลังโหลดข้อมูลบริษัทขนส่ง";
@@ -2075,7 +2081,8 @@ export default function ExportRequestModal({
     return (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm sm:p-5">
             <div role="dialog" aria-modal="true" aria-labelledby="export-track-fleet-title"
-                className="flex h-full max-h-[960px] w-full max-w-[1400px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl sm:rounded-3xl">
+                style={{ color: "#0f172a" }}
+                className="flex h-full max-h-[960px] w-full text-slate-900 max-w-[1400px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl sm:rounded-3xl">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50 to-slate-50 px-5 py-4">
                     <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
@@ -2085,37 +2092,61 @@ export default function ExportRequestModal({
                             <h2 id="export-track-fleet-title" className="text-base font-bold text-slate-900">
                                 {exportMode === "update" ? "สำหรับอัปเดตงาน" : "ส่งออกรายงานคำขอรถ"}
                             </h2>
-                            <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
+                            <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-600">
                                 {dcLabel || "ข้อมูลคำขอทั้งหมดที่สามารถเข้าถึงได้"}
                             </p>
                         </div>
                     </div>
 
-                    <button
+                    <button style={BUTTON_COLORS.red}
                         type="button"
                         onClick={onClose}
                         aria-label="ปิดหน้าต่างส่งออกรายงาน"
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-rose-700 text-white shadow-sm transition hover:bg-rose-800"
                     >
                         <X size={17} />
                     </button>
                 </div>
 
                 <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-3">
-                    <div role="group" aria-label="รูปแบบการส่งออก" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
-                        {([["report", "ส่งออกรายงาน"], ["update", "สำหรับอัปเดตงาน"]] as const).map(([mode, label]) => (
-                            <button key={mode} type="button" aria-pressed={exportMode === mode}
-                                onClick={() => {
-                                    if (mode === exportMode) return;
-                                    setExportMode(mode);
-                                    setShowExportTable(false);
-                                    setExportError("");
-                                }}
-                                className={`rounded-lg px-4 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${exportMode === mode ? "bg-blue-700 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}>
-                                {label}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div role="group" aria-label="รูปแบบการส่งออก" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
+                            {([["report", "ส่งออกรายงาน"], ["update", "สำหรับอัปเดตงาน"]] as const).map(([mode, label]) => (
+                                <button style={exportMode === mode ? BUTTON_COLORS.blue : BUTTON_COLORS.lightBlue} key={mode} type="button" aria-pressed={exportMode === mode}
+                                    onClick={() => {
+                                        if (mode === exportMode) return;
+                                        setExportMode(mode);
+                                        setShowExportTable(false);
+                                        setExportError("");
+                                    }}
+                                    className={`rounded-lg px-4 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 ${exportMode === mode ? "bg-blue-700 text-white shadow-sm" : "bg-blue-100 text-blue-950 hover:bg-blue-200"}`}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        {exportMode === "update" && (
+                            <button style={canExport ? BUTTON_COLORS.blue : BUTTON_COLORS.lightBlue}
+                                type="button"
+                                onClick={handleExport}
+                                disabled={!canExport}
+                                className="inline-flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-blue-800 bg-blue-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:border-blue-200 disabled:bg-blue-100 disabled:text-blue-950 disabled:shadow-none sm:w-auto"
+                            >
+                                {isLoading
+                                    ? <LoaderCircle aria-hidden="true" size={18} className="shrink-0 motion-safe:animate-spin" />
+                                    : <Download aria-hidden="true" size={18} className="shrink-0" />}
+                                <span>ดาวน์โหลดไฟล์สำหรับอัปเดตงาน</span>
                             </button>
-                        ))}
+                        )}
                     </div>
+                    {ready && exceedsExportLimit && (
+                        <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                            <p>พบ {exportRows.length.toLocaleString("th-TH")} แถว ส่งออกได้สูงสุด {MAX_EXPORT_ROWS} แถว กรุณาปิดหน้านี้แล้วเลือกเดือนในตัวกรองหน้า Track Fleet ให้เหลือไม่เกิน {MAX_EXPORT_ROWS} แถว</p>
+                            <button style={BUTTON_COLORS.amber} type="button" onClick={onClose}
+                                className="rounded-lg bg-amber-800 px-4 py-2 font-semibold text-white hover:bg-amber-900">
+                                ปิดแล้วกลับไปกรองเดือน
+                            </button>
+                        </div>
+                    )}
                     {exportError && <p role="alert" className="mt-2 text-xs text-rose-700">{exportError}</p>}
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -2127,12 +2158,12 @@ export default function ExportRequestModal({
                                 </div>
                                 <div>
                                     <h2 className="text-sm font-black text-slate-900">อัปโหลดไฟล์</h2>
-                                    <p className="mt-0.5 text-xs text-slate-500">เลือกไฟล์หรือลากไฟล์มาวาง</p>
+                                    <p className="mt-0.5 text-xs text-slate-700">เลือกไฟล์หรือลากไฟล์มาวาง</p>
                                 </div>
                             </div>
                         </div>
                         <div className="p-5 sm:p-6">
-                            <p className="text-xs leading-5 text-slate-500">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน ระบบจะนำเข้าเฉพาะช่องที่อนุญาตให้แก้ไข</p>
+                            <p className="text-xs leading-5 text-slate-700">ใช้ไฟล์จากแท็บสำหรับอัปเดตงาน คุณลบทั้งแถวที่ไม่ต้องการอัปเดตใน Excel ได้</p>
                             <input ref={importInput} type="file" accept=".xlsx" className="sr-only" aria-label="เลือกไฟล์ Excel สำหรับอัปเดตงาน"
                                 disabled={readingImport || savingImport} onChange={(event) => { void readImportFile(event.target.files?.[0]); event.target.value = ""; }} />
                             <div onDragOver={(event) => { event.preventDefault(); if (!readingImport && !savingImport) setIsDraggingImport(true); }}
@@ -2141,50 +2172,178 @@ export default function ExportRequestModal({
                                 className={`mt-4 flex min-h-[180px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 text-center ${isDraggingImport ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"}`}>
                                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600"><CloudUpload className="h-7 w-7" /></div>
                                 <p className="mt-3 text-sm font-semibold text-slate-800">{isDraggingImport ? "วางไฟล์ตรงนี้" : "ลากไฟล์มาวางที่นี่"}</p>
-                                <p className="mt-1 text-xs text-slate-500">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 500 แถว</p>
-                                <button type="button" disabled={readingImport || savingImport || isLoading} onClick={() => importInput.current?.click()}
-                                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-blue-50 disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" />เลือกไฟล์ Excel</button>
+                                <p className="mt-1 text-xs text-slate-700">รองรับ .xlsx • สูงสุด 10 MB • ไม่เกิน 500 แถว</p>
+                                <button style={readingImport || savingImport || isLoading ? BUTTON_COLORS.lightBlue : BUTTON_COLORS.blue} type="button" disabled={readingImport || savingImport || isLoading} onClick={() => importInput.current?.click()}
+                                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-blue-800 bg-blue-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:border-blue-200 disabled:bg-blue-100 disabled:text-blue-950"><FileSpreadsheet className="h-4 w-4" />เลือกไฟล์ Excel</button>
                             </div>
                             {importFileName && <p className="mt-3 break-all text-xs text-slate-600">ไฟล์: {importFileName}</p>}
                             {readingImport && <p role="status" className="mt-2 text-xs text-blue-700">กำลังอ่านและตรวจสอบไฟล์…</p>}
                             {importError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{importError}</p>}
                             {importMessage && <p role="status" className="mt-3 text-xs text-emerald-800">{importMessage}</p>}
                             {importPreview.length > 0 && (
-                                <div className="mt-4 space-y-3">
-                                    {importPreview.slice(0, 20).map((row) => (
-                                        <section key={row.excelRowNumber} aria-label={`แถว ${row.excelRowNumber} ${row.document}`}
-                                            className="min-w-0 rounded-xl border border-slate-200 bg-white">
-                                            <div className="border-b border-slate-200 bg-blue-50 px-4 py-2 text-xs">
-                                                <span className="font-bold text-blue-900">{row.document}</span>
-                                                <span className="ml-3 text-slate-600">แถว Excel {row.excelRowNumber}</span>
-                                            </div>
-                                            <ul className="flex gap-3 overflow-x-auto p-3 text-xs">
-                                                {row.changes.map((change) => (
-                                                    <li key={change.column} className="w-64 shrink-0 rounded-lg border border-slate-200">
-                                                        <h4 className="border-b border-slate-200 px-3 py-2 font-semibold text-blue-900">
-                                                            {change.column}
-                                                        </h4>
-                                                        <dl className="grid grid-cols-2">
-                                                            <div className="min-w-0 bg-rose-50 px-3 py-2 text-rose-800">
-                                                                <dt className="font-semibold">ค่าเดิม</dt>
-                                                                <dd className="mt-1 whitespace-pre-wrap break-words">{change.oldValue || "—"}</dd>
-                                                            </div>
-                                                            <div className="min-w-0 bg-emerald-50 px-3 py-2 text-emerald-900">
-                                                                <dt className="font-semibold">ค่าใหม่</dt>
-                                                                <dd className="mt-1 whitespace-pre-wrap break-words font-semibold">{change.newValue || "—"}</dd>
-                                                            </div>
-                                                        </dl>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </section>
-                                    ))}
+                                <div className="mt-4 max-h-80 overflow-auto rounded-xl border border-slate-200">
+                                    <table
+    aria-label="ตัวอย่างข้อมูลที่เปลี่ยนก่อนนำเข้า"
+    className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm"
+    style={{ backgroundColor: "#ffffff", color: "#0f172a" }}
+>
+    <colgroup span={2} />
+    {importChangeColumns.map((column) => (
+        <colgroup key={column} span={2} />
+    ))}
+    <colgroup />
+
+    <thead
+        className="sticky top-0 z-20"
+        style={{ backgroundColor: "#1e3a8a", color: "#ffffff" }}
+    >
+        <tr>
+            <th
+                scope="col"
+                rowSpan={2}
+                className="whitespace-nowrap border-b border-blue-700 px-4 py-3 text-center font-semibold"
+            >
+                แถว Excel
+            </th>
+            <th
+                scope="col"
+                rowSpan={2}
+                className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 font-semibold"
+            >
+                เลขที่เอกสาร
+            </th>
+
+            {importChangeColumns.map((column) => (
+                <th
+                    key={column}
+                    scope="colgroup"
+                    colSpan={2}
+                    className="whitespace-nowrap border-l border-blue-700 px-4 py-3 text-center font-semibold"
+                >
+                    {column}
+                </th>
+            ))}
+
+            <th
+                scope="col"
+                rowSpan={2}
+                className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 text-center font-semibold"
+                style={{ backgroundColor: "#172554", color: "#ffffff" }}
+            >
+                จัดการ
+            </th>
+        </tr>
+
+        <tr>
+            {importChangeColumns.flatMap((column) => [
+                <th
+                    key={`${column}-old`}
+                    scope="col"
+                    className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-2 text-center text-xs font-bold"
+                    style={{ backgroundColor: "#ffe4e6", color: "#881337" }}
+                >
+                    ค่าเดิม
+                </th>,
+                <th
+                    key={`${column}-new`}
+                    scope="col"
+                    className="whitespace-nowrap border-b border-blue-700 px-4 py-2 text-center text-xs font-bold"
+                    style={{ backgroundColor: "#d1fae5", color: "#064e3b" }}
+                >
+                    ค่าใหม่
+                </th>,
+            ])}
+        </tr>
+    </thead>
+
+    <tbody>
+        {importTableRows.map((row, index) => {
+            const changesByColumn = new Map(
+                row.changes.map((change) => [change.column, change])
+            );
+            const removeDisabled = readingImport || savingImport;
+            const rowBackground = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+
+            return (
+                <tr key={row.excelRowNumber} style={{ backgroundColor: rowBackground }}>
+                    <td className="border-b border-slate-200 px-4 py-3 text-center align-middle">
+                        <span className="inline-flex min-w-9 justify-center rounded-md bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-800">
+                            {row.excelRowNumber}
+                        </span>
+                    </td>
+
+                    {importDocumentSpans[index] > 0 && (
+                        <td
+                            rowSpan={importDocumentSpans[index]}
+                            className="whitespace-nowrap border-b border-l border-blue-100 px-4 py-3 align-middle font-bold"
+                            style={{ backgroundColor: "#eff6ff", color: "#1e3a8a" }}
+                        >
+                            {row.document || "—"}
+                        </td>
+                    )}
+
+                    {importChangeColumns.flatMap((column) => {
+                        const change = changesByColumn.get(column);
+
+                        if (!change) {
+                            return (
+                                <td
+                                    key={column}
+                                    colSpan={2}
+                                    className="whitespace-nowrap border-b border-l border-slate-200 px-4 py-3 text-center text-xs text-slate-600"
+                                >
+                                    ไม่มีการแก้ไข
+                                </td>
+                            );
+                        }
+
+                        return [
+                            <td
+                                key={`${column}-old`}
+                                className="min-w-[110px] whitespace-pre-wrap break-words border-b border-l border-rose-100 px-4 py-3 align-middle"
+                                style={{ backgroundColor: "#fff1f2", color: "#881337" }}
+                            >
+                                {change.oldValue || "(ว่าง)"}
+                            </td>,
+                            <td
+                                key={`${column}-new`}
+                                className="min-w-[110px] whitespace-pre-wrap break-words border-b border-emerald-100 px-4 py-3 align-middle font-semibold"
+                                style={{ backgroundColor: "#ecfdf5", color: "#064e3b" }}
+                            >
+                                {change.newValue || "(ว่าง)"}
+                            </td>,
+                        ];
+                    })}
+
+                    <td
+                        className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-slate-200 px-3 py-3 text-center align-middle"
+                        style={{ backgroundColor: rowBackground }}
+                    >
+                        <button
+                            type="button"
+                            disabled={removeDisabled}
+                            aria-label={`เอาแถว Excel ${row.excelRowNumber} ออกจากรายการนำเข้า`}
+                            onClick={() => removeImportRow(row.excelRowNumber)}
+                            className="inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-xs font-bold transition enabled:hover:brightness-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 disabled:cursor-not-allowed"
+                            style={{
+                                backgroundColor: removeDisabled ? "#ffe4e6" : "#be123c",
+                                color: removeDisabled ? "#881337" : "#ffffff",
+                            }}
+                        >
+                            X
+                        </button>
+                    </td>
+                </tr>
+            );
+        })}
+    </tbody>
+</table>
                                 </div>
                             )}
-                            {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-500">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
-                            <p className="mt-3 text-xs leading-5 text-slate-500">ยืนยันเพื่อนำเฉพาะข้อมูลที่แก้ไขไปบันทึกในระบบ ช่องที่ลบข้อมูลออกจะถูกบันทึกเป็นค่าว่าง</p>
-                            <button type="button" onClick={() => void saveImportedUpdates()} disabled={!importUpdates.length || readingImport || savingImport || isLoading}
-                                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
+                            {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-700">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
+                            <p className="mt-3 text-xs leading-5 text-slate-700">ยืนยันเพื่อนำเฉพาะข้อมูลที่แก้ไขไปบันทึกในระบบ ช่องที่ลบข้อมูลออกจะถูกบันทึกเป็นค่าว่าง</p>
+                            <button style={!importUpdates.length || readingImport || savingImport || isLoading ? BUTTON_COLORS.lightGreen : BUTTON_COLORS.green} type="button" onClick={() => void saveImportedUpdates()} disabled={!importUpdates.length || readingImport || savingImport || isLoading}
+                                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-950">
                                 {savingImport ? <LoaderCircle size={15} className="animate-spin" /> : <Upload size={15} />}
                                 {savingImport ? "กำลัง Import…" : `ยืนยัน Import${importUpdates.length ? ` ${importUpdates.length} รายการ` : ""}`}
                             </button>
@@ -2193,19 +2352,13 @@ export default function ExportRequestModal({
 
                     {exportMode === "update" && (
                         <div className="mx-4 mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                            <button type="button" aria-expanded={showExportTable}
+                            <button style={BUTTON_COLORS.indigo} type="button" aria-expanded={showExportTable}
                                 aria-controls={showExportTable ? "fleet-export-table" : undefined}
                                 onClick={() => setShowExportTable((shown) => !shown)}
-                                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-blue-50">
+                                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-indigo-800 bg-indigo-700 px-4 text-sm font-bold text-white hover:bg-indigo-800">
                                 {showExportTable ? "ซ่อนตาราง" : "ดูตารางสำหรับส่งออก"}
                                 <ChevronDown className={`h-4 w-4 motion-safe:transition-transform ${showExportTable ? "rotate-180" : ""}`} />
                             </button>
-                            {showExportTable && (
-                                <button type="button" onClick={handleExport} disabled={!ready}
-                                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">
-                                    <Download aria-hidden="true" size={15} /> ดาวน์โหลด Excel
-                                </button>
-                            )}
                         </div>
                     )}
 
@@ -2219,7 +2372,7 @@ export default function ExportRequestModal({
                                             <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
                                                 {trackFilters.map(({ key, label, value }) => (
                                                     <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
-                                                        <dt className="mr-1.5 inline font-medium text-slate-500">{label}</dt>
+                                                        <dt className="mr-1.5 inline font-medium text-slate-700">{label}</dt>
                                                         <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
                                                     </div>
                                                 ))}
@@ -2237,7 +2390,7 @@ export default function ExportRequestModal({
                                             <h3 id="export-preview-title" className="text-sm font-semibold text-slate-900">
                                                 {exportMode === "update" ? "ตารางสำหรับส่งออก" : "ตัวอย่างรายงาน"}
                                             </h3>
-                                            {ready && <p className="mt-0.5 text-xs text-slate-500">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
+                                            {ready && <p className="mt-0.5 text-xs text-slate-700">เลื่อนตารางไปทางขวาเพื่อดูคอลัมน์ทั้งหมด</p>}
                                         </div>
                                         {ready && (
                                             <div className="flex flex-wrap gap-2 text-xs font-semibold">
@@ -2252,14 +2405,14 @@ export default function ExportRequestModal({
                                             <AlertCircle aria-hidden="true" size={23} className="text-rose-600" />
                                             <p className="text-sm font-semibold text-rose-900">โหลดรายงานไม่สำเร็จ</p>
                                             <p className="max-w-lg break-words text-xs text-rose-800">{loadError}</p>
-                                            <button type="button" onClick={() => {
+                                            <button style={BUTTON_COLORS.red} type="button" onClick={() => {
                                                 setTrackError("");
                                                 setFbpError("");
                                                 setReportProgress(null);
                                                 setLoadingTrackRows(true);
                                                 setLoadingFbp(true);
                                                 setLoadAttempt((attempt) => attempt + 1);
-                                            }} className="mt-1 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100">
+                                            }} className="mt-1 rounded-lg border border-rose-800 bg-rose-700 px-3 py-2 text-sm font-bold text-white hover:bg-rose-800">
                                                 ลองโหลดอีกครั้ง
                                             </button>
                                         </div>
@@ -2279,7 +2432,7 @@ export default function ExportRequestModal({
                                         </div>
                                     ) : !ready ? (
                                         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-4 text-center">
-                                            <Search aria-hidden="true" size={25} className="mb-1 text-slate-400" />
+                                            <Search aria-hidden="true" size={25} className="mb-1 text-slate-600" />
                                             <p className="text-sm font-semibold text-slate-900">ไม่พบรายการที่จะส่งออก</p>
                                             <p className="max-w-md text-xs text-slate-600">{emptyDescription}</p>
                                         </div>
@@ -2304,15 +2457,19 @@ export default function ExportRequestModal({
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {paginatedRows.map((item, index) => {
-                                                            const row = toExportRow(
-                                                                item,
-                                                                (currentPage - 1) * ROWS_PER_PAGE + index
-                                                            );
+                                                        {paginatedRows.map(({ item, sequence }, index) => {
+                                                            const row = toExportRow(item, sequence);
+                                                            const documentSpan = previewDocumentSpans[index];
                                                             return (
                                                                 <tr key={`${item.id ?? item.running_doc}-${item.vehicle_no ?? item.export_row_index ?? index}-${index}`}
                                                                     className="border-b border-slate-100 text-xs even:bg-slate-50 hover:bg-blue-50">
-                                                                    {previewColumns.map((column) => (
+                                                                    {previewColumns.map((column) => column === "เลขที่เอกสาร" ? (
+                                                                        documentSpan > 0 && (
+                                                                            <td key={column} rowSpan={documentSpan} className="w-[170px] min-w-[170px] max-w-[220px] break-words border-r border-blue-200 bg-blue-50 px-3 py-2 align-middle text-sm font-bold text-blue-950">
+                                                                                {row["เลขที่เอกสาร"] || "—"}
+                                                                            </td>
+                                                                        )
+                                                                    ) : (
                                                                         <td key={column} className={`${exportMode === "update" && previewColumns.indexOf(column) >= editableStart ? "bg-emerald-50/70" : ""} border-r border-slate-100 px-3 py-2 align-top leading-4 whitespace-normal break-words text-slate-700 ${column === "ลำดับ" ? "w-[64px] min-w-[64px] text-center" : "w-[170px] min-w-[170px] max-w-[220px]"}`}>
                                                                             {row[column as keyof typeof row] ?? "-"}
                                                                         </td>
@@ -2325,7 +2482,7 @@ export default function ExportRequestModal({
                                             </div>
 
                                             <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                                <p className="text-[11px] font-bold text-slate-500">
+                                                <p className="text-[11px] font-bold text-slate-700">
                                                     แสดง {((currentPage - 1) * ROWS_PER_PAGE) + 1}
                                                     {" - "}
                                                     {Math.min(currentPage * ROWS_PER_PAGE, exportRows.length)}
@@ -2334,13 +2491,13 @@ export default function ExportRequestModal({
                                                 </p>
 
                                                 <div className="flex items-center justify-end gap-2">
-                                                    <button
+                                                    <button style={currentPage === 1 ? BUTTON_COLORS.lightBlue : BUTTON_COLORS.blue}
                                                         type="button"
                                                         onClick={() =>
                                                             setCurrentPage((page) => Math.max(1, page - 1))
                                                         }
                                                         disabled={currentPage === 1}
-                                                        className="h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        className="h-9 rounded-xl border border-blue-800 bg-blue-700 px-4 text-sm font-bold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:border-blue-200 disabled:bg-blue-100 disabled:text-blue-950"
                                                     >
                                                         ก่อนหน้า
                                                     </button>
@@ -2349,7 +2506,7 @@ export default function ExportRequestModal({
                                                         หน้า {currentPage} / {totalPages}
                                                     </span>
 
-                                                    <button
+                                                    <button style={currentPage === totalPages ? BUTTON_COLORS.lightBlue : BUTTON_COLORS.blue}
                                                         type="button"
                                                         onClick={() =>
                                                             setCurrentPage((page) =>
@@ -2357,7 +2514,7 @@ export default function ExportRequestModal({
                                                             )
                                                         }
                                                         disabled={currentPage === totalPages}
-                                                        className="h-9 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        className="h-9 rounded-xl border border-blue-800 bg-blue-700 px-4 text-sm font-bold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:border-blue-200 disabled:bg-blue-100 disabled:text-blue-950"
                                                     >
                                                         ถัดไป
                                                     </button>
@@ -2376,25 +2533,25 @@ export default function ExportRequestModal({
                         <p className="text-xs font-semibold text-slate-600">{exportMode === "update" ? "สถานะข้อมูลอัปเดตงาน" : "สถานะรายงาน"}</p>
                         <p role="status" className="mt-0.5 text-xs font-medium text-slate-800">
                             {loadError ? "โหลดข้อมูลไม่สำเร็จ" : isLoading ? loadingTitle : ready
-                                ? `พร้อมส่งออก ${exportRows.length.toLocaleString("th-TH")} รายการ`
+                                ? exceedsExportLimit ? "เกินจำนวนแถวที่ส่งออกได้" : `พร้อมส่งออก ${exportRows.length.toLocaleString("th-TH")} รายการ`
                                 : "ไม่มีรายการให้ส่งออก"}
                         </p>
                     </div>
 
                     <div className="flex items-center justify-end gap-2">
-                        <button
+                        <button style={BUTTON_COLORS.slate}
                             type="button"
                             onClick={onClose}
-                            className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50"
+                            className="h-10 rounded-xl border border-slate-800 bg-slate-700 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
                         >
                             ยกเลิก
                         </button>
                         {exportMode === "report" && (
-                            <button
+                            <button style={canExport ? BUTTON_COLORS.green : BUTTON_COLORS.lightGreen}
                                 type="button"
                                 onClick={handleExport}
-                                disabled={!ready}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 text-xs font-black text-white shadow-lg shadow-emerald-600/20 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                                disabled={!canExport}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-950"
                             >
                                 {isLoading && !loadError
                                     ? <LoaderCircle aria-hidden="true" size={15} className="motion-safe:animate-spin" />

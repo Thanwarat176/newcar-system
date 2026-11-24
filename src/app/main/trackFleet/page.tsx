@@ -88,6 +88,7 @@ interface RequestItem {
   car_license?: string | null; car_model?: string | null;
   car_brand?: string | null; unit_code?: string;
   replaced_old_licenses?: string[];
+  parent_document?: { running_doc?: string; replaced_old_licenses?: string[] };
   matches_filters?: boolean;
 }
 interface DocumentGroup {
@@ -536,9 +537,15 @@ function getRequestDateOptions(dates: Iterable<string>): RequestDateOptions {
 
 function getFleetVehicles(data: unknown): RequestItem[] {
   if (!Array.isArray(data)) return [];
-  return data.flatMap((item: RequestItem | { vehicles: RequestItem[] }) =>
-    "vehicles" in item && Array.isArray(item.vehicles) ? item.vehicles : [item as RequestItem],
-  );
+  return data.flatMap((item: RequestItem | { running_doc?: string; replaced_old_licenses?: string[]; vehicles: RequestItem[] }) => {
+    if (!("vehicles" in item)) return [item];
+    const { running_doc, replaced_old_licenses } = item;
+    if (!Array.isArray(item.vehicles)) return [];
+    return item.vehicles.map((vehicle) => ({
+      ...vehicle,
+      parent_document: { running_doc, replaced_old_licenses },
+    }));
+  });
 }
 
 const formatThaiDate = (value?: string) => {
@@ -566,12 +573,14 @@ const getDocumentGroupInfo = (
   vehicle: RequestItem,
   index: number,
 ): { key: string; displayDocument: string } => {
-  const documentNo = textValue(vehicle.running_doc_vehicle_no)
+  const vehicleDocument = textValue(vehicle.running_doc_vehicle_no)
     || textValue(vehicle.unit_code)
-    || textValue(vehicle.running_doc);
+    || textValue(vehicle.running_doc)
+    || textValue(vehicle.parent_document?.running_doc);
+  const documentNo = vehicleDocument.replace(/-N\d+$/i, "");
   return {
     key: documentNo
-      ? `vehicle-doc:${documentNo.toUpperCase()}`
+      ? JSON.stringify([documentNo, vehicle.dc_type, vehicle.dc_code].map((value) => textValue(value).toUpperCase()))
       : `incoming:${vehicle.incoming_truck_id ?? vehicle.id ?? index}`,
     displayDocument: documentNo,
   };
@@ -625,7 +634,15 @@ const displayVehicleFields = (vehicle: RequestItem) => {
   ];
 };
 const documentLicenses = (vehicles: RequestItem[]) => Array.from(new Set(
-  vehicles.flatMap(oldLicenses).map((license) => license.replace(/\s+-\s+/g, ", ")),
+  vehicles.flatMap((vehicle, index) => {
+    const parent = vehicle.parent_document;
+    const parentNumber = textValue(parent?.running_doc).replace(/-N\d+$/i, "");
+    if (parent?.replaced_old_licenses?.length && parentNumber
+      && parentNumber.toUpperCase() === getDocumentGroupInfo(vehicle, index).displayDocument.toUpperCase()) {
+      return parent.replaced_old_licenses.map(textValue).filter(Boolean);
+    }
+    return oldLicenses(vehicle);
+  }),
 ));
 // ไม่บังคับว่าทุกเอกสารต้องใช้รหัส -N01
 const assessmentReference = (vehicles: RequestItem[]) => {
@@ -691,10 +708,10 @@ function TrackFleetContent() {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [openDetailModal, setOpenDetailModal] = useState(false);
   const [selectedDocumentLicenses, setSelectedDocumentLicenses] = useState<string[]>([]);
-  const [searchText, setSearchText] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchItems, setSearchItems] = useState<string[]>([]);
   const [oldLicenseSearchInput, setOldLicenseSearchInput] = useState("");
   const [oldLicenseSearchItems, setOldLicenseSearchItems] = useState<string[]>([]);
-  const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const [vehicleSearchInput, setVehicleSearchInput] = useState("");
   const [vehicleSearchItems, setVehicleSearchItems] = useState<string[]>([]);
   const [fleetTypeFilter, setFleetTypeFilter] = useState("all");
@@ -752,11 +769,6 @@ function TrackFleetContent() {
     window.addEventListener("selectedDCChanged", loadSelectedDC);
     return () => window.removeEventListener("selectedDCChanged", loadSelectedDC);
   }, []);
-  useEffect(() => {
-    const timeout = setTimeout(() => setDebouncedSearchText(searchText), 250);
-    return () => clearTimeout(timeout);
-  }, [searchText]);
-
   const selectedDcFromSidebar = textValue(selectedDC?.DC_CODE || selectedDC?.dc_code).toUpperCase();
   const userWarehouse = textValue(userInfo?.warehouse || userInfo?.WAREHOUSE || userInfo?.team || userInfo?.TEAM).toUpperCase();
   const activeWarehouse = selectedDcFromSidebar || userWarehouse;
@@ -781,7 +793,10 @@ function TrackFleetContent() {
       if (userType) params.set("user_type", userType);
       const filters = { status: statusFilter, dc_type: dcTypeFilter, dc_code: dcFilter, fleet_type: fleetTypeFilter, truck_type: truckTypeFilter, process: currentProcessFilter };
       Object.entries(filters).forEach(([key, value]) => { if (value !== "all") params.set(key, value); });
-      if (debouncedSearchText.trim()) params.set("search", debouncedSearchText.trim());
+      if (searchItems.length === 1) params.set("search", searchItems[0]);
+      if (searchItems.length > 1) {
+        searchItems.forEach((item) => params.append("search_terms[]", item));
+      }
       if (vehicleSearchItems.length) params.set("vehicle_search", vehicleSearchItems.join(","));
       if (oldLicenseSearchItems.length) params.set("old_license", oldLicenseSearchItems.join(","));
       if (processDateFrom && processDateTo && processDateTo < processDateFrom) {
@@ -803,9 +818,13 @@ function TrackFleetContent() {
 
       const load = async () => {
         const response = await fetch(`${API_BASE}?${params}`, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(`ไม่สามารถดึงข้อมูลได้ (${response.status})`);
-        const json = await response.json();
-        if (json.status !== "success") throw new Error(json.message || "เกิดข้อผิดพลาดในการดึงข้อมูล");
+        const json = await response.json().catch(() => null);
+        if (!response.ok || json?.status !== "success") {
+          throw new Error(json?.message || `ไม่สามารถดึงข้อมูลได้ (${response.status})`);
+        }
+        if (searchItems.length > 1 && json.search_term_count !== searchItems.length) {
+          throw new Error("API รับคำค้นหลายรายการไม่ครบ กรุณาตรวจสอบไฟล์ api_new_truck/api/track_fleet_get.php บนเซิร์ฟเวอร์");
+        }
         return json;
       };
       let json = await load();
@@ -854,7 +873,7 @@ function TrackFleetContent() {
       clearTimeout(timeout);
       if (sequence === sequenceRef.current) setLoading(false);
     }
-  }, [contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, debouncedSearchText, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
+  }, [contextReady, activeWarehouse, userInfo?.team, userInfo?.TEAM, currentPage, pageSize, statusFilter, dcTypeFilter, dcFilter, fleetTypeFilter, truckTypeFilter, currentProcessFilter, searchItems, oldLicenseSearchItems, processDateField, processDateFrom, processDateTo, vehicleSearchItems, hasRequestDateRange, requestDateRange]);
   useEffect(() => {
     void fetchRequests();
     return () => { ++sequenceRef.current; controllerRef.current?.abort(); };
@@ -998,6 +1017,28 @@ function TrackFleetContent() {
     setSelectedDocumentNo("");
     setSelectedDocumentLicenses([]);
   };
+  const addSearchItems = (value: string) => {
+    const items = value.split(/[,;|\t\r\n]+/)
+      .map((item) => item.trim())
+      .filter((item) => item && !/^:?-{3,}:?$/.test(item));
+    if (!items.length) return;
+    setSearchItems((previous) => Array.from(new Map(
+      [...previous, ...items].map((item) => [item.toLowerCase(), item])
+    ).values()));
+    setSearchInput("");
+    setCurrentPage(1);
+  };
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (["Enter", ",", ";"].includes(event.key)) {
+      event.preventDefault();
+      addSearchItems(searchInput);
+    }
+    if (event.key === "Backspace" && !searchInput && searchItems.length) {
+      setSearchItems((items) => items.slice(0, -1));
+      setCurrentPage(1);
+    }
+  };
   const addVehicleSearchItems = (value: string) => {
     const items = value.split(/[,;\n]+/).map((v) => v.trim()).filter(Boolean);
     if (!items.length) return;
@@ -1045,7 +1086,7 @@ function TrackFleetContent() {
   };
   const clearDates = () => { setHasRequestDateRange(false); setCurrentPage(1); setRequestDateRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }]); };
   const clearFilters = () => {
-    setSearchText(""); setOldLicenseSearchInput(""); setOldLicenseSearchItems([]); setVehicleSearchInput(""); setVehicleSearchItems([]);
+    setSearchInput(""); setSearchItems([]); setOldLicenseSearchInput(""); setOldLicenseSearchItems([]); setVehicleSearchInput(""); setVehicleSearchItems([]);
     setFleetTypeFilter("all"); setTruckTypeFilter("all"); setDcTypeFilter("all");
     setDcFilter("all"); setStatusFilter("all"); setCurrentProcessFilter("all");
     setProcessDateField("str_date"); setProcessDateFrom(""); setProcessDateTo(""); setActiveProcessCalendar(null); clearDates();
@@ -1263,12 +1304,6 @@ function TrackFleetContent() {
                         </p>
                       </div>
 
-                      <p
-                        className={`mt-1 truncate text-[11px] font-bold ${isActive ? "text-white/60" : "text-slate-400"
-                          }`}
-                      >
-                        {loading ? "…" : formatNumber(summary[key].items)} เอกสาร
-                      </p>
                     </div>
 
                     <div
@@ -1284,10 +1319,10 @@ function TrackFleetContent() {
                       className={`text-2xl font-semibold tracking-tight ${isActive ? activeCountClass : countClass
                         }`}
                     >
-                      {loading ? "…" : formatNumber(summary[key].qty)}
+                      {loading ? "…" : formatNumber(summary[key].items)}
 
                       <span className="ml-1 text-xs font-semibold opacity-60">
-                        คัน
+                        เอกสาร
                       </span>
                     </p>
                   </div>
@@ -1300,7 +1335,39 @@ function TrackFleetContent() {
         <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><SlidersHorizontal size={17} className="text-blue-600" /><p className="text-xs font-semibold">ค้นหาและตัวกรอง</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] text-blue-700">พบ {formatNumber(pagination.total_vehicles)} คัน{pagination.total_documents != null ? ` / ${formatNumber(pagination.total_documents)} เอกสาร` : ""}</span></div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Field label="ค้นหา"><div className="relative"><Search size={14} className="absolute left-3 top-3 text-blue-400" /><input className={`${inputClass} pl-9 pr-8`} value={searchText} onChange={(event) => { setSearchText(event.target.value); setCurrentPage(1); }} placeholder="เลขเอกสาร, DC, ผู้ขอ, ทะเบียน..." />{searchText && <button type="button" aria-label="ล้างคำค้นหา" className="absolute right-3 top-3 text-slate-400" onClick={() => { setSearchText(""); setCurrentPage(1); }}><X size={14} /></button>}</div></Field>
+            <Field label="ค้นหา">
+              <div className={`${inputClass.replace("h-10", "min-h-10")} flex flex-wrap items-center gap-1.5`}>
+                <Search size={14} className="shrink-0 text-blue-400" />
+                {searchItems.map((item) => (
+                  <span key={item} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                    {item}
+                    <button type="button" aria-label={`ลบคำค้น ${item}`} onClick={() => {
+                      setSearchItems((items) => items.filter((value) => value !== item));
+                      setCurrentPage(1);
+                    }}><X size={12} /></button>
+                  </span>
+                ))}
+                <input className="min-w-[130px] flex-1 bg-transparent py-1.5 text-xs outline-none"
+                  aria-label="ค้นหาเลขเอกสาร, DC, ผู้ขอ, ทะเบียน"
+                  value={searchInput} onChange={(event) => setSearchInput(event.target.value)}
+                  onKeyDown={handleSearchKeyDown} onBlur={() => addSearchItems(searchInput)}
+                  onPaste={(event) => {
+                    const value = event.clipboardData.getData("text");
+                    if (/[,;|\t\r\n]/.test(value)) {
+                      event.preventDefault();
+                      addSearchItems([searchInput, value].join(","));
+                    }
+                  }}
+                  placeholder={searchItems.length ? "เพิ่มคำค้น แล้วกด Enter" : "เลขเอกสาร, DC, ผู้ขอ, ทะเบียน... แล้วกด Enter"} />
+                {(searchItems.length > 0 || searchInput) && (
+                  <button type="button" aria-label="ล้างคำค้นทั้งหมด" onClick={() => {
+                    setSearchItems([]);
+                    setSearchInput("");
+                    setCurrentPage(1);
+                  }}><X size={14} className="text-slate-400" /></button>
+                )}
+              </div>
+            </Field>
             <Field label="ค้นหาทะเบียนเก่าหลายทะเบียน">
               <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 px-2 py-1 focus-within:border-blue-500">
                 <Truck size={14} className="shrink-0 text-blue-400" />
@@ -1477,6 +1544,7 @@ function TrackFleetContent() {
                   <tr><td colSpan={13} className="border-b border-slate-100 bg-blue-50 px-4 py-2"><div className="flex items-center gap-2 text-[11px] font-semibold text-blue-600"><CalendarDays size={13} />วันที่ขอ: {formatThaiDate(date)}<span className="text-slate-400">· {groupedByRequestDate[date].length} เอกสาร / {groupedByRequestDate[date].reduce((sum, document) => sum + document.vehicles.length, 0)} คันในเอกสาร</span></div></td></tr>
                   {groupedByRequestDate[date].map((document) => {
                     const { vehicles } = document;
+                    const licenses = documentLicenses(vehicles);
                     return <tr key={document.key} className="group bg-white hover:bg-blue-50/20 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-3 [&>td]:align-top">
                       <td className="sticky left-0 z-10 bg-white text-center group-hover:bg-blue-50"><span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-1 text-[11px] font-semibold text-slate-500">{documentRowNumbers.get(document.key)}</span></td>
                       <td className="whitespace-nowrap"><p className="font-semibold text-slate-800">{document.running_doc || "ไม่ระบุเลขเอกสาร"}</p><span className="mt-2 inline-flex rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">{vehicles.length} คันในเอกสาร</span><div className="mt-2 space-y-1 text-[11px] text-slate-400">{uniqueValues(vehicles, (v) => normalizeDateKey(v.request_date || v.date)).map((value) => <p key={value}>ขอ: {formatThaiDate(value)}</p>)}</div></td>
@@ -1485,8 +1553,8 @@ function TrackFleetContent() {
                       <td className="min-w-[170px]"><DocumentValues vehicles={vehicles} getValue={(v) => v.fleet_type} /></td>
                       <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => textValue(v.new_truck_type || v.fleet_truck_type)}>{(v) => <p className="font-semibold">{v.new_truck_type || v.fleet_truck_type || "-"}</p>}</VehicleBlocks></td>
                       <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => textValue(v.new_vendor_name)}>{(v) => <p className="font-semibold">{v.new_vendor_name || "-"}</p>}</VehicleBlocks></td>
-                      <td>{documentLicenses(vehicles).length ? <ul style={{ margin: 0, paddingLeft: 16, listStyleType: "disc" }}>
-                        {documentLicenses(vehicles).map((license) => <li key={license} style={{ marginBottom: 6, fontSize: 11, fontWeight: 600 }}>{license}</li>)}
+                      <td>{licenses.length ? <ul style={{ margin: 0, paddingLeft: 16, listStyleType: "disc" }}>
+                        {licenses.map((license) => <li key={license} style={{ marginBottom: 6, fontSize: 11, fontWeight: 600 }}>{license}</li>)}
                       </ul> : <span className="text-slate-400">-</span>}</td>
                       <td><VehicleBlocks vehicles={vehicles} groupBy={displayVehicleFields}>{(v) => {
                         const fields = displayVehicleFields(v);
