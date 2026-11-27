@@ -64,6 +64,8 @@ interface FlowCarDetail {
   truck_type: string;
   company_name: string;
   detail_id: string | null;
+  incoming_truck_id?: string | number | null;
+  unit_code?: string | null;
 }
 
 interface FlowTrackingDetail {
@@ -141,6 +143,65 @@ interface VehicleWarehouseInfoResponse {
   data?: VehicleWarehouseInfo | VehicleWarehouseInfo[] | null;
 }
 
+interface TrackingVehicle {
+  request_id?: string | number;
+  unit_code?: string | null;
+  running_doc_vehicle_no?: string | null;
+  warehouse_vehicle_no?: string | number | null;
+  vehicle_no?: string | number | null;
+  latest_process_level?: string | number | null;
+  latest_process_name?: string | null;
+  tracking_status?: string | null;
+  car_license?: string | null;
+}
+
+interface TrackingPage {
+  status: string;
+  data: { running_doc: string; vehicles: TrackingVehicle[] }[];
+  pagination?: { total_pages?: number };
+}
+
+async function fetchTrackingVehicles() {
+  const vehiclesByRequest = new Map<string, TrackingVehicle[]>();
+  let totalPages = 1;
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    const params = new URLSearchParams({
+      fleet_group: "replace",
+      status_scope: "tracking",
+      group_mode: "document",
+      request_date_scope: "all",
+      limit: "100",
+      page: String(page),
+    });
+    const response = await fetch(
+      `http://192.168.158.210/api_new_truck/api/track_fleet_get.php?${params}`,
+      { cache: "no-store", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) throw new Error(`โหลดข้อมูลรายคันไม่สำเร็จ (${response.status})`);
+
+    const result: TrackingPage = await response.json();
+    if (result.status !== "success" || !Array.isArray(result.data)) {
+      throw new Error("ไม่ได้รับข้อมูลติดตามรถจาก API");
+    }
+
+    totalPages = Number(result.pagination?.total_pages) || 1;
+    for (const document of result.data) {
+      for (const vehicle of document.vehicles) {
+        if (vehicle.request_id == null) continue;
+        const key = String(vehicle.request_id);
+        const vehicles = vehiclesByRequest.get(key) ?? [];
+        vehicles.push(vehicle);
+        vehiclesByRequest.set(key, vehicles);
+      }
+    }
+  }
+
+  return vehiclesByRequest;
+}
+
+const isRejectedStep = (step: number) => step === 9 || step === 10;
+
 interface RequestItem {
   id: number | null;
   request_id?: number | string | null;
@@ -168,6 +229,7 @@ interface RequestItem {
   remark: string;
 
   vehicle_no?: string | number;
+  tracking_vehicles?: RequestItem[];
   running_doc_vehicle_no?: string;
   vehicle_license?: string;
   current_step?: number;
@@ -968,7 +1030,7 @@ function AddFleetContent() {
       setLoading(true);
       setError("");
 
-      const [requestResponse, flowSummaryResponse] = await Promise.all([
+      const [requestResponse, flowSummaryResponse, trackedVehicles] = await Promise.all([
         fetch(
           "http://192.168.158.210/api_new_truck/api/request_get.php",
           {
@@ -985,6 +1047,7 @@ function AddFleetContent() {
             cache: "no-store",
           },
         ),
+        fetchTrackingVehicles(),
       ]);
 
       if (!requestResponse.ok) {
@@ -1181,11 +1244,13 @@ function AddFleetContent() {
           statusDetails.replace(/^\d+\s*[.:]\s*/, "").trim() ||
           "ยังไม่เริ่มดำเนินการ";
 
-        // Keep request_truck.status for both cards and table filtering.
-        // Flow levels describe progress without changing the request category.
+        const status = normalizeStatus(item.status);
+        const isTracking = status === "process" || status === "completed";
         return {
           ...item,
-          status: item.status,
+          status: isTracking && isRejectedStep(currentLevel) && !trackedVehicles.has(String(item.id))
+            ? "rejected"
+            : item.status,
           current_step: currentLevel,
           total_steps: 8,
           current_process: currentProcess,
@@ -1199,17 +1264,38 @@ function AddFleetContent() {
 
         return (
           normalizedStatus === "process" ||
-          normalizedStatus === "completed"
+          normalizedStatus === "completed" ||
+          trackedVehicles.has(String(item.id))
         );
       });
 
       setProcessVehicleRows(
-        processRequests.map((item) => ({
-          ...item,
-          vehicle_no: undefined,
-          running_doc_vehicle_no: item.running_doc,
-          vehicle_license: "",
-        })),
+        processRequests.flatMap((item) => {
+          const vehicles = trackedVehicles.get(String(item.id));
+          if (!vehicles?.length) return [item];
+
+          return vehicles.map((vehicle, index) => {
+            const step = Number(vehicle.latest_process_level) || 0;
+            const trackingStatus = normalizeStatus(vehicle.tracking_status ?? undefined);
+            const vehicleNo = vehicle.warehouse_vehicle_no ?? vehicle.vehicle_no ?? index + 1;
+
+            return {
+              ...item,
+              status: isRejectedStep(step) || trackingStatus === "rejected"
+                ? "rejected"
+                : step === 8 || trackingStatus === "completed"
+                  ? "completed"
+                  : "process",
+              qty: 1,
+              vehicle_no: vehicleNo,
+              running_doc_vehicle_no: vehicle.unit_code || vehicle.running_doc_vehicle_no ||
+                `${item.running_doc}-${String(vehicleNo).padStart(3, "0")}`,
+              vehicle_license: vehicle.car_license ?? "",
+              current_step: step,
+              current_process: vehicle.latest_process_name || "ยังไม่พบข้อมูลขั้นตอน",
+            };
+          });
+        }),
       );
 
       setOpenRows({});
@@ -1659,8 +1745,10 @@ function AddFleetContent() {
 
   const warehouseFilteredAllRows = useMemo(() => {
     // Request ที่ยังไม่เข้า TCAS ใช้ข้อมูลเดิม
+    const trackedRequestIds = new Set(warehouseFilteredProcessRows.map(item => item.id));
     const normalRows = warehouseFilteredRequests.filter(
       (item) => {
+        if (trackedRequestIds.has(item.id)) return false;
         const normalizedStatus = normalizeStatus(item.status);
         return (
           normalizedStatus !== "process" &&
@@ -1709,7 +1797,7 @@ function AddFleetContent() {
     const steps = new Set<number>();
     warehouseFilteredProcessRows.forEach((item) => {
       const step = Number(item.current_step);
-      if (Number.isInteger(step) && step > 0) steps.add(step);
+      if (Number.isInteger(step) && step > 0 && !isRejectedStep(step)) steps.add(step);
     });
     return Array.from(steps)
       .sort((a, b) => a - b)
@@ -1846,12 +1934,42 @@ function AddFleetContent() {
     searchText,
   ]);
 
-  const filteredRequests = useMemo(() =>
-    statusFilter === "all"
-      ? summaryRequests
-      : summaryRequests.filter(item => normalizeStatus(item.status) === statusFilter),
-    [summaryRequests, statusFilter],
-  );
+  const filteredRequests = useMemo(() => {
+    const documents = new Map<string, RequestItem>();
+    const requestById = new Map(requests.map(item => [item.id, item]));
+
+    for (const item of summaryRequests) {
+      if (statusFilter !== "all" && normalizeStatus(item.status) !== statusFilter) continue;
+
+      const key = item.running_doc || String(item.id);
+      const existing = documents.get(key);
+      const vehicle = item.vehicle_no != null ? item : null;
+
+      if (!existing) {
+        const base = requestById.get(item.id) ?? item;
+        documents.set(key, {
+          ...base,
+          status: statusFilter === "all" ? base.status : item.status,
+          qty: item.qty,
+          tracking_vehicles: vehicle ? [vehicle] : [],
+        });
+        continue;
+      }
+
+      existing.qty = Number(existing.qty) + Number(item.qty);
+      if (vehicle) existing.tracking_vehicles?.push(vehicle);
+    }
+
+    for (const document of documents.values()) {
+      const vehicles = document.tracking_vehicles ?? [];
+      if (statusFilter === "all" && vehicles.length === Number(document.qty) && vehicles.length > 0) {
+        const statuses = new Set(vehicles.map(vehicle => vehicle.status));
+        document.status = statuses.size === 1 ? vehicles[0].status : "mixed_tracking";
+      }
+    }
+
+    return [...documents.values()];
+  }, [requests, summaryRequests, statusFilter]);
 
   const sortedRequests = useMemo(() => {
     if (!sortConfig) return filteredRequests;
@@ -2013,10 +2131,8 @@ function AddFleetContent() {
 
       // ใช้ key เดียวกันสำหรับรถทุกคันที่อยู่ภายใต้คำขอเดียวกัน
       const requestKey = String(
-        item.request_id ??
-        item.id ??
-        item.running_doc ??
-        `request-${index}`,
+        item.running_doc ||
+        (item.request_id ?? item.id ?? `request-${index}`),
       );
 
       // ตัวเลขหลักนับจำนวนรถ ส่วน Set ใช้นับจำนวนคำขอโดยไม่ซ้ำ
@@ -2158,8 +2274,10 @@ function AddFleetContent() {
 
   const exportRequests = useMemo(() => {
     // รายการที่ยังไม่เข้า TCAS ใช้ข้อมูลระดับ Request ตามเดิม
+    const trackedRequestIds = new Set(warehouseFilteredProcessRows.map(item => item.id));
     const normalRequests = warehouseFilteredRequests.filter(
       (item) => {
+        if (trackedRequestIds.has(item.id)) return false;
         const normalizedStatus = normalizeStatus(item.status);
         return (
           normalizedStatus !== "process" &&
@@ -2396,8 +2514,8 @@ function AddFleetContent() {
                     size={88}
                     strokeWidth={1.2}
                     className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive
-                        ? "text-white opacity-[0.12]"
-                        : "opacity-[0.07]"
+                      ? "text-white opacity-[0.12]"
+                      : "opacity-[0.07]"
                       }`}
                   />
                   <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
@@ -2993,7 +3111,9 @@ function AddFleetContent() {
 
                             // จำนวนที่อนุมัติ
                             const rawApprovedQtyValue = Number(item.approved_qty);
-                            const approvedQtyValue = (rawApprovedQtyValue > 0 && rawApprovedQtyValue <= 100) ? rawApprovedQtyValue : 0;
+                            const approvedQtyValue = item.tracking_vehicles?.length
+                              ? item.tracking_vehicles.filter(vehicle => vehicle.status !== "rejected").length
+                              : (rawApprovedQtyValue > 0 && rawApprovedQtyValue <= 100) ? rawApprovedQtyValue : 0;
                             const approvedQty = Number.isFinite(
                               approvedQtyValue,
                             )
@@ -3097,13 +3217,7 @@ function AddFleetContent() {
 
                                   <td className="whitespace-nowrap px-3 py-3">
                                     <p className="font-semibold text-slate-800">
-                                      {statusFilter === "process"
-                                        ? item.running_doc_vehicle_no ||
-                                        (item.vehicle_no !== undefined &&
-                                          item.vehicle_no !== null
-                                          ? `${item.running_doc}_${item.vehicle_no}`
-                                          : item.running_doc || "-")
-                                        : item.running_doc || "-"}
+                                      {item.running_doc || "-"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] font-medium text-slate-400">
                                       ใช้: {formatThaiDate(item.usage_date)}
@@ -3207,7 +3321,14 @@ function AddFleetContent() {
                                   </td>
 
                                   <td className="whitespace-nowrap px-3 py-3">
-                                    {isProcessStatus || isCompletedStatus || isRejectedStatus ? (
+                                    {item.tracking_vehicles?.length ? (
+                                      <p className={`text-[11px] font-semibold ${statusVisual.textClass}`}>
+                                        {status === "mixed_tracking" ? "หลายสถานะ" : statusText}
+                                        <span className="mt-0.5 block text-slate-500">
+                                          {item.tracking_vehicles.length} คัน
+                                        </span>
+                                      </p>
+                                    ) : isProcessStatus || isCompletedStatus || isRejectedStatus ? (
                                       <div
                                         className={`min-w-[230px] rounded-xl border px-3 py-2.5 ${isRejectedStatus
                                           ? "border-red-200 bg-red-50"
@@ -3385,6 +3506,27 @@ function AddFleetContent() {
                                               : formatStatusText(item.status)}
                                           </span>
                                         </div>
+
+                                        {Boolean(item.tracking_vehicles?.length) && (
+                                          <section className="border-b border-slate-200 p-4">
+                                            <h4 className="mb-2 text-xs font-semibold text-slate-800">ขั้นตอนรายคัน</h4>
+                                            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                                              {item.tracking_vehicles?.map(vehicle => (
+                                                <li
+                                                  key={`${vehicle.id}-${vehicle.running_doc_vehicle_no}`}
+                                                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"
+                                                >
+                                                  <span className="font-semibold text-slate-800">
+                                                    {vehicle.running_doc_vehicle_no}
+                                                  </span>
+                                                  <span className={vehicle.status === "rejected" ? "font-semibold text-red-700" : "text-slate-600"}>
+                                                    ขั้นตอนที่ {vehicle.current_step} · {vehicle.current_process}
+                                                  </span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </section>
+                                        )}
 
                                         {/* เนื้อหาหลัก: 2 คอลัมน์ ลดความสูงและลดการ์ดซ้อน */}
                                         <div

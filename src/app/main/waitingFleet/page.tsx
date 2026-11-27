@@ -10,7 +10,6 @@ import type { LucideIcon } from "lucide-react";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 import FleetModalDetail from "./components/FleetModalDetail";
-import ExportWaitingFleetModal from "./components/ExportWaitingFleetModal";
 import SupplierRatingModal from "./components/SupplierRatingModal";
 
 interface SelectedDC {
@@ -546,14 +545,7 @@ export default function WaitingFleetPage() {
       <SupplierRatingModal onClose={() => setOpenSupplierRatingModal(false)} />,
       portalTarget
     )}
-    {openExportModal && portalTarget && createPortal(scopedRequests.length > 0 ? (
-      <ExportWaitingFleetModal open={true} onClose={() => setOpenExportModal(false)}
-        requests={scopedRequests} dcLabel={dcLabel} />
-    ) : (
-      <div role="dialog" aria-modal="true" className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/55 p-4">
-        <div className="rounded-2xl bg-white p-6 shadow-xl"><p>ไม่พบข้อมูลสำหรับดึงรายงาน</p><button type="button" onClick={() => setOpenExportModal(false)} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-white">ปิด</button></div>
-      </div>
-    ), portalTarget)}
+    
     <style jsx global>{`
       .request-date-calendar.rdrCalendarWrapper { width: 100%; }
       .request-date-calendar .rdrMonth { width: 100%; }

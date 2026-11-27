@@ -524,7 +524,7 @@ async function loadTrackSearchExport(
 }
 
 
-const MAX_EXPORT_ROWS = 100;
+const MAX_EXPORT_ROWS = 500;
 
 type ImportPreviewChange = {
     column: string;
@@ -2183,161 +2183,161 @@ export default function ExportRequestModal({
                             {importPreview.length > 0 && (
                                 <div className="mt-4 max-h-80 overflow-auto rounded-xl border border-slate-200">
                                     <table
-    aria-label="ตัวอย่างข้อมูลที่เปลี่ยนก่อนนำเข้า"
-    className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm"
-    style={{ backgroundColor: "#ffffff", color: "#0f172a" }}
->
-    <colgroup span={2} />
-    {importChangeColumns.map((column) => (
-        <colgroup key={column} span={2} />
-    ))}
-    <colgroup />
+                                        aria-label="ตัวอย่างข้อมูลที่เปลี่ยนก่อนนำเข้า"
+                                        className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm"
+                                        style={{ backgroundColor: "#ffffff", color: "#0f172a" }}
+                                    >
+                                        <colgroup span={2} />
+                                        {importChangeColumns.map((column) => (
+                                            <colgroup key={column} span={2} />
+                                        ))}
+                                        <colgroup />
 
-    <thead
-        className="sticky top-0 z-20"
-        style={{ backgroundColor: "#1e3a8a", color: "#ffffff" }}
-    >
-        <tr>
-            <th
-                scope="col"
-                rowSpan={2}
-                className="whitespace-nowrap border-b border-blue-700 px-4 py-3 text-center font-semibold"
-            >
-                แถว Excel
-            </th>
-            <th
-                scope="col"
-                rowSpan={2}
-                className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 font-semibold"
-            >
-                เลขที่เอกสาร
-            </th>
+                                        <thead
+                                            className="sticky top-0 z-20"
+                                            style={{ backgroundColor: "#1e3a8a", color: "#ffffff" }}
+                                        >
+                                            <tr>
+                                                <th
+                                                    scope="col"
+                                                    rowSpan={2}
+                                                    className="whitespace-nowrap border-b border-blue-700 px-4 py-3 text-center font-semibold"
+                                                >
+                                                    แถว Excel
+                                                </th>
+                                                <th
+                                                    scope="col"
+                                                    rowSpan={2}
+                                                    className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 font-semibold"
+                                                >
+                                                    เลขที่เอกสาร
+                                                </th>
 
-            {importChangeColumns.map((column) => (
-                <th
-                    key={column}
-                    scope="colgroup"
-                    colSpan={2}
-                    className="whitespace-nowrap border-l border-blue-700 px-4 py-3 text-center font-semibold"
-                >
-                    {column}
-                </th>
-            ))}
+                                                {importChangeColumns.map((column) => (
+                                                    <th
+                                                        key={column}
+                                                        scope="colgroup"
+                                                        colSpan={2}
+                                                        className="whitespace-nowrap border-l border-blue-700 px-4 py-3 text-center font-semibold"
+                                                    >
+                                                        {column}
+                                                    </th>
+                                                ))}
 
-            <th
-                scope="col"
-                rowSpan={2}
-                className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 text-center font-semibold"
-                style={{ backgroundColor: "#172554", color: "#ffffff" }}
-            >
-                จัดการ
-            </th>
-        </tr>
+                                                <th
+                                                    scope="col"
+                                                    rowSpan={2}
+                                                    className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-blue-700 px-4 py-3 text-center font-semibold"
+                                                    style={{ backgroundColor: "#172554", color: "#ffffff" }}
+                                                >
+                                                    จัดการ
+                                                </th>
+                                            </tr>
 
-        <tr>
-            {importChangeColumns.flatMap((column) => [
-                <th
-                    key={`${column}-old`}
-                    scope="col"
-                    className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-2 text-center text-xs font-bold"
-                    style={{ backgroundColor: "#ffe4e6", color: "#881337" }}
-                >
-                    ค่าเดิม
-                </th>,
-                <th
-                    key={`${column}-new`}
-                    scope="col"
-                    className="whitespace-nowrap border-b border-blue-700 px-4 py-2 text-center text-xs font-bold"
-                    style={{ backgroundColor: "#d1fae5", color: "#064e3b" }}
-                >
-                    ค่าใหม่
-                </th>,
-            ])}
-        </tr>
-    </thead>
+                                            <tr>
+                                                {importChangeColumns.flatMap((column) => [
+                                                    <th
+                                                        key={`${column}-old`}
+                                                        scope="col"
+                                                        className="whitespace-nowrap border-b border-l border-blue-700 px-4 py-2 text-center text-xs font-bold"
+                                                        style={{ backgroundColor: "#ffe4e6", color: "#881337" }}
+                                                    >
+                                                        ค่าเดิม
+                                                    </th>,
+                                                    <th
+                                                        key={`${column}-new`}
+                                                        scope="col"
+                                                        className="whitespace-nowrap border-b border-blue-700 px-4 py-2 text-center text-xs font-bold"
+                                                        style={{ backgroundColor: "#d1fae5", color: "#064e3b" }}
+                                                    >
+                                                        ค่าใหม่
+                                                    </th>,
+                                                ])}
+                                            </tr>
+                                        </thead>
 
-    <tbody>
-        {importTableRows.map((row, index) => {
-            const changesByColumn = new Map(
-                row.changes.map((change) => [change.column, change])
-            );
-            const removeDisabled = readingImport || savingImport;
-            const rowBackground = index % 2 === 0 ? "#ffffff" : "#f8fafc";
+                                        <tbody>
+                                            {importTableRows.map((row, index) => {
+                                                const changesByColumn = new Map(
+                                                    row.changes.map((change) => [change.column, change])
+                                                );
+                                                const removeDisabled = readingImport || savingImport;
+                                                const rowBackground = index % 2 === 0 ? "#ffffff" : "#f8fafc";
 
-            return (
-                <tr key={row.excelRowNumber} style={{ backgroundColor: rowBackground }}>
-                    <td className="border-b border-slate-200 px-4 py-3 text-center align-middle">
-                        <span className="inline-flex min-w-9 justify-center rounded-md bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-800">
-                            {row.excelRowNumber}
-                        </span>
-                    </td>
+                                                return (
+                                                    <tr key={row.excelRowNumber} style={{ backgroundColor: rowBackground }}>
+                                                        <td className="border-b border-slate-200 px-4 py-3 text-center align-middle">
+                                                            <span className="inline-flex min-w-9 justify-center rounded-md bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-800">
+                                                                {row.excelRowNumber}
+                                                            </span>
+                                                        </td>
 
-                    {importDocumentSpans[index] > 0 && (
-                        <td
-                            rowSpan={importDocumentSpans[index]}
-                            className="whitespace-nowrap border-b border-l border-blue-100 px-4 py-3 align-middle font-bold"
-                            style={{ backgroundColor: "#eff6ff", color: "#1e3a8a" }}
-                        >
-                            {row.document || "—"}
-                        </td>
-                    )}
+                                                        {importDocumentSpans[index] > 0 && (
+                                                            <td
+                                                                rowSpan={importDocumentSpans[index]}
+                                                                className="whitespace-nowrap border-b border-l border-blue-100 px-4 py-3 align-middle font-bold"
+                                                                style={{ backgroundColor: "#eff6ff", color: "#1e3a8a" }}
+                                                            >
+                                                                {row.document || "—"}
+                                                            </td>
+                                                        )}
 
-                    {importChangeColumns.flatMap((column) => {
-                        const change = changesByColumn.get(column);
+                                                        {importChangeColumns.flatMap((column) => {
+                                                            const change = changesByColumn.get(column);
 
-                        if (!change) {
-                            return (
-                                <td
-                                    key={column}
-                                    colSpan={2}
-                                    className="whitespace-nowrap border-b border-l border-slate-200 px-4 py-3 text-center text-xs text-slate-600"
-                                >
-                                    ไม่มีการแก้ไข
-                                </td>
-                            );
-                        }
+                                                            if (!change) {
+                                                                return (
+                                                                    <td
+                                                                        key={column}
+                                                                        colSpan={2}
+                                                                        className="whitespace-nowrap border-b border-l border-slate-200 px-4 py-3 text-center text-xs text-slate-600"
+                                                                    >
+                                                                        ไม่มีการแก้ไข
+                                                                    </td>
+                                                                );
+                                                            }
 
-                        return [
-                            <td
-                                key={`${column}-old`}
-                                className="min-w-[110px] whitespace-pre-wrap break-words border-b border-l border-rose-100 px-4 py-3 align-middle"
-                                style={{ backgroundColor: "#fff1f2", color: "#881337" }}
-                            >
-                                {change.oldValue || "(ว่าง)"}
-                            </td>,
-                            <td
-                                key={`${column}-new`}
-                                className="min-w-[110px] whitespace-pre-wrap break-words border-b border-emerald-100 px-4 py-3 align-middle font-semibold"
-                                style={{ backgroundColor: "#ecfdf5", color: "#064e3b" }}
-                            >
-                                {change.newValue || "(ว่าง)"}
-                            </td>,
-                        ];
-                    })}
+                                                            return [
+                                                                <td
+                                                                    key={`${column}-old`}
+                                                                    className="min-w-[110px] whitespace-pre-wrap break-words border-b border-l border-rose-100 px-4 py-3 align-middle"
+                                                                    style={{ backgroundColor: "#fff1f2", color: "#881337" }}
+                                                                >
+                                                                    {change.oldValue || "(ว่าง)"}
+                                                                </td>,
+                                                                <td
+                                                                    key={`${column}-new`}
+                                                                    className="min-w-[110px] whitespace-pre-wrap break-words border-b border-emerald-100 px-4 py-3 align-middle font-semibold"
+                                                                    style={{ backgroundColor: "#ecfdf5", color: "#064e3b" }}
+                                                                >
+                                                                    {change.newValue || "(ว่าง)"}
+                                                                </td>,
+                                                            ];
+                                                        })}
 
-                    <td
-                        className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-slate-200 px-3 py-3 text-center align-middle"
-                        style={{ backgroundColor: rowBackground }}
-                    >
-                        <button
-                            type="button"
-                            disabled={removeDisabled}
-                            aria-label={`เอาแถว Excel ${row.excelRowNumber} ออกจากรายการนำเข้า`}
-                            onClick={() => removeImportRow(row.excelRowNumber)}
-                            className="inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-xs font-bold transition enabled:hover:brightness-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 disabled:cursor-not-allowed"
-                            style={{
-                                backgroundColor: removeDisabled ? "#ffe4e6" : "#be123c",
-                                color: removeDisabled ? "#881337" : "#ffffff",
-                            }}
-                        >
-                            X
-                        </button>
-                    </td>
-                </tr>
-            );
-        })}
-    </tbody>
-</table>
+                                                        <td
+                                                            className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-slate-200 px-3 py-3 text-center align-middle"
+                                                            style={{ backgroundColor: rowBackground }}
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                disabled={removeDisabled}
+                                                                aria-label={`เอาแถว Excel ${row.excelRowNumber} ออกจากรายการนำเข้า`}
+                                                                onClick={() => removeImportRow(row.excelRowNumber)}
+                                                                className="inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-1.5 text-xs font-bold transition enabled:hover:brightness-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 disabled:cursor-not-allowed"
+                                                                style={{
+                                                                    backgroundColor: removeDisabled ? "#ffe4e6" : "#be123c",
+                                                                    color: removeDisabled ? "#881337" : "#ffffff",
+                                                                }}
+                                                            >
+                                                                X
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
                                 </div>
                             )}
                             {importPreview.length > 20 && <p className="mt-2 text-xs text-slate-700">ตัวอย่าง 20 รายการแรก จาก {importPreview.length} รายการที่แก้ไข</p>}
@@ -2364,23 +2364,6 @@ export default function ExportRequestModal({
 
                     {showPreview && (
                         <>
-                            <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5">
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                                    {trackFilters.length > 0 && (
-                                        <section aria-label="ตัวกรองจากหน้าหลัก" className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
-                                            <p className="mb-1.5 text-[11px] font-semibold text-blue-800">ตัวกรองที่ส่งมาจากหน้าหลัก</p>
-                                            <dl className="flex max-h-24 flex-wrap gap-1.5 overflow-auto">
-                                                {trackFilters.map(({ key, label, value }) => (
-                                                    <div key={key} className="min-w-0 max-w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px]">
-                                                        <dt className="mr-1.5 inline font-medium text-slate-700">{label}</dt>
-                                                        <dd className="inline break-words font-semibold text-blue-800">{value}</dd>
-                                                    </div>
-                                                ))}
-                                            </dl>
-                                        </section>
-                                    )}
-                                </div>
-                            </div>
 
                             <div id="fleet-export-table" className={`flex flex-1 flex-col bg-slate-50 px-3 py-3 sm:px-5 ${exportMode === "update" ? "min-h-[420px]" : "min-h-[260px]"}`}>
                                 <section aria-labelledby="export-preview-title" aria-busy={isLoading && !loadError}

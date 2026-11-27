@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import FlowAssessmentModal from "./component/FlowAssessmentModal";
 import ExportTrackFleet from "./component/ExportTrackFleet";
+import ExportData from "./component/ExportData";
 
 /*
  * วางไฟล์นี้แทน page.tsx ในโฟลเดอร์ trackFleet เดิม
@@ -589,8 +590,11 @@ const vehicleKey = (vehicle: RequestItem, index: number) =>
   `${vehicle.request_id ?? ""}-${vehicle.incoming_truck_id ?? vehicle.id ?? vehicleCode(vehicle, index)}-${index}`;
 const getProcessStatus = (item: RequestItem) => {
   const step = Number(item.current_step ?? item.latest_process_level ?? 0);
-  const process = textValue(item.current_process || item.latest_process_name) || "ยังไม่พบข้อมูลขั้นตอน";
-  return normalizeStatus(item.status) === "cancel" ? process : `${step}/${item.total_steps || 8} : ${process}`;
+  const process = textValue(item.current_process) || textValue(item.latest_process_name);
+  if (step === 9) return process || "ยกเลิกหนังสือ";
+if (step === 10) return process || "หนังสือหมดอายุ";
+if (step === 0) return "ยังไม่พบข้อมูลขั้นตอน";
+  return `${step}/${item.total_steps || 8} : ${process || "ยังไม่พบข้อมูลขั้นตอน"}`;
 };
 const vehicleInfo = (item: RequestItem) => item.vehicle_info || item.warehouse_info;
 const uniqueValues = (vehicles: RequestItem[], getValue: (item: RequestItem) => unknown) =>
@@ -728,6 +732,7 @@ function TrackFleetContent() {
   const [pageSize, setPageSize] = useState(20);
   const [documentSort, setDocumentSort] = useState<"asc" | "desc" | null>(null);
   const [openExportModal, setOpenExportModal] = useState(false);
+  const [openExportData, setOpenExportData] = useState(false);
   const [exportApiUrl, setExportApiUrl] = useState("");
   const [excelBusy, setExcelBusy] = useState<"export" | "import" | null>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -1016,6 +1021,7 @@ function TrackFleetContent() {
     setSelectedRequest(null);
     setSelectedDocumentNo("");
     setSelectedDocumentLicenses([]);
+    void fetchRequests();
   };
   const addSearchItems = (value: string) => {
     const items = value.split(/[,;|\t\r\n]+/)
@@ -1175,7 +1181,8 @@ function TrackFleetContent() {
             <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600"><Warehouse size={12} />{selectedDcLabel}</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={16} />ดึงรายงาน</button>
+            {/* <button type="button" onClick={() => setOpenExportData(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={16} />แก้ไข</button> */}
+            <button type="button" onClick={() => setOpenExportModal(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold hover:bg-blue-50"><Download size={16} />ดาวโหลดรายงาน</button>
             <button type="button" onClick={() => void fetchRequests()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />{loading ? "กำลังโหลด..." : "รีเฟรชข้อมูล"}</button>
           </div>
         </div>
@@ -1201,7 +1208,7 @@ function TrackFleetContent() {
               },
               {
                 key: "progress",
-                label: "คำขอรอพิจารณา (TCAS)",
+                label: "คำขอพิจารณา",
                 activeClass:
                   "bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 text-white ring-blue-300/40",
                 inactiveClass:
@@ -1231,7 +1238,7 @@ function TrackFleetContent() {
               },
               {
                 key: "success",
-                label: "เสร็จสิ้นกระบวนการ",
+                label: "เสร็จสิ้น",
                 activeClass:
                   "bg-gradient-to-br from-emerald-600 via-green-600 to-teal-500 text-white ring-emerald-300/40",
                 inactiveClass:
@@ -1279,8 +1286,8 @@ function TrackFleetContent() {
                     size={88}
                     strokeWidth={1.2}
                     className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none ${isActive
-                        ? "text-white opacity-[0.12]"
-                        : "opacity-[0.07]"
+                      ? "text-white opacity-[0.12]"
+                      : "opacity-[0.07]"
                       }`}
                   />
 
@@ -1322,7 +1329,7 @@ function TrackFleetContent() {
                       {loading ? "…" : formatNumber(summary[key].items)}
 
                       <span className="ml-1 text-xs font-semibold opacity-60">
-                        เอกสาร
+                        {isActive ? "รายการในหน้านี้" : "เอกสาร"}
                       </span>
                     </p>
                   </div>
@@ -1562,12 +1569,43 @@ function TrackFleetContent() {
                       }}</VehicleBlocks></td>
                       <td><VehicleBlocks vehicles={vehicles} groupBy={(v) => [normalizeDateKey(v.usage_date), v.usage_end_date?.trim() ? normalizeDateKey(v.usage_end_date) : "", normalizeStatus(v.status) === "cancel"]}>{(v) => { const remaining = remainingUsage(v.usage_date); return <><p className="whitespace-nowrap font-semibold">{formatThaiDate(v.usage_date)}{v.usage_end_date?.trim() ? ` - ${formatThaiDate(v.usage_end_date)}` : ""}</p>{normalizeStatus(v.status) !== "cancel" && <p className={`mt-1 whitespace-nowrap text-[11px] ${remaining.className}`}>{remaining.label}</p>}</>; }}</VehicleBlocks></td>
                       <td><DocumentValues vehicles={vehicles} getValue={(v) => v.request_by} /></td>
-                      <td>{(() => {
-                        const reference = assessmentReference(vehicles); return reference ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] font-semibold leading-5 text-blue-700">{getProcessStatus(reference)}</p><div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
-                          <p>วันที่เริ่ม: {reference.latest_process_str_date ? formatThaiDate(reference.latest_process_str_date) : "-"}</p>
-                          <p>วันที่สิ้นสุด: {reference.latest_process_end_date ? formatThaiDate(reference.latest_process_end_date) : "-"}</p>
-                        </div></div> : <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>;
-                      })()}</td>
+                      <td>
+  {(() => {
+    const reference = assessmentReference(vehicles);
+
+    if (!reference) {
+      return <span className="text-amber-600">ไม่พบข้อมูลรถอ้างอิง</span>;
+    }
+
+    const step = Number(reference.latest_process_level);
+    const isRejected = step === 9 || step === 10;
+
+    return (
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+        <p
+          className={`text-[11px] font-semibold leading-5 ${
+            isRejected ? "text-red-700" : "text-blue-700"
+          }`}
+        >
+          {getProcessStatus(reference)}
+        </p>
+
+        <div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-[11px] text-slate-600">
+          <p>
+            วันที่เริ่ม: {reference.latest_process_str_date
+              ? formatThaiDate(reference.latest_process_str_date)
+              : "-"}
+          </p>
+          <p>
+            วันที่สิ้นสุด: {reference.latest_process_end_date
+              ? formatThaiDate(reference.latest_process_end_date)
+              : "-"}
+          </p>
+        </div>
+      </div>
+    );
+  })()}
+</td>
                       <td><button type="button" onClick={() => handleOpenDocument(document)} className="inline-flex h-9 min-w-[110px] items-center justify-center rounded-xl bg-blue-700 px-3 text-[11px] font-semibold text-white hover:bg-blue-800">ประเมิน</button></td>
                     </tr>;
                   })}
@@ -1615,6 +1653,7 @@ function TrackFleetContent() {
         </div>, portalTarget)}
 
       {portalTarget && createPortal(<div style={{ position: "relative", zIndex: 100000 }}>
+        {/* <ExportData open={openExportData} onClose={() => setOpenExportData(false)} requests={visibleRequests.map((item) => ({ ...item, id: item.id == null || item.id === "" ? null : Number.isSafeInteger(Number(item.id)) ? Number(item.id) : null }))} dcLabel={selectedDcLabel} exportApiUrl={exportApiUrl} /> */}
         <ExportTrackFleet open={openExportModal} onClose={() => setOpenExportModal(false)} requests={visibleRequests.map((item) => ({ ...item, id: item.id == null || item.id === "" ? null : Number.isSafeInteger(Number(item.id)) ? Number(item.id) : null }))} dcLabel={selectedDcLabel} exportApiUrl={exportApiUrl} />
         <FlowAssessmentModal documentNo={selectedDocumentNo} open={openDetailModal} requestId={selectedRequest?.request_id ?? null} vehicleNo={selectedRequest?.unit_code || selectedRequest?.warehouse_vehicle_no || selectedRequest?.vehicle_no || null} documentMode referenceVehicleNo={selectedRequest?.warehouse_vehicle_no ?? selectedRequest?.vehicle_info?.vehicle_no ?? null} replacedOldLicenses={selectedDocumentLicenses} onClose={handleCloseDetail} />
       </div>, portalTarget)}
